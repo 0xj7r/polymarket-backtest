@@ -1,0 +1,92 @@
+//! Strategy trait + signal stack + reference strategies.
+//!
+//! The Nautilus-native runtime integration lives in `pm-app`; this crate stays
+//! Nautilus-free so signal math can be unit-tested in milliseconds without
+//! pulling the engine.
+
+#![forbid(unsafe_code)]
+
+pub mod bonereaper;
+pub mod bonereaper_v2;
+pub mod delta_neutral_mm;
+pub mod late_big_bet;
+pub mod late_confirmation;
+pub mod late_convex_tail;
+pub mod paired_mm;
+pub mod reactive;
+pub mod regime;
+pub mod signals;
+pub mod spot_follower;
+pub mod spot_momentum;
+pub mod trivial;
+
+use pm_types::{ReplayEvent, SpotHistory, TradeHistory};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    BuyYes,
+    SellYes,
+    BuyNo,
+    SellNo,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OrderRequest {
+    pub side: Side,
+    pub shares: f64,
+    /// Optional limit price (in YES terms; for NO orders, the runner inverts).
+    /// `None` means market order against the opposite top of book.
+    pub limit_price: Option<f32>,
+    /// Tag for attribution (kept tiny — &'static so strategies don't allocate).
+    pub tag: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Ctx {
+    pub events_seen: u64,
+    pub yes_shares: f64,
+    pub no_shares: f64,
+    pub cash_usdc: f64,
+    /// Market resolution time in ns since epoch (UTC). Strategies use this
+    /// to compute time-to-close and gate early/mid/late behaviour.
+    pub market_close_ns: i64,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct StrategyOutput {
+    pub orders: Vec<OrderRequest>,
+}
+
+impl StrategyOutput {
+    pub fn hold() -> Self {
+        Self::default()
+    }
+    pub fn one(req: OrderRequest) -> Self {
+        Self { orders: vec![req] }
+    }
+}
+
+/// Per-event strategy hook. `spot` is the underlying spot tape (e.g. BTC/USD
+/// from Binance). `trades` is the per-market Polymarket trade tape (aggressor
+/// flow). Either may be empty if not loaded; strategies should ignore unused
+/// inputs.
+pub trait Strategy {
+    fn on_event(
+        &mut self,
+        event: &ReplayEvent,
+        ctx: &Ctx,
+        spot: &SpotHistory,
+        trades: &TradeHistory,
+    ) -> StrategyOutput;
+}
+
+pub use bonereaper::{BonereaperLite, BonereaperLiteConfig};
+pub use bonereaper_v2::{BonereaperV2, BonereaperV2Config};
+pub use delta_neutral_mm::{DeltaNeutralMm, DeltaNeutralMmConfig};
+pub use late_big_bet::{LateBigBet, LateBigBetConfig};
+pub use late_confirmation::{LateConfirmation, LateConfirmationConfig};
+pub use late_convex_tail::{LateConvexTail, LateConvexTailConfig};
+pub use paired_mm::{PairedMmDense, PairedMmDenseConfig};
+pub use reactive::ReactiveDirectional;
+pub use spot_follower::{SpotMomentumFollower, SpotMomentumFollowerConfig};
+pub use trivial::{BuyYesAtOpen, NoopStrategy};

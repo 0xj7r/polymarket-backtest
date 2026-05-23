@@ -1,0 +1,30 @@
+[package]
+name = "pm-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "pm-app"
+path = "src/main.rs"
+
+[dependencies]
+pm-types          = { workspace = true }
+pm-telonex-loader = { workspace = true }
+pm-strategy       = { workspace = true }
+pm-risk           = { workspace = true }
+
+anyhow             = { workspace = true }
+clap               = { workspace = true }
+tokio              = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono             = { workspace = true }
+serde              = { workspace = true }
+serde_json         = { workspace = true }
+futures            = { workspace = true }
+reqwest            = { workspace = true }
+rayon              = { workspace = true }
+object_store       = { workspace = true }

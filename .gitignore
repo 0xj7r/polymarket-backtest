@@ -1,0 +1,9 @@
+target/
+data/raw/
+data/prepared/
+*.log
+.env
+.env.*
+.DS_Store
+.cook/
+data/*.bak

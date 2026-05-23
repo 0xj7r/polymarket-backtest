@@ -1,0 +1,83 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/pm-types",
+    "crates/pm-telonex-loader",
+    "crates/pm-strategy",
+    "crates/pm-risk",
+    "crates/pm-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+authors = ["jack@visumlabs.com"]
+license = "Proprietary"
+publish = false
+
+[workspace.dependencies]
+# Nautilus (pinned; bump in lockstep)
+nautilus-core        = { version = "0.57", default-features = false }
+nautilus-common      = { version = "0.57", default-features = false }
+nautilus-model       = { version = "0.57", default-features = false }
+nautilus-data        = { version = "0.57", default-features = false }
+nautilus-execution   = { version = "0.57", default-features = false }
+nautilus-trading     = { version = "0.57", default-features = false }
+nautilus-backtest    = { version = "0.57", default-features = false }
+nautilus-live        = { version = "0.57", default-features = false }
+nautilus-portfolio   = { version = "0.57", default-features = false }
+nautilus-risk        = { version = "0.57", default-features = false }
+nautilus-persistence = { version = "0.57", default-features = false }
+nautilus-polymarket  = { version = "0.57", default-features = false }
+nautilus-indicators  = { version = "0.57", default-features = false }
+nautilus-analysis    = { version = "0.57", default-features = false }
+nautilus-system      = { version = "0.57", default-features = false }
+
+# Arrow-rs + parquet (async S3-streaming reader)
+arrow         = { version = "58", default-features = false }
+parquet       = { version = "58", default-features = false, features = ["arrow", "async", "object_store", "snap", "lz4", "zstd", "brotli"] }
+object_store  = { version = "0.13", features = ["aws"] }
+bytes         = "1"
+futures       = "0.3"
+
+# Serde
+serde         = { version = "1", features = ["derive"] }
+serde_json    = "1"
+toml          = "0.9"
+
+# Time & ids
+chrono        = { version = "0.4", features = ["serde"] }
+rust_decimal  = "1"
+
+# Concurrency
+rayon         = "1"
+tokio         = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs"] }
+
+# Errors & logging
+anyhow        = "1"
+thiserror     = "2"
+tracing       = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# CLI
+clap          = { version = "4", features = ["derive"] }
+
+# HTTP (Telonex availability lookups)
+reqwest       = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# Internal
+pm-types            = { path = "crates/pm-types" }
+pm-telonex-loader   = { path = "crates/pm-telonex-loader" }
+pm-strategy        = { path = "crates/pm-strategy" }
+pm-risk             = { path = "crates/pm-risk" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.bench]
+inherits = "release"
+debug = true
