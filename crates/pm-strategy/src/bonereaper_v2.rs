@@ -41,6 +41,7 @@ pub struct BonereaperV2GateStats {
     pub late_confirm_checks: u64,
     pub late_confirm_price_fail: u64,
     pub late_confirm_book_favourite_fail: u64,
+    pub late_confirm_book_skew_fail: u64,
     pub late_confirm_model_missing: u64,
     pub late_confirm_model_side_fail: u64,
     pub late_confirm_model_confidence_fail: u64,
@@ -90,6 +91,7 @@ impl BonereaperV2GateStats {
         self.late_confirm_checks += other.late_confirm_checks;
         self.late_confirm_price_fail += other.late_confirm_price_fail;
         self.late_confirm_book_favourite_fail += other.late_confirm_book_favourite_fail;
+        self.late_confirm_book_skew_fail += other.late_confirm_book_skew_fail;
         self.late_confirm_model_missing += other.late_confirm_model_missing;
         self.late_confirm_model_side_fail += other.late_confirm_model_side_fail;
         self.late_confirm_model_confidence_fail += other.late_confirm_model_confidence_fail;
@@ -158,6 +160,7 @@ pub struct BonereaperV2Config {
     pub late_confirm_max_model_risk: f32,
     pub late_confirm_min_model_side_p: f32,
     pub late_confirm_min_model_edge: f32,
+    pub late_confirm_min_book_skew: f32,
     pub late_confirm_max_whipsaw_score: f32,
 
     // High-skew load lane with whipsaw guards
@@ -232,6 +235,7 @@ impl Default for BonereaperV2Config {
             late_confirm_max_model_risk: 0.80,
             late_confirm_min_model_side_p: 0.58,
             late_confirm_min_model_edge: 0.00,
+            late_confirm_min_book_skew: 0.06,
             late_confirm_max_whipsaw_score: 0.85,
             // Favourite-loading lane. Keep this stricter than the old probe
             // defaults: the looser settings overtraded early skew and paid
@@ -552,6 +556,14 @@ fn side_is_book_favourite(event: &ReplayEvent, side: Side) -> bool {
     }
 }
 
+fn side_book_skew(event: &ReplayEvent, side: Side) -> f32 {
+    match side {
+        Side::BuyYes => event.yes_mid - 0.5,
+        Side::BuyNo => 0.5 - event.yes_mid,
+        _ => f32::NEG_INFINITY,
+    }
+}
+
 impl Strategy for BonereaperV2 {
     fn on_event(
         &mut self,
@@ -694,6 +706,8 @@ impl Strategy for BonereaperV2 {
                 self.gate_stats.late_confirm_price_fail += 1;
             } else if !side_is_book_favourite(event, target) {
                 self.gate_stats.late_confirm_book_favourite_fail += 1;
+            } else if side_book_skew(event, target) < self.cfg.late_confirm_min_book_skew {
+                self.gate_stats.late_confirm_book_skew_fail += 1;
             } else if whipsaw.score > self.cfg.late_confirm_max_whipsaw_score {
                 self.gate_stats.late_confirm_whipsaw_fail += 1;
             } else {

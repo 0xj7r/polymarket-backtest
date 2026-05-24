@@ -51,6 +51,7 @@ BR2_LATE_CONFIRM_MIN_MODEL_CONFIDENCE="0.58"
 BR2_LATE_CONFIRM_MAX_MODEL_RISK="0.80"
 BR2_LATE_CONFIRM_MIN_MODEL_SIDE_P="0.58"
 BR2_LATE_CONFIRM_MIN_MODEL_EDGE="0.00"
+BR2_LATE_CONFIRM_MIN_BOOK_SKEW="0.06"
 BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE="0.85"
 BR2_HIGH_SKEW_CLIP_FRAC="0.60"
 BR2_HIGH_SKEW_MAX_CLIPS="5"
@@ -114,6 +115,7 @@ while [ $# -gt 0 ]; do
         --br2-late-confirm-max-model-risk) BR2_LATE_CONFIRM_MAX_MODEL_RISK="$2"; shift 2 ;;
         --br2-late-confirm-min-model-side-p) BR2_LATE_CONFIRM_MIN_MODEL_SIDE_P="$2"; shift 2 ;;
         --br2-late-confirm-min-model-edge) BR2_LATE_CONFIRM_MIN_MODEL_EDGE="$2"; shift 2 ;;
+        --br2-late-confirm-min-book-skew) BR2_LATE_CONFIRM_MIN_BOOK_SKEW="$2"; shift 2 ;;
         --br2-late-confirm-max-whipsaw-score) BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
         --br2-high-skew-clip-frac) BR2_HIGH_SKEW_CLIP_FRAC="$2"; shift 2 ;;
         --br2-high-skew-max-clips) BR2_HIGH_SKEW_MAX_CLIPS="$2"; shift 2 ;;
@@ -318,6 +320,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-confirm-max-model-risk "${BR2_LATE_CONFIRM_MAX_MODEL_RISK}" \\
       --br2-late-confirm-min-model-side-p "${BR2_LATE_CONFIRM_MIN_MODEL_SIDE_P}" \\
       --br2-late-confirm-min-model-edge "${BR2_LATE_CONFIRM_MIN_MODEL_EDGE}" \\
+      --br2-late-confirm-min-book-skew "${BR2_LATE_CONFIRM_MIN_BOOK_SKEW}" \\
       --br2-late-confirm-max-whipsaw-score "${BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE}" \\
       --br2-high-skew-clip-frac "${BR2_HIGH_SKEW_CLIP_FRAC}" \\
       --br2-high-skew-max-clips "${BR2_HIGH_SKEW_MAX_CLIPS}" \\
