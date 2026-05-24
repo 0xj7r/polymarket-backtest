@@ -310,6 +310,9 @@ enum Cmd {
         /// Bonereaper v2 minimum ML predicted-side probability for late confirmation entries.
         #[arg(long, default_value = "0.58")]
         br2_late_confirm_min_model_side_p: f32,
+        /// Bonereaper v2 minimum ML probability edge over entry price for late confirmation entries.
+        #[arg(long, default_value = "0.00")]
+        br2_late_confirm_min_model_edge: f32,
         /// Bonereaper v2 high-skew clip multiplier.
         #[arg(long, default_value = "0.60")]
         br2_high_skew_clip_frac: f32,
@@ -728,6 +731,7 @@ async fn main() -> Result<()> {
             br2_late_confirm_min_model_confidence,
             br2_late_confirm_max_model_risk,
             br2_late_confirm_min_model_side_p,
+            br2_late_confirm_min_model_edge,
             br2_high_skew_clip_frac,
             br2_high_skew_max_clips,
             br2_late_favourite_start_secs,
@@ -785,6 +789,7 @@ async fn main() -> Result<()> {
                 br2_late_confirm_min_model_confidence,
                 br2_late_confirm_max_model_risk,
                 br2_late_confirm_min_model_side_p,
+                br2_late_confirm_min_model_edge,
                 br2_high_skew_clip_frac,
                 br2_high_skew_max_clips,
                 br2_late_favourite_start_secs,
@@ -1275,6 +1280,7 @@ async fn walk_forward(
     br2_late_confirm_min_model_confidence: f32,
     br2_late_confirm_max_model_risk: f32,
     br2_late_confirm_min_model_side_p: f32,
+    br2_late_confirm_min_model_edge: f32,
     br2_high_skew_clip_frac: f32,
     br2_high_skew_max_clips: usize,
     br2_late_favourite_start_secs: f32,
@@ -1366,6 +1372,7 @@ async fn walk_forward(
         br2_late_confirm_min_model_confidence,
         br2_late_confirm_max_model_risk,
         br2_late_confirm_min_model_side_p,
+        br2_late_confirm_min_model_edge,
         br2_high_skew_clip_frac,
         br2_high_skew_max_clips,
         br2_late_favourite_start_secs,

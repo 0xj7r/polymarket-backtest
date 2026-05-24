@@ -151,6 +151,7 @@ pub struct BonereaperV2Config {
     pub late_confirm_min_model_confidence: f32,
     pub late_confirm_max_model_risk: f32,
     pub late_confirm_min_model_side_p: f32,
+    pub late_confirm_min_model_edge: f32,
 
     // High-skew load lane with whipsaw guards
     pub high_skew_threshold: f32,
@@ -220,6 +221,7 @@ impl Default for BonereaperV2Config {
             late_confirm_min_model_confidence: 0.58,
             late_confirm_max_model_risk: 0.80,
             late_confirm_min_model_side_p: 0.58,
+            late_confirm_min_model_edge: 0.00,
             // Favourite-loading lane. Keep this stricter than the old probe
             // defaults: the looser settings overtraded early skew and paid
             // taker spread before the market had a durable favourite.
@@ -658,7 +660,7 @@ impl Strategy for BonereaperV2 {
                     self.cfg.late_confirm_max_model_risk,
                     self.cfg.late_confirm_min_model_side_p,
                     px as f32,
-                    0.0,
+                    self.cfg.late_confirm_min_model_edge,
                 );
                 if !model_support.is_supported() {
                     bump_model_fail(&mut self.gate_stats, GatePrefix::LateConfirm, model_support);
