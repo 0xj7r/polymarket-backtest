@@ -482,6 +482,19 @@ fn volatility_band(range: f64, threshold: f64) -> VolatilityBand {
     }
 }
 
+fn compounded_clip(bankroll: f64, frac: f64) -> f64 {
+    if !bankroll.is_finite() || !frac.is_finite() || bankroll <= 0.0 || frac <= 0.0 {
+        return 0.0;
+    }
+    let raw = bankroll * frac;
+    let cap = (bankroll * 0.10).max(0.0);
+    if cap <= 0.50 {
+        raw.min(cap).max(0.0)
+    } else {
+        raw.clamp(0.50, cap)
+    }
+}
+
 fn drawdown_clip_multiplier(drawdown_pct: f64, soft_pct: f64, hard_pct: f64) -> f64 {
     if !drawdown_pct.is_finite()
         || !soft_pct.is_finite()
@@ -2058,7 +2071,7 @@ async fn run_portfolio(
             // Per-market clip: a fraction of current equity (compounds), else
             // static fallback. Hard floor + ceiling for sanity.
             let clip = match cfg.clip_fraction_of_equity {
-                Some(frac) => (bankroll * frac).clamp(0.50, bankroll * 0.10),
+                Some(frac) => compounded_clip(bankroll, frac),
                 None => cfg.max_clip_usdc,
             } * clip_multiplier;
             let runner_cfg = RunnerConfig {
@@ -2839,6 +2852,13 @@ mod tests {
         let cfg = WalkForwardConfig::default();
         let plan = build_fold_plan(7, &cfg).expect("plan");
         assert_eq!(plan, vec![(0, 0, 7)]);
+    }
+
+    #[test]
+    fn compounded_clip_does_not_panic_on_tiny_bankroll() {
+        assert_eq!(compounded_clip(0.16, 0.02), 0.0032);
+        assert_eq!(compounded_clip(0.0, 0.02), 0.0);
+        assert_eq!(compounded_clip(1000.0, 0.02), 20.0);
     }
 
     #[test]
