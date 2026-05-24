@@ -7,6 +7,7 @@
 //!     is largely irrelevant, but we keep the structure for when it matters).
 
 use anyhow::{Context, Result, anyhow};
+use chrono::{Duration, NaiveDate};
 use futures::StreamExt;
 use pm_model::{
     MetaFeatureWeight, MetaTrainingConfig, MetaTrainingSample, MetaTrainingStats, ModelState,
@@ -30,7 +31,7 @@ use pm_telonex_loader::{
     Channel, TelonexStore, load_binance_agg_trades_async, load_book_snapshot_async,
     load_pm_trades_async, resolve_binance_day, resolve_pm_trades_day,
 };
-use pm_types::{MarketId, SpotHistory, TradeHistory};
+use pm_types::{MarketId, SpotHistory, SpotTick, TradeHistory};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs::File;
@@ -130,8 +131,10 @@ pub struct WalkForwardConfig {
     pub br2_late_confirm_max_model_risk: f32,
     pub br2_late_confirm_min_model_side_p: f32,
     pub br2_late_confirm_min_model_edge: f32,
+    pub br2_late_confirm_max_whipsaw_score: f32,
     pub br2_high_skew_clip_frac: f32,
     pub br2_high_skew_max_clips: usize,
+    pub br2_high_skew_max_whipsaw_score: f32,
     pub br2_late_favourite_start_secs: f32,
     pub br2_late_favourite_threshold: f32,
     pub br2_late_favourite_clip_frac: f32,
@@ -141,6 +144,7 @@ pub struct WalkForwardConfig {
     pub br2_late_favourite_max_model_risk: f32,
     pub br2_late_favourite_min_model_side_p: f32,
     pub br2_late_favourite_min_model_edge: f32,
+    pub br2_late_favourite_max_whipsaw_score: f32,
     pub enforce_model_gate: bool,
     pub model_gate_min_confidence: f32,
     pub model_gate_max_risk: f32,
@@ -210,8 +214,10 @@ impl Default for WalkForwardConfig {
             br2_late_confirm_max_model_risk: 0.80,
             br2_late_confirm_min_model_side_p: 0.58,
             br2_late_confirm_min_model_edge: 0.00,
+            br2_late_confirm_max_whipsaw_score: 0.85,
             br2_high_skew_clip_frac: 0.60,
             br2_high_skew_max_clips: 5,
+            br2_high_skew_max_whipsaw_score: 0.75,
             br2_late_favourite_start_secs: 180.0,
             br2_late_favourite_threshold: 0.22,
             br2_late_favourite_clip_frac: 1.00,
@@ -221,6 +227,7 @@ impl Default for WalkForwardConfig {
             br2_late_favourite_max_model_risk: 0.72,
             br2_late_favourite_min_model_side_p: 0.62,
             br2_late_favourite_min_model_edge: 0.00,
+            br2_late_favourite_max_whipsaw_score: 0.75,
             enforce_model_gate: true,
             model_gate_min_confidence: 0.68,
             model_gate_max_risk: 0.72,
@@ -316,8 +323,10 @@ pub struct SummaryRunConfig {
     pub br2_late_confirm_max_model_risk: f32,
     pub br2_late_confirm_min_model_side_p: f32,
     pub br2_late_confirm_min_model_edge: f32,
+    pub br2_late_confirm_max_whipsaw_score: f32,
     pub br2_high_skew_clip_frac: f32,
     pub br2_high_skew_max_clips: usize,
+    pub br2_high_skew_max_whipsaw_score: f32,
     pub br2_late_favourite_start_secs: f32,
     pub br2_late_favourite_threshold: f32,
     pub br2_late_favourite_clip_frac: f32,
@@ -327,6 +336,7 @@ pub struct SummaryRunConfig {
     pub br2_late_favourite_max_model_risk: f32,
     pub br2_late_favourite_min_model_side_p: f32,
     pub br2_late_favourite_min_model_edge: f32,
+    pub br2_late_favourite_max_whipsaw_score: f32,
     pub enforce_model_gate: bool,
     pub model_gate_min_confidence: f32,
     pub model_gate_max_risk: f32,
@@ -531,26 +541,81 @@ pub struct FillTagAggregate {
 #[derive(Default)]
 struct SpotCache {
     pub inner: HashMap<String, Arc<SpotHistory>>,
+    raw_days: HashMap<String, Arc<Vec<SpotTick>>>,
 }
 
 impl SpotCache {
+    async fn load_raw_day(
+        &mut self,
+        store: &TelonexStore,
+        symbol: &str,
+        date: &str,
+        required: bool,
+    ) -> Result<Option<Arc<Vec<SpotTick>>>> {
+        if let Some(ticks) = self.raw_days.get(date) {
+            return Ok(Some(ticks.clone()));
+        }
+
+        let path = match resolve_binance_day(store, "agg_trades", symbol, date).await {
+            Ok(path) => path,
+            Err(err) if required => {
+                return Err(err).with_context(|| format!("resolve spot {symbol} {date}"));
+            }
+            Err(err) => {
+                tracing::warn!(
+                    symbol,
+                    date,
+                    error = %err,
+                    "optional prior spot day unavailable"
+                );
+                return Ok(None);
+            }
+        };
+        let (ticks, stats) = load_binance_agg_trades_async(store.store(), path).await?;
+        tracing::info!(symbol, date, ticks = stats.rows_emitted, "spot day loaded");
+        let ticks = Arc::new(ticks);
+        self.raw_days.insert(date.to_string(), ticks.clone());
+        Ok(Some(ticks))
+    }
+
     async fn get_or_load(
         &mut self,
         store: &TelonexStore,
         symbol: &str,
         date: &str,
     ) -> Result<Arc<SpotHistory>> {
-        let key = format!("{symbol}|{date}");
-        if let Some(s) = self.inner.get(&key) {
+        if let Some(s) = self.inner.get(date) {
             return Ok(s.clone());
         }
-        let path = resolve_binance_day(store, "agg_trades", symbol, date).await?;
-        let (ticks, stats) = load_binance_agg_trades_async(store.store(), path).await?;
-        tracing::info!(symbol, date, ticks = stats.rows_emitted, "spot day loaded");
+        let current = self
+            .load_raw_day(store, symbol, date, true)
+            .await?
+            .ok_or_else(|| anyhow!("missing required spot day {symbol} {date}"))?;
+
+        let mut ticks = Vec::new();
+        if let Some(prev_date) = previous_date(date)? {
+            if let Some(prev) = self
+                .load_raw_day(store, symbol, &prev_date, false)
+                .await
+                .with_context(|| format!("load optional prior spot {prev_date}"))?
+            {
+                ticks.reserve(prev.len() + current.len());
+                ticks.extend_from_slice(&prev);
+            }
+        }
+        ticks.extend_from_slice(&current);
         let h = Arc::new(SpotHistory::new(ticks));
-        self.inner.insert(key, h.clone());
+        self.inner.insert(date.to_string(), h.clone());
         Ok(h)
     }
+}
+
+fn previous_date(date: &str) -> Result<Option<String>> {
+    let parsed = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .with_context(|| format!("parse market date {date}"))?;
+    Ok(parsed
+        .checked_sub_signed(Duration::days(1))
+        .map(|d| d.format("%Y-%m-%d").to_string()))
 }
 
 pub async fn run_walkforward(
@@ -1833,8 +1898,10 @@ fn run_one_strategy(
                 late_confirm_max_model_risk: cfg.br2_late_confirm_max_model_risk,
                 late_confirm_min_model_side_p: cfg.br2_late_confirm_min_model_side_p,
                 late_confirm_min_model_edge: cfg.br2_late_confirm_min_model_edge,
+                late_confirm_max_whipsaw_score: cfg.br2_late_confirm_max_whipsaw_score,
                 high_skew_clip_frac: cfg.br2_high_skew_clip_frac,
                 high_skew_max_clips: cfg.br2_high_skew_max_clips,
+                high_skew_max_whipsaw_score: cfg.br2_high_skew_max_whipsaw_score,
                 late_favourite_start_secs: cfg.br2_late_favourite_start_secs,
                 late_favourite_threshold: cfg.br2_late_favourite_threshold,
                 late_favourite_clip_frac: cfg.br2_late_favourite_clip_frac,
@@ -1844,6 +1911,7 @@ fn run_one_strategy(
                 late_favourite_max_model_risk: cfg.br2_late_favourite_max_model_risk,
                 late_favourite_min_model_side_p: cfg.br2_late_favourite_min_model_side_p,
                 late_favourite_min_model_edge: cfg.br2_late_favourite_min_model_edge,
+                late_favourite_max_whipsaw_score: cfg.br2_late_favourite_max_whipsaw_score,
                 ..BonereaperV2Config::default()
             });
             let report = run_backtest(events, spot, trades, &mut s, runner_cfg)?;
@@ -2440,8 +2508,10 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_late_confirm_max_model_risk: cfg.br2_late_confirm_max_model_risk,
         br2_late_confirm_min_model_side_p: cfg.br2_late_confirm_min_model_side_p,
         br2_late_confirm_min_model_edge: cfg.br2_late_confirm_min_model_edge,
+        br2_late_confirm_max_whipsaw_score: cfg.br2_late_confirm_max_whipsaw_score,
         br2_high_skew_clip_frac: cfg.br2_high_skew_clip_frac,
         br2_high_skew_max_clips: cfg.br2_high_skew_max_clips,
+        br2_high_skew_max_whipsaw_score: cfg.br2_high_skew_max_whipsaw_score,
         br2_late_favourite_start_secs: cfg.br2_late_favourite_start_secs,
         br2_late_favourite_threshold: cfg.br2_late_favourite_threshold,
         br2_late_favourite_clip_frac: cfg.br2_late_favourite_clip_frac,
@@ -2451,6 +2521,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_late_favourite_max_model_risk: cfg.br2_late_favourite_max_model_risk,
         br2_late_favourite_min_model_side_p: cfg.br2_late_favourite_min_model_side_p,
         br2_late_favourite_min_model_edge: cfg.br2_late_favourite_min_model_edge,
+        br2_late_favourite_max_whipsaw_score: cfg.br2_late_favourite_max_whipsaw_score,
         enforce_model_gate: cfg.enforce_model_gate,
         model_gate_min_confidence: cfg.model_gate_min_confidence,
         model_gate_max_risk: cfg.model_gate_max_risk,
@@ -2768,5 +2839,13 @@ mod tests {
         let cfg = WalkForwardConfig::default();
         let plan = build_fold_plan(7, &cfg).expect("plan");
         assert_eq!(plan, vec![(0, 0, 7)]);
+    }
+
+    #[test]
+    fn previous_date_handles_month_boundary() {
+        assert_eq!(
+            previous_date("2026-03-01").unwrap(),
+            Some("2026-02-28".to_string())
+        );
     }
 }

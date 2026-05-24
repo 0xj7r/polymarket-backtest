@@ -316,12 +316,18 @@ enum Cmd {
         /// Bonereaper v2 minimum ML probability edge over entry price for late confirmation entries.
         #[arg(long, default_value = "0.00")]
         br2_late_confirm_min_model_edge: f32,
+        /// Bonereaper v2 maximum continuous whipsaw score for late confirmation entries.
+        #[arg(long, default_value = "0.85")]
+        br2_late_confirm_max_whipsaw_score: f32,
         /// Bonereaper v2 high-skew clip multiplier.
         #[arg(long, default_value = "0.60")]
         br2_high_skew_clip_frac: f32,
         /// Bonereaper v2 maximum high-skew load clips.
         #[arg(long, default_value = "5")]
         br2_high_skew_max_clips: usize,
+        /// Bonereaper v2 maximum continuous whipsaw score for high-skew loads.
+        #[arg(long, default_value = "0.75")]
+        br2_high_skew_max_whipsaw_score: f32,
         /// Bonereaper v2 seconds into market before late-favourite loads begin.
         #[arg(long, default_value = "180.0")]
         br2_late_favourite_start_secs: f32,
@@ -349,6 +355,9 @@ enum Cmd {
         /// Bonereaper v2 minimum ML probability edge over entry price for late-favourite loads.
         #[arg(long, default_value = "0.00")]
         br2_late_favourite_min_model_edge: f32,
+        /// Bonereaper v2 maximum continuous whipsaw score for late-favourite loads.
+        #[arg(long, default_value = "0.75")]
+        br2_late_favourite_max_whipsaw_score: f32,
         /// Enable the runner-level model gate after strategy emission.
         #[arg(long, default_value_t = true)]
         enforce_model_gate: bool,
@@ -736,8 +745,10 @@ async fn main() -> Result<()> {
             br2_late_confirm_max_model_risk,
             br2_late_confirm_min_model_side_p,
             br2_late_confirm_min_model_edge,
+            br2_late_confirm_max_whipsaw_score,
             br2_high_skew_clip_frac,
             br2_high_skew_max_clips,
+            br2_high_skew_max_whipsaw_score,
             br2_late_favourite_start_secs,
             br2_late_favourite_threshold,
             br2_late_favourite_clip_frac,
@@ -747,6 +758,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_max_model_risk,
             br2_late_favourite_min_model_side_p,
             br2_late_favourite_min_model_edge,
+            br2_late_favourite_max_whipsaw_score,
             enforce_model_gate,
             disable_model_gate,
             model_gate_min_confidence,
@@ -795,8 +807,10 @@ async fn main() -> Result<()> {
                 br2_late_confirm_max_model_risk,
                 br2_late_confirm_min_model_side_p,
                 br2_late_confirm_min_model_edge,
+                br2_late_confirm_max_whipsaw_score,
                 br2_high_skew_clip_frac,
                 br2_high_skew_max_clips,
+                br2_high_skew_max_whipsaw_score,
                 br2_late_favourite_start_secs,
                 br2_late_favourite_threshold,
                 br2_late_favourite_clip_frac,
@@ -806,6 +820,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_max_model_risk,
                 br2_late_favourite_min_model_side_p,
                 br2_late_favourite_min_model_edge,
+                br2_late_favourite_max_whipsaw_score,
                 enforce_model_gate && !disable_model_gate,
                 model_gate_min_confidence,
                 model_gate_max_risk,
@@ -1287,8 +1302,10 @@ async fn walk_forward(
     br2_late_confirm_max_model_risk: f32,
     br2_late_confirm_min_model_side_p: f32,
     br2_late_confirm_min_model_edge: f32,
+    br2_late_confirm_max_whipsaw_score: f32,
     br2_high_skew_clip_frac: f32,
     br2_high_skew_max_clips: usize,
+    br2_high_skew_max_whipsaw_score: f32,
     br2_late_favourite_start_secs: f32,
     br2_late_favourite_threshold: f32,
     br2_late_favourite_clip_frac: f32,
@@ -1298,6 +1315,7 @@ async fn walk_forward(
     br2_late_favourite_max_model_risk: f32,
     br2_late_favourite_min_model_side_p: f32,
     br2_late_favourite_min_model_edge: f32,
+    br2_late_favourite_max_whipsaw_score: f32,
     enforce_model_gate: bool,
     model_gate_min_confidence: f32,
     model_gate_max_risk: f32,
@@ -1380,8 +1398,10 @@ async fn walk_forward(
         br2_late_confirm_max_model_risk,
         br2_late_confirm_min_model_side_p,
         br2_late_confirm_min_model_edge,
+        br2_late_confirm_max_whipsaw_score,
         br2_high_skew_clip_frac,
         br2_high_skew_max_clips,
+        br2_high_skew_max_whipsaw_score,
         br2_late_favourite_start_secs,
         br2_late_favourite_threshold,
         br2_late_favourite_clip_frac,
@@ -1391,6 +1411,7 @@ async fn walk_forward(
         br2_late_favourite_max_model_risk,
         br2_late_favourite_min_model_side_p,
         br2_late_favourite_min_model_edge,
+        br2_late_favourite_max_whipsaw_score,
         enforce_model_gate,
         model_gate_min_confidence,
         model_gate_max_risk,

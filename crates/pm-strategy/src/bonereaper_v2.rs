@@ -24,9 +24,9 @@
 //!      Matches real Bonereaper's late favourite_load behaviour.
 //!   5. **Convex tail** — small one-shot cheap bet on the losing side.
 
-use crate::regime::{BtcRegime, BtcRegimeSnapshot};
+use crate::regime::{BtcRegime, BtcRegimeSnapshot, WhipsawRiskSnapshot};
 use crate::signals::{Ring, direction_score};
-use crate::spot_momentum::weighted_multi_tf_return;
+use crate::spot_momentum::spot_momentum_stack;
 use crate::{Ctx, OrderRequest, Side, Strategy, StrategyOutput};
 use pm_types::{ReplayEvent, SpotHistory, TradeHistory, compute_trade_flow};
 use serde::Serialize;
@@ -34,7 +34,6 @@ use serde::Serialize;
 const BETTING_WINDOW_SECS: i64 = 300;
 const MOM_WINDOW: usize = 32;
 const MICRO_DEV_SCALE: f32 = 0.6;
-const SPOT_SCALE: f32 = 300.0;
 const TRADE_FLOW_LOOKBACK_NS: i64 = 60 * 1_000_000_000;
 
 #[derive(Debug, Default, Clone, Copy, Serialize)]
@@ -48,6 +47,7 @@ pub struct BonereaperV2GateStats {
     pub late_confirm_model_risk_fail: u64,
     pub late_confirm_model_side_p_fail: u64,
     pub late_confirm_model_edge_fail: u64,
+    pub late_confirm_whipsaw_fail: u64,
     pub late_confirm_shares_fail: u64,
     pub late_confirm_emits: u64,
 
@@ -63,6 +63,7 @@ pub struct BonereaperV2GateStats {
     pub high_skew_model_risk_fail: u64,
     pub high_skew_model_side_p_fail: u64,
     pub high_skew_model_edge_fail: u64,
+    pub high_skew_whipsaw_fail: u64,
     pub high_skew_shares_fail: u64,
     pub high_skew_emits: u64,
 
@@ -79,6 +80,7 @@ pub struct BonereaperV2GateStats {
     pub late_favourite_model_risk_fail: u64,
     pub late_favourite_model_side_p_fail: u64,
     pub late_favourite_model_edge_fail: u64,
+    pub late_favourite_whipsaw_fail: u64,
     pub late_favourite_shares_fail: u64,
     pub late_favourite_emits: u64,
 }
@@ -94,6 +96,7 @@ impl BonereaperV2GateStats {
         self.late_confirm_model_risk_fail += other.late_confirm_model_risk_fail;
         self.late_confirm_model_side_p_fail += other.late_confirm_model_side_p_fail;
         self.late_confirm_model_edge_fail += other.late_confirm_model_edge_fail;
+        self.late_confirm_whipsaw_fail += other.late_confirm_whipsaw_fail;
         self.late_confirm_shares_fail += other.late_confirm_shares_fail;
         self.late_confirm_emits += other.late_confirm_emits;
 
@@ -109,6 +112,7 @@ impl BonereaperV2GateStats {
         self.high_skew_model_risk_fail += other.high_skew_model_risk_fail;
         self.high_skew_model_side_p_fail += other.high_skew_model_side_p_fail;
         self.high_skew_model_edge_fail += other.high_skew_model_edge_fail;
+        self.high_skew_whipsaw_fail += other.high_skew_whipsaw_fail;
         self.high_skew_shares_fail += other.high_skew_shares_fail;
         self.high_skew_emits += other.high_skew_emits;
 
@@ -125,6 +129,7 @@ impl BonereaperV2GateStats {
         self.late_favourite_model_risk_fail += other.late_favourite_model_risk_fail;
         self.late_favourite_model_side_p_fail += other.late_favourite_model_side_p_fail;
         self.late_favourite_model_edge_fail += other.late_favourite_model_edge_fail;
+        self.late_favourite_whipsaw_fail += other.late_favourite_whipsaw_fail;
         self.late_favourite_shares_fail += other.late_favourite_shares_fail;
         self.late_favourite_emits += other.late_favourite_emits;
     }
@@ -153,6 +158,7 @@ pub struct BonereaperV2Config {
     pub late_confirm_max_model_risk: f32,
     pub late_confirm_min_model_side_p: f32,
     pub late_confirm_min_model_edge: f32,
+    pub late_confirm_max_whipsaw_score: f32,
 
     // High-skew load lane with whipsaw guards
     pub high_skew_threshold: f32,
@@ -164,6 +170,7 @@ pub struct BonereaperV2Config {
     pub high_skew_min_sustain_secs: f32,
     pub high_skew_min_spot_alignment: f32,
     pub high_skew_skip_whipsaw: bool,
+    pub high_skew_max_whipsaw_score: f32,
 
     // Late favourite loading: heavier than generic high-skew, but only after
     // the market has a clear favourite and book/spot direction agree.
@@ -181,6 +188,7 @@ pub struct BonereaperV2Config {
     pub late_favourite_max_model_risk: f32,
     pub late_favourite_min_model_side_p: f32,
     pub late_favourite_min_model_edge: f32,
+    pub late_favourite_max_whipsaw_score: f32,
 
     // Convex tail ladder. Real Bonereaper buys the losing side in multiple
     // rungs as the book moves further away from the tail side; each rung is
@@ -224,6 +232,7 @@ impl Default for BonereaperV2Config {
             late_confirm_max_model_risk: 0.80,
             late_confirm_min_model_side_p: 0.58,
             late_confirm_min_model_edge: 0.00,
+            late_confirm_max_whipsaw_score: 0.85,
             // Favourite-loading lane. Keep this stricter than the old probe
             // defaults: the looser settings overtraded early skew and paid
             // taker spread before the market had a durable favourite.
@@ -236,6 +245,7 @@ impl Default for BonereaperV2Config {
             high_skew_min_sustain_secs: 12.0,
             high_skew_min_spot_alignment: 0.02,
             high_skew_skip_whipsaw: true,
+            high_skew_max_whipsaw_score: 0.75,
             late_favourite_start_secs: 180.0,
             late_favourite_threshold: 0.22, // yes_mid >= 0.72 or <= 0.28
             late_favourite_min_ask: 0.70,
@@ -254,6 +264,7 @@ impl Default for BonereaperV2Config {
             // side probability/confidence/risk, and require a smaller positive
             // edge for the high-cert ladder.
             late_favourite_min_model_edge: 0.00,
+            late_favourite_max_whipsaw_score: 0.75,
             // Tail ladder: cheap convex bets. Threshold raised to match the
             // skew level where a "cheap" side actually exists.
             // Paired late tails were negative in walk-forward attribution:
@@ -551,12 +562,16 @@ impl Strategy for BonereaperV2 {
     ) -> StrategyOutput {
         self.recent_mids.push(event.yes_mid);
         let book_dir = direction_score(event, &self.recent_mids, MICRO_DEV_SCALE);
-        let spot_mom = if !spot.is_empty() {
-            weighted_multi_tf_return(event.ts_ns, spot)
-                .map(|r| (r * SPOT_SCALE as f64).clamp(-1.0, 1.0) as f32)
-                .unwrap_or(0.0)
+        let (spot_mom, spot_fast_mom) = if !spot.is_empty() {
+            let stack = spot_momentum_stack(event.ts_ns, spot);
+            (stack.blended_score, stack.fast_score)
         } else {
-            0.0
+            (0.0, 0.0)
+        };
+        let whipsaw = if !spot.is_empty() {
+            WhipsawRiskSnapshot::from_history(event.ts_ns, spot)
+        } else {
+            WhipsawRiskSnapshot::default()
         };
         let trade_flow = if !trades.is_empty() {
             compute_trade_flow(event.ts_ns, TRADE_FLOW_LOOKBACK_NS, trades).flow_imbalance
@@ -679,6 +694,8 @@ impl Strategy for BonereaperV2 {
                 self.gate_stats.late_confirm_price_fail += 1;
             } else if !side_is_book_favourite(event, target) {
                 self.gate_stats.late_confirm_book_favourite_fail += 1;
+            } else if whipsaw.score > self.cfg.late_confirm_max_whipsaw_score {
+                self.gate_stats.late_confirm_whipsaw_fail += 1;
             } else {
                 let model_support = self.model_support_for_side(
                     ctx,
@@ -756,8 +773,11 @@ impl Strategy for BonereaperV2 {
             };
             let skew_signed = event.yes_mid - 0.5;
             let skew_mag = skew_signed.abs();
-            if !regime_ok {
+            if !regime_ok || whipsaw.score > self.cfg.high_skew_max_whipsaw_score {
                 self.gate_stats.high_skew_regime_fail += 1;
+                if whipsaw.score > self.cfg.high_skew_max_whipsaw_score {
+                    self.gate_stats.high_skew_whipsaw_fail += 1;
+                }
             } else if skew_mag < self.cfg.high_skew_threshold {
                 self.gate_stats.high_skew_threshold_fail += 1;
             } else {
@@ -772,8 +792,8 @@ impl Strategy for BonereaperV2 {
                             >= self.cfg.high_skew_min_sustain_secs as f64
                     })
                     .unwrap_or(false);
-                let spot_aligned = spot_mom.signum() == skew_signed.signum()
-                    && spot_mom.abs() >= self.cfg.high_skew_min_spot_alignment;
+                let spot_aligned = spot_fast_mom.signum() == skew_signed.signum()
+                    && spot_fast_mom.abs() >= self.cfg.high_skew_min_spot_alignment;
                 if !sustained {
                     self.gate_stats.high_skew_sustain_fail += 1;
                 } else if !spot_aligned {
@@ -842,11 +862,13 @@ impl Strategy for BonereaperV2 {
                 let skew_mag = skew_signed.abs();
                 let composite_aligned = composite_dir.signum() == skew_signed.signum()
                     && composite_dir.abs() >= self.cfg.late_favourite_min_composite_alignment;
-                let spot_aligned = spot_mom.signum() == skew_signed.signum()
-                    && spot_mom.abs() >= self.cfg.high_skew_min_spot_alignment;
+                let spot_aligned = spot_fast_mom.signum() == skew_signed.signum()
+                    && spot_fast_mom.abs() >= self.cfg.high_skew_min_spot_alignment;
 
                 if skew_mag < self.cfg.late_favourite_threshold {
                     self.gate_stats.late_favourite_skew_fail += 1;
+                } else if whipsaw.score > self.cfg.late_favourite_max_whipsaw_score {
+                    self.gate_stats.late_favourite_whipsaw_fail += 1;
                 } else {
                     let side = if skew_signed > 0.0 {
                         Side::BuyYes

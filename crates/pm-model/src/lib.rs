@@ -2137,46 +2137,53 @@ pub fn calibrated_p(direction: f32, confidence: f32, book_implied: f32, model_we
 }
 
 pub fn spot_score(ts_ns: i64, spot: &SpotHistory) -> f32 {
-    let r = weighted_multi_tf_return(ts_ns, spot).unwrap_or(0.0);
-    (r as f32 * 250.0).clamp(-1.0, 1.0)
+    let fast = weighted_multi_tf_return(ts_ns, spot);
+    let broad = weighted_broad_multi_tf_return(ts_ns, spot);
+    let fast_score = score_spot_return(fast, 250.0);
+    let broad_score = score_spot_return(broad, 80.0);
+    if fast_score.abs() < 0.02 || broad_score.abs() < 0.02 {
+        fast_score
+    } else if fast_score.signum() == broad_score.signum() {
+        (0.80 * fast_score + 0.20 * broad_score).clamp(-1.0, 1.0)
+    } else {
+        (0.65 * fast_score + 0.35 * broad_score).clamp(-1.0, 1.0)
+    }
 }
 
 pub fn weighted_multi_tf_return(now_ns: i64, spot: &SpotHistory) -> Option<f64> {
-    let s = |secs: i64| spot.simple_return(now_ns, secs * NS_PER_SECOND);
-    let r10 = s(10);
-    let r30 = s(30);
-    let r60 = s(60);
-    let r120 = s(120);
-    let r300 = s(300);
-    if r10.is_none() && r30.is_none() && r60.is_none() && r120.is_none() && r300.is_none() {
-        return None;
-    }
+    weighted_spot_return(
+        now_ns,
+        spot,
+        &[(10, 0.45), (30, 0.25), (60, 0.15), (120, 0.10), (300, 0.05)],
+    )
+}
+
+pub fn weighted_broad_multi_tf_return(now_ns: i64, spot: &SpotHistory) -> Option<f64> {
+    weighted_spot_return(
+        now_ns,
+        spot,
+        &[(600, 0.35), (900, 0.25), (1800, 0.25), (3600, 0.15)],
+    )
+}
+
+fn weighted_spot_return(now_ns: i64, spot: &SpotHistory, windows: &[(i64, f64)]) -> Option<f64> {
     let mut sum = 0.0f64;
     let mut wsum = 0.0f64;
-    if let Some(r) = r10 {
-        sum += 0.45 * r;
-        wsum += 0.45;
-    }
-    if let Some(r) = r30 {
-        sum += 0.25 * r;
-        wsum += 0.25;
-    }
-    if let Some(r) = r60 {
-        sum += 0.15 * r;
-        wsum += 0.15;
-    }
-    if let Some(r) = r120 {
-        sum += 0.10 * r;
-        wsum += 0.10;
-    }
-    if let Some(r) = r300 {
-        sum += 0.05 * r;
-        wsum += 0.05;
+    for &(secs, weight) in windows {
+        if let Some(r) = spot.simple_return(now_ns, secs * NS_PER_SECOND) {
+            sum += weight * r;
+            wsum += weight;
+        }
     }
     if wsum <= 0.0 {
         return None;
     }
     Some(sum / wsum)
+}
+
+fn score_spot_return(r: Option<f64>, scale: f64) -> f32 {
+    r.map(|value| (value * scale).clamp(-1.0, 1.0) as f32)
+        .unwrap_or(0.0)
 }
 
 fn top3_imbalance_deltas(top3_imbalance: &TimedRing, now_ns: i64) -> (f32, f32) {
@@ -2452,6 +2459,51 @@ mod tests {
         ]);
         let r = weighted_multi_tf_return(300 * ns, &spot).unwrap();
         assert!(r > 0.0, "expected positive multi-tf return");
+    }
+
+    #[test]
+    fn spot_score_blends_broad_context_without_replacing_fast_signal() {
+        let ns = 1_000_000_000;
+        let spot = SpotHistory::new(vec![
+            SpotTick {
+                ts_ns: 0,
+                price: 100.0,
+                quantity: 0.0,
+                is_buyer_maker: false,
+            },
+            SpotTick {
+                ts_ns: 600 * ns,
+                price: 101.0,
+                quantity: 0.0,
+                is_buyer_maker: false,
+            },
+            SpotTick {
+                ts_ns: 900 * ns,
+                price: 102.0,
+                quantity: 0.0,
+                is_buyer_maker: false,
+            },
+            SpotTick {
+                ts_ns: 1800 * ns,
+                price: 103.0,
+                quantity: 0.0,
+                is_buyer_maker: false,
+            },
+            SpotTick {
+                ts_ns: 3300 * ns,
+                price: 104.0,
+                quantity: 0.0,
+                is_buyer_maker: false,
+            },
+            SpotTick {
+                ts_ns: 3600 * ns,
+                price: 105.0,
+                quantity: 0.0,
+                is_buyer_maker: false,
+            },
+        ]);
+        assert!(weighted_broad_multi_tf_return(3600 * ns, &spot).unwrap() > 0.0);
+        assert!(spot_score(3600 * ns, &spot) > 0.0);
     }
 
     #[test]

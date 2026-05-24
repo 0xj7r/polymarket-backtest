@@ -51,8 +51,10 @@ BR2_LATE_CONFIRM_MIN_MODEL_CONFIDENCE="0.58"
 BR2_LATE_CONFIRM_MAX_MODEL_RISK="0.80"
 BR2_LATE_CONFIRM_MIN_MODEL_SIDE_P="0.58"
 BR2_LATE_CONFIRM_MIN_MODEL_EDGE="0.00"
+BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE="0.85"
 BR2_HIGH_SKEW_CLIP_FRAC="0.60"
 BR2_HIGH_SKEW_MAX_CLIPS="5"
+BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE="0.75"
 BR2_LATE_FAVOURITE_START_SECS="180.0"
 BR2_LATE_FAVOURITE_THRESHOLD="0.22"
 BR2_LATE_FAVOURITE_CLIP_FRAC="1.00"
@@ -62,6 +64,7 @@ BR2_LATE_FAVOURITE_MIN_MODEL_CONFIDENCE="0.68"
 BR2_LATE_FAVOURITE_MAX_MODEL_RISK="0.72"
 BR2_LATE_FAVOURITE_MIN_MODEL_SIDE_P="0.62"
 BR2_LATE_FAVOURITE_MIN_MODEL_EDGE="0.00"
+BR2_LATE_FAVOURITE_MAX_WHIPSAW_SCORE="0.75"
 ENFORCE_MODEL_GATE="true"
 MODEL_GATE_MIN_CONFIDENCE="0.68"
 MODEL_GATE_MAX_RISK="0.72"
@@ -107,8 +110,10 @@ while [ $# -gt 0 ]; do
         --br2-late-confirm-max-model-risk) BR2_LATE_CONFIRM_MAX_MODEL_RISK="$2"; shift 2 ;;
         --br2-late-confirm-min-model-side-p) BR2_LATE_CONFIRM_MIN_MODEL_SIDE_P="$2"; shift 2 ;;
         --br2-late-confirm-min-model-edge) BR2_LATE_CONFIRM_MIN_MODEL_EDGE="$2"; shift 2 ;;
+        --br2-late-confirm-max-whipsaw-score) BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
         --br2-high-skew-clip-frac) BR2_HIGH_SKEW_CLIP_FRAC="$2"; shift 2 ;;
         --br2-high-skew-max-clips) BR2_HIGH_SKEW_MAX_CLIPS="$2"; shift 2 ;;
+        --br2-high-skew-max-whipsaw-score) BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
         --br2-late-favourite-start-secs) BR2_LATE_FAVOURITE_START_SECS="$2"; shift 2 ;;
         --br2-late-favourite-threshold) BR2_LATE_FAVOURITE_THRESHOLD="$2"; shift 2 ;;
         --br2-late-favourite-clip-frac) BR2_LATE_FAVOURITE_CLIP_FRAC="$2"; shift 2 ;;
@@ -118,6 +123,7 @@ while [ $# -gt 0 ]; do
         --br2-late-favourite-max-model-risk) BR2_LATE_FAVOURITE_MAX_MODEL_RISK="$2"; shift 2 ;;
         --br2-late-favourite-min-model-side-p) BR2_LATE_FAVOURITE_MIN_MODEL_SIDE_P="$2"; shift 2 ;;
         --br2-late-favourite-min-model-edge) BR2_LATE_FAVOURITE_MIN_MODEL_EDGE="$2"; shift 2 ;;
+        --br2-late-favourite-max-whipsaw-score) BR2_LATE_FAVOURITE_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
         --enforce-model-gate) ENFORCE_MODEL_GATE="$2"; shift 2 ;;
         --model-gate-min-confidence) MODEL_GATE_MIN_CONFIDENCE="$2"; shift 2 ;;
         --model-gate-max-risk) MODEL_GATE_MAX_RISK="$2"; shift 2 ;;
@@ -304,8 +310,10 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-confirm-max-model-risk "${BR2_LATE_CONFIRM_MAX_MODEL_RISK}" \\
       --br2-late-confirm-min-model-side-p "${BR2_LATE_CONFIRM_MIN_MODEL_SIDE_P}" \\
       --br2-late-confirm-min-model-edge "${BR2_LATE_CONFIRM_MIN_MODEL_EDGE}" \\
+      --br2-late-confirm-max-whipsaw-score "${BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE}" \\
       --br2-high-skew-clip-frac "${BR2_HIGH_SKEW_CLIP_FRAC}" \\
       --br2-high-skew-max-clips "${BR2_HIGH_SKEW_MAX_CLIPS}" \\
+      --br2-high-skew-max-whipsaw-score "${BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE}" \\
       --br2-late-favourite-start-secs "${BR2_LATE_FAVOURITE_START_SECS}" \\
       --br2-late-favourite-threshold "${BR2_LATE_FAVOURITE_THRESHOLD}" \\
       --br2-late-favourite-clip-frac "${BR2_LATE_FAVOURITE_CLIP_FRAC}" \\
@@ -315,6 +323,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-favourite-max-model-risk "${BR2_LATE_FAVOURITE_MAX_MODEL_RISK}" \\
       --br2-late-favourite-min-model-side-p "${BR2_LATE_FAVOURITE_MIN_MODEL_SIDE_P}" \\
       --br2-late-favourite-min-model-edge "${BR2_LATE_FAVOURITE_MIN_MODEL_EDGE}" \\
+      --br2-late-favourite-max-whipsaw-score "${BR2_LATE_FAVOURITE_MAX_WHIPSAW_SCORE}" \\
       "\${MODEL_GATE_ARGS[@]}" \\
       --model-gate-min-confidence "${MODEL_GATE_MIN_CONFIDENCE}" \\
       --model-gate-max-risk "${MODEL_GATE_MAX_RISK}" \\
