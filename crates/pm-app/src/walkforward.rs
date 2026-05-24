@@ -105,6 +105,9 @@ pub struct WalkForwardConfig {
     pub spot_symbol: String,
     pub strategies: Vec<StratId>,
     pub max_concurrent_fetches: usize,
+    /// Optional research-speed replay thinning. `0` keeps every raw event.
+    /// Non-zero keeps first/last plus at most one event per interval.
+    pub replay_sample_ms: u64,
     pub use_outcome_label: bool,
     pub maker_rebate_bps: f64,
     pub taker_fee_bps: f64,
@@ -214,6 +217,7 @@ impl Default for WalkForwardConfig {
             spot_symbol: "BTCUSDT".to_string(),
             strategies: vec![StratId::ReactiveDirectional, StratId::PairedMm],
             max_concurrent_fetches: 16,
+            replay_sample_ms: 0,
             use_outcome_label: false,
             maker_rebate_bps: 0.0,
             taker_fee_bps: 0.0,
@@ -332,6 +336,7 @@ pub struct SummaryRunConfig {
     pub max_clip_usdc: f64,
     pub max_order_clip_multiplier: f64,
     pub max_per_market_exposure_usdc: f64,
+    pub replay_sample_ms: u64,
     pub clip_fraction_of_equity: Option<f64>,
     pub clip_drawdown_soft_pct: f64,
     pub clip_drawdown_hard_pct: f64,
@@ -510,6 +515,26 @@ fn volatility_band(range: f64, threshold: f64) -> VolatilityBand {
     } else {
         VolatilityBand::Low
     }
+}
+
+fn sample_replay_events(
+    events: &[pm_types::ReplayEvent],
+    sample_ms: u64,
+) -> Vec<pm_types::ReplayEvent> {
+    if sample_ms == 0 || events.len() <= 2 {
+        return events.to_vec();
+    }
+    let sample_ns = (sample_ms as i64).saturating_mul(1_000_000).max(1);
+    let mut sampled = Vec::with_capacity(events.len().min(320));
+    let mut last_kept_ns = i64::MIN / 2;
+    for (idx, event) in events.iter().enumerate() {
+        let is_edge = idx == 0 || idx + 1 == events.len();
+        if is_edge || event.ts_ns.saturating_sub(last_kept_ns) >= sample_ns {
+            sampled.push(*event);
+            last_kept_ns = event.ts_ns;
+        }
+    }
+    sampled
 }
 
 fn compounded_clip(bankroll: f64, frac: f64) -> f64 {
@@ -1857,6 +1882,13 @@ async fn run_markets(
                     return None;
                 }
             };
+            let sampled_events;
+            let events_for_run = if cfg_arc.replay_sample_ms > 0 {
+                sampled_events = sample_replay_events(&events, cfg_arc.replay_sample_ms);
+                sampled_events.as_slice()
+            } else {
+                events.as_slice()
+            };
             // Per-market trades (best effort: skip if missing/erroring).
             let trades = match resolve_pm_trades_day(&store_for_resolve, &m.date, &m.asset_id).await {
                 Ok(tp) => match load_pm_trades_async(store_inner.clone(), tp).await {
@@ -1912,7 +1944,7 @@ async fn run_markets(
                 match run_one_strategy(
                     strat,
                     &cfg_arc,
-                    &events,
+                    events_for_run,
                     &spot,
                     &trades,
                     &runner_cfg,
@@ -1933,12 +1965,13 @@ async fn run_markets(
                 }
             }
 
-            let volatility_range = market_volatility_range(&events);
+            let volatility_range = market_volatility_range(events_for_run);
             let volatility_band = volatility_band(volatility_range, cfg_arc.volatility_regime_threshold);
 
             tracing::debug!(
                 market = %m.slug,
-                events = events.len(),
+                events = events_for_run.len(),
+                raw_events = events.len(),
                 elapsed_ms = started.elapsed().as_millis() as u64,
                 "market done",
             );
@@ -2205,6 +2238,13 @@ async fn run_portfolio(
                     continue;
                 }
             };
+        let sampled_events;
+        let events_for_run = if cfg.replay_sample_ms > 0 {
+            sampled_events = sample_replay_events(&events, cfg.replay_sample_ms);
+            sampled_events.as_slice()
+        } else {
+            events.as_slice()
+        };
         let trades = match resolve_pm_trades_day(store, &m.date, &m.asset_id).await {
             Ok(tp) => match load_pm_trades_async(store_inner.clone(), tp).await {
                 Ok((ticks, _)) => Arc::new(TradeHistory::new(ticks)),
@@ -2281,7 +2321,7 @@ async fn run_portfolio(
             match run_one_strategy(
                 strat,
                 cfg,
-                &events,
+                events_for_run,
                 &spot,
                 &trades,
                 &runner_cfg,
@@ -2311,7 +2351,7 @@ async fn run_portfolio(
             }
         }
 
-        let volatility_range = market_volatility_range(&events);
+        let volatility_range = market_volatility_range(events_for_run);
         let volatility_band = volatility_band(volatility_range, cfg.volatility_regime_threshold);
 
         if (idx + 1) % 50 == 0 {
@@ -2697,6 +2737,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         max_clip_usdc: cfg.max_clip_usdc,
         max_order_clip_multiplier: cfg.max_order_clip_multiplier,
         max_per_market_exposure_usdc: cfg.max_per_market_exposure_usdc,
+        replay_sample_ms: cfg.replay_sample_ms,
         clip_fraction_of_equity: cfg.clip_fraction_of_equity,
         clip_drawdown_soft_pct: cfg.clip_drawdown_soft_pct,
         clip_drawdown_hard_pct: cfg.clip_drawdown_hard_pct,

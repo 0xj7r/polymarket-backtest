@@ -260,6 +260,9 @@ enum Cmd {
         strategies: String,
         #[arg(long, default_value = "16")]
         max_concurrent_fetches: usize,
+        /// Research-speed replay thinning in milliseconds. 0 keeps every raw event.
+        #[arg(long, default_value = "0")]
+        replay_sample_ms: u64,
         /// If set, use the outcome label from discovery instead of inferring
         /// from yes_mid.
         #[arg(long, default_value_t = false)]
@@ -744,6 +747,7 @@ async fn main() -> Result<()> {
             spot_symbol,
             strategies,
             max_concurrent_fetches,
+            replay_sample_ms,
             use_outcome_label,
             portfolio_mode,
             volatility_regime_threshold,
@@ -811,6 +815,7 @@ async fn main() -> Result<()> {
                 spot_symbol,
                 strategies,
                 max_concurrent_fetches,
+                replay_sample_ms,
                 use_outcome_label,
                 portfolio_mode,
                 volatility_regime_threshold,
@@ -1311,6 +1316,7 @@ async fn walk_forward(
     spot_symbol: String,
     strategies_csv: String,
     max_concurrent_fetches: usize,
+    replay_sample_ms: u64,
     use_outcome_label: bool,
     portfolio_mode: bool,
     volatility_regime_threshold: f64,
@@ -1411,6 +1417,7 @@ async fn walk_forward(
         spot_symbol,
         strategies,
         max_concurrent_fetches,
+        replay_sample_ms,
         use_outcome_label,
         maker_rebate_bps: 10.0,
         taker_fee_bps: 0.0,

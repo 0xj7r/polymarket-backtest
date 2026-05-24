@@ -84,6 +84,7 @@ CLIP_FRACTIONS="0.015,0.02,0.03"
 GROSS_CAPS="250,500,750"
 SPOT_SYMBOL="BTCUSDT"
 MAX_CONCURRENT_FETCHES="32"
+REPLAY_SAMPLE_MS="0"
 USE_LOCAL_CACHE="0"
 LOCAL_CACHE_DIR="/opt/pm/cache"
 PREP_CACHE_MAX_CONCURRENT="128"
@@ -148,6 +149,7 @@ while [ $# -gt 0 ]; do
         --gross-caps) GROSS_CAPS="$2"; shift 2 ;;
         --spot-symbol) SPOT_SYMBOL="$2"; shift 2 ;;
         --max-concurrent-fetches) MAX_CONCURRENT_FETCHES="$2"; shift 2 ;;
+        --replay-sample-ms) REPLAY_SAMPLE_MS="$2"; shift 2 ;;
         --use-local-cache) USE_LOCAL_CACHE="1"; shift ;;
         --local-cache-dir) LOCAL_CACHE_DIR="$2"; shift 2 ;;
         --prep-cache-max-concurrent) PREP_CACHE_MAX_CONCURRENT="$2"; shift 2 ;;
@@ -349,6 +351,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --meta-max-samples-per-market "${META_MAX_SAMPLES_PER_MARKET}" \\
       --meta-max-oos-evaluation-samples "${META_MAX_OOS_EVALUATION_SAMPLES}" \\
       --max-concurrent-fetches "${MAX_CONCURRENT_FETCHES}" \\
+      --replay-sample-ms "${REPLAY_SAMPLE_MS}" \\
       --portfolio-checkpoint-every-markets "${PORTFOLIO_CHECKPOINT_EVERY_MARKETS}" \\
       "\${LOCAL_CACHE_ARGS[@]}" \\
       "\${EXTRA_MODEL_ARGS[@]}" \\
