@@ -27,9 +27,11 @@ use std::time::Instant;
 
 mod discovery;
 mod prep_cache;
+mod result_summary;
 mod runner;
 mod walkforward;
 
+use result_summary::{print_result_summary, summarize_markets_jsonl, write_result_summary_json};
 use runner::{RunnerConfig, pretty_print, run_backtest};
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
@@ -462,6 +464,18 @@ enum Cmd {
         /// Summary JSON output.
         #[arg(long)]
         out_summary: Option<PathBuf>,
+    },
+    /// Summarize a walk-forward `markets.jsonl` result file.
+    SummarizeMarkets {
+        /// Path to the per-market JSONL emitted by `walk-forward --out-markets`.
+        #[arg(long)]
+        markets: PathBuf,
+        /// Strategy key inside `per_strategy`.
+        #[arg(long, default_value = "bonereaper_v2")]
+        strategy: String,
+        /// Optional JSON output path for the computed summary.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
     /// Run a paper-mode replay on one market (historical tape + same execution stack as backtest).
     Paper {
@@ -898,6 +912,19 @@ async fn main() -> Result<()> {
                 out_summary,
             )
             .await
+        }
+        Cmd::SummarizeMarkets {
+            markets,
+            strategy,
+            out,
+        } => {
+            let summary = summarize_markets_jsonl(&markets, &strategy)?;
+            print_result_summary(&summary);
+            if let Some(path) = out {
+                write_result_summary_json(&path, &summary)?;
+                tracing::info!(?path, "wrote result summary");
+            }
+            Ok(())
         }
         Cmd::Paper {
             exchange,
