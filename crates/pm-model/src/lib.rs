@@ -22,7 +22,7 @@ const META_TREE_COUNT: usize = 10;
 const META_TREE_LEARNING_RATE: f32 = 0.08;
 const META_TREE_L2: f32 = 8.0;
 const META_TREE_MIN_LEAF: usize = 128;
-const META_TREE_MAX_TRAIN_SAMPLES: usize = 96_000;
+const META_TREE_MAX_TRAIN_SAMPLES: usize = 48_000;
 const META_TREE_VALUE_CLIP: f32 = 0.65;
 const VOLATILITY_WINDOW_MARKETS: usize = 3;
 const VOLATILITY_REGIME_WEIGHT: f32 = 0.22;
@@ -1098,7 +1098,7 @@ impl TreeEnsemble {
         if samples.len() < META_TREE_MIN_LEAF * 4 {
             return Self::default();
         }
-        let stride = (samples.len() / META_TREE_MAX_TRAIN_SAMPLES).max(1);
+        let stride = samples.len().div_ceil(META_TREE_MAX_TRAIN_SAMPLES).max(1);
         let train_indices: Vec<usize> = (0..samples.len()).step_by(stride).collect();
         if train_indices.len() < META_TREE_MIN_LEAF * 4 {
             return Self::default();
