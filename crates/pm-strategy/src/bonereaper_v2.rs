@@ -74,6 +74,7 @@ pub struct BonereaperV2GateStats {
     pub late_favourite_refresh_fail: u64,
     pub late_favourite_checks: u64,
     pub late_favourite_skew_fail: u64,
+    pub late_favourite_sustain_fail: u64,
     pub late_favourite_alignment_fail: u64,
     pub late_favourite_price_fail: u64,
     pub late_favourite_model_missing: u64,
@@ -126,6 +127,7 @@ impl BonereaperV2GateStats {
         self.late_favourite_refresh_fail += other.late_favourite_refresh_fail;
         self.late_favourite_checks += other.late_favourite_checks;
         self.late_favourite_skew_fail += other.late_favourite_skew_fail;
+        self.late_favourite_sustain_fail += other.late_favourite_sustain_fail;
         self.late_favourite_alignment_fail += other.late_favourite_alignment_fail;
         self.late_favourite_price_fail += other.late_favourite_price_fail;
         self.late_favourite_model_missing += other.late_favourite_model_missing;
@@ -190,6 +192,7 @@ pub struct BonereaperV2Config {
     pub late_favourite_clip_frac: f32,
     pub late_favourite_max_clips: usize,
     pub late_favourite_refresh_secs: f32,
+    pub late_favourite_min_sustain_secs: f32,
     pub late_favourite_sweep_depth: usize,
     pub late_favourite_min_composite_alignment: f32,
     pub late_favourite_min_model_confidence: f32,
@@ -267,6 +270,7 @@ impl Default for BonereaperV2Config {
             late_favourite_clip_frac: 1.00,
             late_favourite_max_clips: 12,
             late_favourite_refresh_secs: 4.0,
+            late_favourite_min_sustain_secs: 0.0,
             late_favourite_sweep_depth: 7,
             late_favourite_min_composite_alignment: 0.05,
             late_favourite_min_model_confidence: 0.68,
@@ -893,9 +897,26 @@ impl Strategy for BonereaperV2 {
                     && composite_dir.abs() >= self.cfg.late_favourite_min_composite_alignment;
                 let spot_aligned = spot_fast_mom.signum() == skew_signed.signum()
                     && spot_fast_mom.abs() >= self.cfg.high_skew_min_spot_alignment;
+                let favourite_sustained = if self.cfg.late_favourite_min_sustain_secs > 0.0 {
+                    let first_ns = if skew_signed > 0.0 {
+                        self.skew_high_first_ns
+                    } else {
+                        self.skew_low_first_ns
+                    };
+                    first_ns
+                        .map(|t0| {
+                            (event.ts_ns - t0) as f64 / 1e9
+                                >= self.cfg.late_favourite_min_sustain_secs as f64
+                        })
+                        .unwrap_or(false)
+                } else {
+                    true
+                };
 
                 if skew_mag < self.cfg.late_favourite_threshold {
                     self.gate_stats.late_favourite_skew_fail += 1;
+                } else if !favourite_sustained {
+                    self.gate_stats.late_favourite_sustain_fail += 1;
                 } else if whipsaw.score > self.cfg.late_favourite_max_whipsaw_score {
                     self.gate_stats.late_favourite_whipsaw_fail += 1;
                 } else if whipsaw.reversal_pressure > self.cfg.late_favourite_max_reversal_pressure
@@ -1067,15 +1088,18 @@ mod tests {
     #[test]
     fn late_favourite_whipsaw_component_stats_accumulate() {
         let mut a = BonereaperV2GateStats {
+            late_favourite_sustain_fail: 11,
             late_favourite_reversal_pressure_fail: 2,
             late_favourite_path_efficiency_fail: 3,
             ..BonereaperV2GateStats::default()
         };
         a.add_assign(BonereaperV2GateStats {
+            late_favourite_sustain_fail: 13,
             late_favourite_reversal_pressure_fail: 5,
             late_favourite_path_efficiency_fail: 7,
             ..BonereaperV2GateStats::default()
         });
+        assert_eq!(a.late_favourite_sustain_fail, 24);
         assert_eq!(a.late_favourite_reversal_pressure_fail, 7);
         assert_eq!(a.late_favourite_path_efficiency_fail, 10);
     }

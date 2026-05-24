@@ -277,10 +277,11 @@ pub fn print_result_summary(summary: &ResultSummary) {
     if let Some(stats) = summary.bonereaper_v2_gate_stats {
         println!("late favourite gates:");
         println!(
-            "  checks={} emits={} skew_fail={} price_fail={} whipsaw_fail={}",
+            "  checks={} emits={} skew_fail={} sustain_fail={} price_fail={} whipsaw_fail={}",
             stats.late_favourite_checks,
             stats.late_favourite_emits,
             stats.late_favourite_skew_fail,
+            stats.late_favourite_sustain_fail,
             stats.late_favourite_price_fail,
             stats.late_favourite_whipsaw_fail
         );

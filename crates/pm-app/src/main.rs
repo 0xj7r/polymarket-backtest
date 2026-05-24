@@ -351,6 +351,9 @@ enum Cmd {
         /// Bonereaper v2 maximum late-favourite load clips.
         #[arg(long, default_value = "12")]
         br2_late_favourite_max_clips: usize,
+        /// Bonereaper v2 minimum seconds favourite skew must persist before late-favourite loads.
+        #[arg(long, default_value = "0.0")]
+        br2_late_favourite_min_sustain_secs: f32,
         /// Bonereaper v2 book depth to sweep for late-favourite loads.
         #[arg(long, default_value = "7")]
         br2_late_favourite_sweep_depth: usize,
@@ -809,6 +812,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_min_ask,
             br2_late_favourite_clip_frac,
             br2_late_favourite_max_clips,
+            br2_late_favourite_min_sustain_secs,
             br2_late_favourite_sweep_depth,
             br2_late_favourite_min_model_confidence,
             br2_late_favourite_max_model_risk,
@@ -884,6 +888,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_min_ask,
                 br2_late_favourite_clip_frac,
                 br2_late_favourite_max_clips,
+                br2_late_favourite_min_sustain_secs,
                 br2_late_favourite_sweep_depth,
                 br2_late_favourite_min_model_confidence,
                 br2_late_favourite_max_model_risk,
@@ -1405,6 +1410,7 @@ async fn walk_forward(
     br2_late_favourite_min_ask: f32,
     br2_late_favourite_clip_frac: f32,
     br2_late_favourite_max_clips: usize,
+    br2_late_favourite_min_sustain_secs: f32,
     br2_late_favourite_sweep_depth: usize,
     br2_late_favourite_min_model_confidence: f32,
     br2_late_favourite_max_model_risk: f32,
@@ -1514,6 +1520,7 @@ async fn walk_forward(
         br2_late_favourite_min_ask,
         br2_late_favourite_clip_frac,
         br2_late_favourite_max_clips,
+        br2_late_favourite_min_sustain_secs,
         br2_late_favourite_sweep_depth,
         br2_late_favourite_min_model_confidence,
         br2_late_favourite_max_model_risk,

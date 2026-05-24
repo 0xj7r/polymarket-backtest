@@ -61,6 +61,7 @@ BR2_LATE_FAVOURITE_THRESHOLD="0.22"
 BR2_LATE_FAVOURITE_MIN_ASK="0.70"
 BR2_LATE_FAVOURITE_CLIP_FRAC="1.00"
 BR2_LATE_FAVOURITE_MAX_CLIPS="12"
+BR2_LATE_FAVOURITE_MIN_SUSTAIN_SECS="0.0"
 BR2_LATE_FAVOURITE_SWEEP_DEPTH="7"
 BR2_LATE_FAVOURITE_MIN_MODEL_CONFIDENCE="0.68"
 BR2_LATE_FAVOURITE_MAX_MODEL_RISK="0.72"
@@ -133,6 +134,7 @@ while [ $# -gt 0 ]; do
         --br2-late-favourite-min-ask) BR2_LATE_FAVOURITE_MIN_ASK="$2"; shift 2 ;;
         --br2-late-favourite-clip-frac) BR2_LATE_FAVOURITE_CLIP_FRAC="$2"; shift 2 ;;
         --br2-late-favourite-max-clips) BR2_LATE_FAVOURITE_MAX_CLIPS="$2"; shift 2 ;;
+        --br2-late-favourite-min-sustain-secs) BR2_LATE_FAVOURITE_MIN_SUSTAIN_SECS="$2"; shift 2 ;;
         --br2-late-favourite-sweep-depth) BR2_LATE_FAVOURITE_SWEEP_DEPTH="$2"; shift 2 ;;
         --br2-late-favourite-min-model-confidence) BR2_LATE_FAVOURITE_MIN_MODEL_CONFIDENCE="$2"; shift 2 ;;
         --br2-late-favourite-max-model-risk) BR2_LATE_FAVOURITE_MAX_MODEL_RISK="$2"; shift 2 ;;
@@ -346,6 +348,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-favourite-min-ask "${BR2_LATE_FAVOURITE_MIN_ASK}" \\
       --br2-late-favourite-clip-frac "${BR2_LATE_FAVOURITE_CLIP_FRAC}" \\
       --br2-late-favourite-max-clips "${BR2_LATE_FAVOURITE_MAX_CLIPS}" \\
+      --br2-late-favourite-min-sustain-secs "${BR2_LATE_FAVOURITE_MIN_SUSTAIN_SECS}" \\
       --br2-late-favourite-sweep-depth "${BR2_LATE_FAVOURITE_SWEEP_DEPTH}" \\
       --br2-late-favourite-min-model-confidence "${BR2_LATE_FAVOURITE_MIN_MODEL_CONFIDENCE}" \\
       --br2-late-favourite-max-model-risk "${BR2_LATE_FAVOURITE_MAX_MODEL_RISK}" \\
