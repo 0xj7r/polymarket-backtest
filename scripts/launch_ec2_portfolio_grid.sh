@@ -41,6 +41,7 @@ MAX_ORDER_CLIP_MULTIPLIER="6.0"
 KELLY="0.25"
 CLIP_DRAWDOWN_SOFT_PCT="1.0"
 CLIP_DRAWDOWN_HARD_PCT="1.0"
+BR2_DISABLE_INTERNAL_MODEL_GATES="0"
 BR2_MIN_COMPOSITE_DIRECTION="0.10"
 BR2_EARLY_CLIP_FRAC="0.00"
 BR2_MID_CLIP_FRAC="0.00"
@@ -96,6 +97,7 @@ while [ $# -gt 0 ]; do
         --kelly) KELLY="$2"; shift 2 ;;
         --clip-drawdown-soft-pct) CLIP_DRAWDOWN_SOFT_PCT="$2"; shift 2 ;;
         --clip-drawdown-hard-pct) CLIP_DRAWDOWN_HARD_PCT="$2"; shift 2 ;;
+        --br2-disable-internal-model-gates) BR2_DISABLE_INTERNAL_MODEL_GATES="1"; shift ;;
         --br2-min-composite-direction) BR2_MIN_COMPOSITE_DIRECTION="$2"; shift 2 ;;
         --br2-early-clip-frac) BR2_EARLY_CLIP_FRAC="$2"; shift 2 ;;
         --br2-mid-clip-frac) BR2_MID_CLIP_FRAC="$2"; shift 2 ;;
@@ -231,6 +233,10 @@ MODEL_GATE_ARGS=()
 if [ "${ENFORCE_MODEL_GATE}" != "true" ]; then
   MODEL_GATE_ARGS=(--disable-model-gate)
 fi
+BR2_INTERNAL_MODEL_GATE_ARGS=()
+if [ "${BR2_DISABLE_INTERNAL_MODEL_GATES}" = "1" ]; then
+  BR2_INTERNAL_MODEL_GATE_ARGS=(--br2-disable-internal-model-gates)
+fi
 
 IFS=',' read -r -a CLIPS <<< "${CLIP_FRACTIONS}"
 IFS=',' read -r -a GROSS_CAPS <<< "${GROSS_CAPS}"
@@ -288,6 +294,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --clip-fraction-of-equity "\${CLIP_FRAC}" \\
       --clip-drawdown-soft-pct "${CLIP_DRAWDOWN_SOFT_PCT}" \\
       --clip-drawdown-hard-pct "${CLIP_DRAWDOWN_HARD_PCT}" \\
+      "\${BR2_INTERNAL_MODEL_GATE_ARGS[@]}" \\
       --br2-min-composite-direction "${BR2_MIN_COMPOSITE_DIRECTION}" \\
       --br2-early-clip-frac "${BR2_EARLY_CLIP_FRAC}" \\
       --br2-mid-clip-frac "${BR2_MID_CLIP_FRAC}" \\

@@ -135,6 +135,7 @@ pub struct BonereaperV2Config {
     pub bankroll_usdc: f64,
     pub max_clip_usdc: f64,
     pub tick: f64,
+    pub disable_internal_model_gates: bool,
 
     pub early_phase_end_secs: f32,
     pub mid_phase_end_secs: f32,
@@ -203,6 +204,7 @@ impl Default for BonereaperV2Config {
             bankroll_usdc: 1000.0,
             max_clip_usdc: 5.0,
             tick: 0.01,
+            disable_internal_model_gates: false,
             early_phase_end_secs: 30.0,
             mid_phase_end_secs: 240.0,
             min_composite_direction: 0.10,
@@ -322,6 +324,31 @@ impl BonereaperV2 {
 
     pub fn gate_stats(&self) -> BonereaperV2GateStats {
         self.gate_stats
+    }
+
+    fn model_support_for_side(
+        &self,
+        ctx: &Ctx,
+        side: Side,
+        min_confidence: f32,
+        max_risk: f32,
+        min_side_p: f32,
+        entry_px: f32,
+        min_edge: f32,
+    ) -> ModelSupport {
+        if self.cfg.disable_internal_model_gates {
+            ModelSupport::Supported
+        } else {
+            model_support_for_side(
+                ctx,
+                side,
+                min_confidence,
+                max_risk,
+                min_side_p,
+                entry_px,
+                min_edge,
+            )
+        }
     }
 }
 
@@ -653,7 +680,7 @@ impl Strategy for BonereaperV2 {
             } else if !side_is_book_favourite(event, target) {
                 self.gate_stats.late_confirm_book_favourite_fail += 1;
             } else {
-                let model_support = model_support_for_side(
+                let model_support = self.model_support_for_side(
                     ctx,
                     target,
                     self.cfg.late_confirm_min_model_confidence,
@@ -761,7 +788,7 @@ impl Strategy for BonereaperV2 {
                     if px <= 0.0 || px as f32 > self.cfg.high_skew_max_ask {
                         self.gate_stats.high_skew_price_fail += 1;
                     } else {
-                        let model_support = model_support_for_side(
+                        let model_support = self.model_support_for_side(
                             ctx,
                             side,
                             self.cfg.late_favourite_min_model_confidence,
@@ -836,7 +863,7 @@ impl Strategy for BonereaperV2 {
                     } else if !high_cert_favourite && !(composite_aligned || spot_aligned) {
                         self.gate_stats.late_favourite_alignment_fail += 1;
                     } else {
-                        let model_support = model_support_for_side(
+                        let model_support = self.model_support_for_side(
                             ctx,
                             side,
                             self.cfg.late_favourite_min_model_confidence,

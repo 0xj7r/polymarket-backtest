@@ -120,6 +120,7 @@ pub struct WalkForwardConfig {
     /// Portfolio-level drawdown where clips scale to zero. Expressed as a
     /// fraction below peak equity, e.g. `0.25` for 25%.
     pub clip_drawdown_hard_pct: f64,
+    pub br2_disable_internal_model_gates: bool,
     pub br2_min_composite_direction: f32,
     pub br2_early_clip_frac: f32,
     pub br2_mid_clip_frac: f32,
@@ -199,6 +200,7 @@ impl Default for WalkForwardConfig {
             clip_fraction_of_equity: None,
             clip_drawdown_soft_pct: 1.0,
             clip_drawdown_hard_pct: 1.0,
+            br2_disable_internal_model_gates: false,
             br2_min_composite_direction: 0.10,
             br2_early_clip_frac: 0.00,
             br2_mid_clip_frac: 0.00,
@@ -304,6 +306,7 @@ pub struct SummaryRunConfig {
     pub clip_fraction_of_equity: Option<f64>,
     pub clip_drawdown_soft_pct: f64,
     pub clip_drawdown_hard_pct: f64,
+    pub br2_disable_internal_model_gates: bool,
     pub br2_min_composite_direction: f32,
     pub br2_early_clip_frac: f32,
     pub br2_mid_clip_frac: f32,
@@ -1820,6 +1823,7 @@ fn run_one_strategy(
             let mut s = BonereaperV2::new(BonereaperV2Config {
                 bankroll_usdc: bankroll,
                 max_clip_usdc: clip,
+                disable_internal_model_gates: cfg.br2_disable_internal_model_gates,
                 min_composite_direction: cfg.br2_min_composite_direction,
                 early_clip_frac: cfg.br2_early_clip_frac,
                 mid_clip_frac: cfg.br2_mid_clip_frac,
@@ -2426,6 +2430,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         clip_fraction_of_equity: cfg.clip_fraction_of_equity,
         clip_drawdown_soft_pct: cfg.clip_drawdown_soft_pct,
         clip_drawdown_hard_pct: cfg.clip_drawdown_hard_pct,
+        br2_disable_internal_model_gates: cfg.br2_disable_internal_model_gates,
         br2_min_composite_direction: cfg.br2_min_composite_direction,
         br2_early_clip_frac: cfg.br2_early_clip_frac,
         br2_mid_clip_frac: cfg.br2_mid_clip_frac,
