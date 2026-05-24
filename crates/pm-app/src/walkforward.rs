@@ -547,13 +547,33 @@ fn sample_replay_events(
     }
     let sample_ns = (sample_ms as i64).saturating_mul(1_000_000).max(1);
     let mut sampled = Vec::with_capacity(events.len().min(320));
-    let mut last_kept_ns = i64::MIN / 2;
-    for (idx, event) in events.iter().enumerate() {
-        let is_edge = idx == 0 || idx + 1 == events.len();
-        if is_edge || event.ts_ns.saturating_sub(last_kept_ns) >= sample_ns {
-            sampled.push(*event);
-            last_kept_ns = event.ts_ns;
+    sampled.push(events[0]);
+
+    let first_ns = events[0].ts_ns;
+    let mut current_bucket = None::<i64>;
+    let mut pending = None::<pm_types::ReplayEvent>;
+    for event in events.iter().skip(1).take(events.len().saturating_sub(2)) {
+        let bucket = event.ts_ns.saturating_sub(first_ns) / sample_ns;
+        if current_bucket != Some(bucket) {
+            if let Some(previous) = pending.take() {
+                sampled.push(previous);
+            }
+            current_bucket = Some(bucket);
         }
+        pending = Some(*event);
+    }
+    if let Some(previous) = pending {
+        if sampled
+            .last()
+            .is_none_or(|last| last.ts_ns != previous.ts_ns)
+        {
+            sampled.push(previous);
+        }
+    }
+
+    let last = *events.last().expect("events length checked");
+    if sampled.last().is_none_or(|event| event.ts_ns != last.ts_ns) {
+        sampled.push(last);
     }
     sampled
 }
@@ -3129,6 +3149,38 @@ mod tests {
         assert_eq!(compounded_clip(0.16, 0.02), 0.0032);
         assert_eq!(compounded_clip(0.0, 0.02), 0.0);
         assert_eq!(compounded_clip(1000.0, 0.02), 20.0);
+    }
+
+    #[test]
+    fn sample_replay_events_keeps_latest_tick_per_interval() {
+        fn event(ts_ms: i64, mid: f32) -> pm_types::ReplayEvent {
+            pm_types::ReplayEvent {
+                ts_ns: ts_ms * 1_000_000,
+                market_id: pm_types::MarketId(1),
+                yes_mid: mid,
+                yes_bid: mid - 0.01,
+                yes_ask: mid + 0.01,
+                volume: 0.0,
+                bids: [pm_types::BookLevel::default(); pm_types::TAPE_DEPTH],
+                asks: [pm_types::BookLevel::default(); pm_types::TAPE_DEPTH],
+                spot_price: 100.0,
+                flags: pm_types::ReplayFlags::BOOK_UPDATE,
+            }
+        }
+
+        let events = vec![
+            event(0, 0.50),
+            event(100, 0.51),
+            event(900, 0.52),
+            event(1100, 0.53),
+            event(1900, 0.54),
+            event(2100, 0.55),
+            event(3000, 0.56),
+        ];
+
+        let sampled = sample_replay_events(&events, 1000);
+        let mids: Vec<_> = sampled.iter().map(|event| event.yes_mid).collect();
+        assert_eq!(mids, vec![0.50, 0.52, 0.54, 0.55, 0.56]);
     }
 
     #[test]
