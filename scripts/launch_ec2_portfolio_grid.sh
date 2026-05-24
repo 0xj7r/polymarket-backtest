@@ -74,6 +74,10 @@ META_EPOCHS="24"
 META_LEARNING_RATE="0.04"
 META_L2="0.001"
 META_WEIGHT_CLIP="1.50"
+META_MAX_FIT_SAMPLES="120000"
+META_MAX_VALIDATION_SAMPLES="60000"
+META_MAX_SAMPLES_PER_MARKET="64"
+META_MAX_OOS_EVALUATION_SAMPLES="120000"
 DISABLE_META_CALIBRATION="0"
 CLIP_FRACTIONS="0.015,0.02,0.03"
 GROSS_CAPS="250,500,750"
@@ -133,6 +137,10 @@ while [ $# -gt 0 ]; do
         --meta-learning-rate) META_LEARNING_RATE="$2"; shift 2 ;;
         --meta-l2) META_L2="$2"; shift 2 ;;
         --meta-weight-clip) META_WEIGHT_CLIP="$2"; shift 2 ;;
+        --meta-max-fit-samples) META_MAX_FIT_SAMPLES="$2"; shift 2 ;;
+        --meta-max-validation-samples) META_MAX_VALIDATION_SAMPLES="$2"; shift 2 ;;
+        --meta-max-samples-per-market) META_MAX_SAMPLES_PER_MARKET="$2"; shift 2 ;;
+        --meta-max-oos-evaluation-samples) META_MAX_OOS_EVALUATION_SAMPLES="$2"; shift 2 ;;
         --disable-meta-calibration) DISABLE_META_CALIBRATION="1"; shift ;;
         --clip-fractions) CLIP_FRACTIONS="$2"; shift 2 ;;
         --gross-caps) GROSS_CAPS="$2"; shift 2 ;;
@@ -333,6 +341,10 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --meta-learning-rate "${META_LEARNING_RATE}" \\
       --meta-l2 "${META_L2}" \\
       --meta-weight-clip "${META_WEIGHT_CLIP}" \\
+      --meta-max-fit-samples "${META_MAX_FIT_SAMPLES}" \\
+      --meta-max-validation-samples "${META_MAX_VALIDATION_SAMPLES}" \\
+      --meta-max-samples-per-market "${META_MAX_SAMPLES_PER_MARKET}" \\
+      --meta-max-oos-evaluation-samples "${META_MAX_OOS_EVALUATION_SAMPLES}" \\
       --max-concurrent-fetches "${MAX_CONCURRENT_FETCHES}" \\
       --portfolio-checkpoint-every-markets "${PORTFOLIO_CHECKPOINT_EVERY_MARKETS}" \\
       "\${LOCAL_CACHE_ARGS[@]}" \\

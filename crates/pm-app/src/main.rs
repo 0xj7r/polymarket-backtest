@@ -406,6 +406,18 @@ enum Cmd {
         /// Absolute clip for meta-calibrator weights and bias.
         #[arg(long, default_value = "1.50")]
         meta_weight_clip: f32,
+        /// Maximum market-balanced samples used to fit the meta-calibrator.
+        #[arg(long, default_value_t = 120_000)]
+        meta_max_fit_samples: usize,
+        /// Maximum market-balanced samples used to validate the meta-calibrator.
+        #[arg(long, default_value_t = 60_000)]
+        meta_max_validation_samples: usize,
+        /// Maximum meta-calibrator samples retained from any one market.
+        #[arg(long, default_value_t = 64)]
+        meta_max_samples_per_market: usize,
+        /// Maximum market-balanced OOS samples used in summary diagnostics.
+        #[arg(long, default_value_t = 120_000)]
+        meta_max_oos_evaluation_samples: usize,
         /// JSON cache for extracted meta-calibrator training samples.
         #[arg(long)]
         meta_training_samples_cache: Option<PathBuf>,
@@ -772,6 +784,10 @@ async fn main() -> Result<()> {
             meta_learning_rate,
             meta_l2,
             meta_weight_clip,
+            meta_max_fit_samples,
+            meta_max_validation_samples,
+            meta_max_samples_per_market,
+            meta_max_oos_evaluation_samples,
             meta_training_samples_cache,
             meta_calibrator_snapshot_in,
             meta_calibrator_snapshot_out,
@@ -833,6 +849,10 @@ async fn main() -> Result<()> {
                 meta_learning_rate,
                 meta_l2,
                 meta_weight_clip,
+                meta_max_fit_samples,
+                meta_max_validation_samples,
+                meta_max_samples_per_market,
+                meta_max_oos_evaluation_samples,
                 meta_training_samples_cache,
                 meta_calibrator_snapshot_in,
                 meta_calibrator_snapshot_out,
@@ -1328,6 +1348,10 @@ async fn walk_forward(
     meta_learning_rate: f32,
     meta_l2: f32,
     meta_weight_clip: f32,
+    meta_max_fit_samples: usize,
+    meta_max_validation_samples: usize,
+    meta_max_samples_per_market: usize,
+    meta_max_oos_evaluation_samples: usize,
     meta_training_samples_cache: Option<PathBuf>,
     meta_calibrator_snapshot_in: Option<PathBuf>,
     meta_calibrator_snapshot_out: Option<PathBuf>,
@@ -1428,6 +1452,10 @@ async fn walk_forward(
             weight_clip: meta_weight_clip,
             reset_before_fit: true,
         },
+        meta_max_fit_samples,
+        meta_max_validation_samples,
+        meta_max_samples_per_market,
+        meta_max_oos_evaluation_samples,
         meta_training_samples_cache,
         meta_calibrator_snapshot_in,
         meta_calibrator_snapshot_out,

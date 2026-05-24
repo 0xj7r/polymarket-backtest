@@ -33,7 +33,7 @@ use pm_telonex_loader::{
 };
 use pm_types::{MarketId, SpotHistory, SpotTick, TradeHistory};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
@@ -43,6 +43,11 @@ use std::time::Instant;
 
 use crate::discovery::MarketHandle;
 use crate::runner::{RunnerConfig, run_backtest};
+
+const DEFAULT_META_MAX_FIT_SAMPLES: usize = 120_000;
+const DEFAULT_META_MAX_VALIDATION_SAMPLES: usize = 60_000;
+const DEFAULT_META_MAX_OOS_EVALUATION_SAMPLES: usize = 120_000;
+const DEFAULT_META_MAX_SAMPLES_PER_MARKET: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum StratId {
@@ -168,6 +173,17 @@ pub struct WalkForwardConfig {
     /// Online meta-calibrator fit hyperparameters. These are intentionally
     /// runtime-tunable because validation often rejects overfit settings.
     pub meta_training_config: MetaTrainingConfig,
+    /// Maximum market-balanced samples used for fitting the meta-calibrator.
+    /// The raw extracted cache is still retained; this only bounds fit cost
+    /// and prevents dense tick markets from dominating the objective.
+    pub meta_max_fit_samples: usize,
+    /// Maximum market-balanced samples used for validation selection.
+    pub meta_max_validation_samples: usize,
+    /// Maximum samples retained from a single market for fit/validation/OOS
+    /// meta-calibrator diagnostics.
+    pub meta_max_samples_per_market: usize,
+    /// Maximum market-balanced OOS samples used in summary diagnostics.
+    pub meta_max_oos_evaluation_samples: usize,
     /// Optional JSON cache for extracted meta-calibrator training samples.
     /// Intended for AWS Batch/local sweeps where the train window is fixed.
     pub meta_training_samples_cache: Option<PathBuf>,
@@ -238,6 +254,10 @@ impl Default for WalkForwardConfig {
             purge_markets: 0,
             min_train_markets: 0,
             meta_training_config: MetaTrainingConfig::default(),
+            meta_max_fit_samples: DEFAULT_META_MAX_FIT_SAMPLES,
+            meta_max_validation_samples: DEFAULT_META_MAX_VALIDATION_SAMPLES,
+            meta_max_samples_per_market: DEFAULT_META_MAX_SAMPLES_PER_MARKET,
+            meta_max_oos_evaluation_samples: DEFAULT_META_MAX_OOS_EVALUATION_SAMPLES,
             meta_training_samples_cache: None,
             meta_calibrator_snapshot_in: None,
             meta_calibrator_snapshot_out: None,
@@ -346,22 +366,29 @@ pub struct SummaryRunConfig {
     pub meta_learning_rate: f32,
     pub meta_l2: f32,
     pub meta_weight_clip: f32,
+    pub meta_max_fit_samples: usize,
+    pub meta_max_validation_samples: usize,
+    pub meta_max_samples_per_market: usize,
+    pub meta_max_oos_evaluation_samples: usize,
     pub enable_meta_calibration: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MetaCalibrationReport {
     pub train_markets: usize,
+    pub raw_train_samples: usize,
     pub train_samples: usize,
     pub train_updates: u32,
     pub train_log_loss: Option<f32>,
     pub selected_training_config: Option<MetaTrainingConfig>,
     pub candidate_evaluations: Vec<MetaCandidateEvaluation>,
+    pub raw_validation_samples: usize,
     pub validation_samples: usize,
     pub validation: Option<MetaEvaluationSummary>,
     pub selected: bool,
     pub rejected_reason: Option<String>,
     pub oos_samples: usize,
+    pub oos_evaluation_samples: usize,
     pub oos: Option<MetaEvaluationSummary>,
     pub beta_enabled: bool,
     pub beta_coefficients: (f32, f32, f32),
@@ -691,16 +718,19 @@ pub async fn run_walkforward(
             } else if let Some(snapshot) = preloaded_snapshot.clone() {
                 meta_report = Some(MetaCalibrationReport {
                     train_markets: 0,
+                    raw_train_samples: 0,
                     train_samples: 0,
                     train_updates: snapshot.updates,
                     train_log_loss: None,
                     selected_training_config: None,
                     candidate_evaluations: Vec::new(),
+                    raw_validation_samples: 0,
                     validation_samples: 0,
                     validation: None,
                     selected: true,
                     rejected_reason: None,
                     oos_samples: 0,
+                    oos_evaluation_samples: 0,
                     oos: None,
                     beta_enabled: snapshot.beta_enabled(),
                     beta_coefficients: snapshot.beta_coefficients(),
@@ -722,6 +752,7 @@ pub async fn run_walkforward(
                         cfg.min_train_markets,
                         &training_samples,
                         cfg.meta_training_config,
+                        MetaSampleLimits::from_config(cfg),
                         cfg.meta_calibrator_snapshot_out.as_deref(),
                     )?;
                     meta_report = Some(selected.report);
@@ -742,16 +773,19 @@ pub async fn run_walkforward(
             .as_ref()
             .map(|snapshot| MetaCalibrationReport {
                 train_markets: 0,
+                raw_train_samples: 0,
                 train_samples: 0,
                 train_updates: snapshot.updates,
                 train_log_loss: None,
                 selected_training_config: None,
                 candidate_evaluations: Vec::new(),
+                raw_validation_samples: 0,
                 validation_samples: 0,
                 validation: None,
                 selected: true,
                 rejected_reason: None,
                 oos_samples: 0,
+                oos_evaluation_samples: 0,
                 oos: None,
                 beta_enabled: snapshot.beta_enabled(),
                 beta_coefficients: snapshot.beta_coefficients(),
@@ -1027,10 +1061,28 @@ struct SelectedMetaCalibrator {
     report: MetaCalibrationReport,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct MetaSampleLimits {
+    max_fit_samples: usize,
+    max_validation_samples: usize,
+    max_samples_per_market: usize,
+}
+
+impl MetaSampleLimits {
+    fn from_config(cfg: &WalkForwardConfig) -> Self {
+        Self {
+            max_fit_samples: cfg.meta_max_fit_samples,
+            max_validation_samples: cfg.meta_max_validation_samples,
+            max_samples_per_market: cfg.meta_max_samples_per_market,
+        }
+    }
+}
+
 fn train_validated_meta_calibrator(
     train_markets: usize,
     training_samples: &[MetaTrainingSample],
     training_config: MetaTrainingConfig,
+    limits: MetaSampleLimits,
     snapshot_out: Option<&std::path::Path>,
 ) -> Result<SelectedMetaCalibrator> {
     if training_samples.len() < 2 {
@@ -1053,16 +1105,35 @@ fn train_validated_meta_calibrator(
                 None,
                 Vec::new(),
                 0,
+                0,
                 None,
+                0,
                 false,
                 Some("not enough training samples".to_string()),
             ),
             snapshot,
         });
     }
-    let split_at = ((training_samples.len() as f64) * 0.80).round() as usize;
-    let split_at = split_at.clamp(1, training_samples.len().saturating_sub(1));
-    let (fit_samples, validation_samples) = training_samples.split_at(split_at);
+    let (raw_fit_samples, raw_validation_samples) =
+        split_meta_samples_by_market(training_samples, 0.80);
+    let fit_samples = market_balanced_meta_samples(
+        &raw_fit_samples,
+        limits.max_fit_samples,
+        limits.max_samples_per_market,
+    );
+    let validation_samples = market_balanced_meta_samples(
+        &raw_validation_samples,
+        limits.max_validation_samples,
+        limits.max_samples_per_market,
+    );
+    tracing::info!(
+        raw_fit_samples = raw_fit_samples.len(),
+        fit_samples = fit_samples.len(),
+        raw_validation_samples = raw_validation_samples.len(),
+        validation_samples = validation_samples.len(),
+        max_samples_per_market = limits.max_samples_per_market,
+        "selected market-balanced meta-calibrator samples"
+    );
 
     let candidates = meta_training_candidates(training_config);
     let mut candidate_evaluations = Vec::with_capacity(candidates.len());
@@ -1074,9 +1145,9 @@ fn train_validated_meta_calibrator(
     )> = None;
     for candidate_cfg in candidates {
         let mut state = ModelState::new();
-        let stats = state.fit_meta_calibrator(fit_samples, candidate_cfg);
+        let stats = state.fit_meta_calibrator(&fit_samples, candidate_cfg);
         let snapshot = state.meta_calibrator_snapshot();
-        let validation = evaluate_meta_calibration(&snapshot, validation_samples);
+        let validation = evaluate_meta_calibration(&snapshot, &validation_samples);
         let validation_passed = validation.calibrated_log_loss < validation.base_log_loss
             && validation.calibrated_log_loss < validation.prior_log_loss
             && validation.calibrated_brier <= validation.base_brier
@@ -1131,7 +1202,7 @@ fn train_validated_meta_calibrator(
                 log_loss: 0.0,
             };
             let snapshot = OnlineMetaCalibrator::default().snapshot();
-            let validation = evaluate_meta_calibration(&snapshot, validation_samples);
+            let validation = evaluate_meta_calibration(&snapshot, &validation_samples);
             (None, stats, snapshot, validation, false)
         };
     if let Some(path) = snapshot_out {
@@ -1178,13 +1249,15 @@ fn train_validated_meta_calibrator(
     };
     let report = meta_calibration_report(
         train_markets,
-        fit_samples,
+        &fit_samples,
         &stats,
         &selected_snapshot,
         selected_training_config,
         candidate_evaluations,
+        raw_fit_samples.len(),
         validation_samples.len(),
         Some(validation),
+        raw_validation_samples.len(),
         validation_passed,
         rejected_reason,
     );
@@ -1192,6 +1265,101 @@ fn train_validated_meta_calibrator(
         snapshot: selected_snapshot,
         report,
     })
+}
+
+fn split_meta_samples_by_market(
+    samples: &[MetaTrainingSample],
+    fit_fraction: f64,
+) -> (Vec<MetaTrainingSample>, Vec<MetaTrainingSample>) {
+    let groups = group_meta_samples_by_market(samples);
+    if groups.len() < 2 {
+        return (samples.to_vec(), Vec::new());
+    }
+
+    let split_at = ((groups.len() as f64) * fit_fraction).round() as usize;
+    let split_at = split_at.clamp(1, groups.len().saturating_sub(1));
+    let mut fit = Vec::new();
+    let mut validation = Vec::new();
+    for (idx, (_market_idx, market_samples)) in groups.into_iter().enumerate() {
+        if idx < split_at {
+            fit.extend(market_samples);
+        } else {
+            validation.extend(market_samples);
+        }
+    }
+    (fit, validation)
+}
+
+fn market_balanced_meta_samples(
+    samples: &[MetaTrainingSample],
+    max_samples: usize,
+    max_samples_per_market: usize,
+) -> Vec<MetaTrainingSample> {
+    if samples.is_empty() || max_samples == 0 {
+        return Vec::new();
+    }
+    if samples.len() <= max_samples && max_samples_per_market == 0 {
+        return samples.to_vec();
+    }
+
+    let groups = group_meta_samples_by_market(samples);
+    if groups.is_empty() {
+        return Vec::new();
+    }
+
+    let configured_per_market = if max_samples_per_market == 0 {
+        usize::MAX
+    } else {
+        max_samples_per_market
+    };
+    let per_market_cap = if max_samples >= groups.len() {
+        configured_per_market.min((max_samples / groups.len()).max(1))
+    } else {
+        1
+    };
+    let mut selected = Vec::with_capacity(samples.len().min(max_samples));
+    for (_market_idx, market_samples) in groups {
+        let take = market_samples.len().min(per_market_cap);
+        extend_evenly_sampled(&market_samples, take, &mut selected);
+    }
+
+    if selected.len() <= max_samples {
+        selected
+    } else {
+        let mut bounded = Vec::with_capacity(max_samples);
+        extend_evenly_sampled(&selected, max_samples, &mut bounded);
+        bounded
+    }
+}
+
+fn group_meta_samples_by_market(
+    samples: &[MetaTrainingSample],
+) -> Vec<(u32, Vec<MetaTrainingSample>)> {
+    let mut groups: BTreeMap<u32, Vec<MetaTrainingSample>> = BTreeMap::new();
+    for sample in samples {
+        groups.entry(sample.market_idx).or_default().push(*sample);
+    }
+    groups.into_iter().collect()
+}
+
+fn extend_evenly_sampled<T: Copy>(items: &[T], take: usize, out: &mut Vec<T>) {
+    if take == 0 || items.is_empty() {
+        return;
+    }
+    if take >= items.len() {
+        out.extend_from_slice(items);
+        return;
+    }
+    if take == 1 {
+        out.push(items[items.len() / 2]);
+        return;
+    }
+    let last = items.len() - 1;
+    let denom = take - 1;
+    for i in 0..take {
+        let idx = (i * last + denom / 2) / denom;
+        out.push(items[idx]);
+    }
 }
 
 fn meta_training_candidates(primary: MetaTrainingConfig) -> Vec<MetaTrainingConfig> {
@@ -1243,23 +1411,28 @@ fn meta_calibration_report(
     snapshot: &OnlineMetaCalibratorSnapshot,
     selected_training_config: Option<MetaTrainingConfig>,
     candidate_evaluations: Vec<MetaCandidateEvaluation>,
+    raw_train_samples: usize,
     validation_samples: usize,
     validation: Option<MetaEvaluationSummary>,
+    raw_validation_samples: usize,
     selected: bool,
     rejected_reason: Option<String>,
 ) -> MetaCalibrationReport {
     MetaCalibrationReport {
         train_markets,
+        raw_train_samples,
         train_samples: training_samples.len(),
         train_updates: stats.updates,
         train_log_loss: Some(stats.log_loss),
         selected_training_config,
         candidate_evaluations,
+        raw_validation_samples,
         validation_samples,
         validation,
         selected,
         rejected_reason,
         oos_samples: 0,
+        oos_evaluation_samples: 0,
         oos: None,
         beta_enabled: snapshot.beta_enabled(),
         beta_coefficients: snapshot.beta_coefficients(),
@@ -2188,7 +2361,13 @@ async fn run_portfolio(
     if let Some(report) = meta_report.as_mut() {
         report.oos_samples = oos_meta_samples.len();
         if let Some(snapshot) = meta_calibrator_snapshot.as_ref() {
-            report.oos = Some(evaluate_meta_calibration(snapshot, &oos_meta_samples));
+            let evaluation_samples = market_balanced_meta_samples(
+                &oos_meta_samples,
+                cfg.meta_max_oos_evaluation_samples,
+                cfg.meta_max_samples_per_market,
+            );
+            report.oos_evaluation_samples = evaluation_samples.len();
+            report.oos = Some(evaluate_meta_calibration(snapshot, &evaluation_samples));
         }
         summary.meta_calibration = meta_report;
     }
@@ -2208,7 +2387,13 @@ fn write_portfolio_checkpoint(
         let mut report = report.clone();
         report.oos_samples = oos_meta_samples.len();
         if let Some(snapshot) = meta_calibrator_snapshot {
-            report.oos = Some(evaluate_meta_calibration(snapshot, oos_meta_samples));
+            let evaluation_samples = market_balanced_meta_samples(
+                oos_meta_samples,
+                cfg.meta_max_oos_evaluation_samples,
+                cfg.meta_max_samples_per_market,
+            );
+            report.oos_evaluation_samples = evaluation_samples.len();
+            report.oos = Some(evaluate_meta_calibration(snapshot, &evaluation_samples));
         }
         summary.meta_calibration = Some(report);
     }
@@ -2544,6 +2729,10 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         meta_learning_rate: cfg.meta_training_config.learning_rate,
         meta_l2: cfg.meta_training_config.l2,
         meta_weight_clip: cfg.meta_training_config.weight_clip,
+        meta_max_fit_samples: cfg.meta_max_fit_samples,
+        meta_max_validation_samples: cfg.meta_max_validation_samples,
+        meta_max_samples_per_market: cfg.meta_max_samples_per_market,
+        meta_max_oos_evaluation_samples: cfg.meta_max_oos_evaluation_samples,
         enable_meta_calibration: cfg.enable_meta_calibration,
     }
 }
@@ -2859,6 +3048,53 @@ mod tests {
         assert_eq!(compounded_clip(0.16, 0.02), 0.0032);
         assert_eq!(compounded_clip(0.0, 0.02), 0.0);
         assert_eq!(compounded_clip(1000.0, 0.02), 20.0);
+    }
+
+    #[test]
+    fn market_balanced_meta_samples_caps_each_market_and_total() {
+        let mut samples = Vec::new();
+        for market_idx in 0..5 {
+            for sample_idx in 0..10 {
+                let mut features = pm_model::MetaFeatures::default();
+                features.values[0] = sample_idx as f32;
+                samples.push(MetaTrainingSample {
+                    features,
+                    market_idx,
+                    base_side_probability: 0.5,
+                    side_observed: market_idx % 2 == 0,
+                });
+            }
+        }
+
+        let selected = market_balanced_meta_samples(&samples, 12, 4);
+        assert_eq!(selected.len(), 10);
+        for market_idx in 0..5 {
+            let count = selected
+                .iter()
+                .filter(|sample| sample.market_idx == market_idx)
+                .count();
+            assert_eq!(count, 2);
+        }
+    }
+
+    #[test]
+    fn split_meta_samples_by_market_uses_chronological_markets() {
+        let samples: Vec<MetaTrainingSample> = (0..4)
+            .flat_map(|market_idx| {
+                (0..3).map(move |_| MetaTrainingSample {
+                    features: pm_model::MetaFeatures::default(),
+                    market_idx,
+                    base_side_probability: 0.5,
+                    side_observed: market_idx % 2 == 0,
+                })
+            })
+            .collect();
+
+        let (fit, validation) = split_meta_samples_by_market(&samples, 0.5);
+        assert_eq!(fit.len(), 6);
+        assert_eq!(validation.len(), 6);
+        assert!(fit.iter().all(|sample| sample.market_idx <= 1));
+        assert!(validation.iter().all(|sample| sample.market_idx >= 2));
     }
 
     #[test]
