@@ -286,6 +286,15 @@ enum Cmd {
         /// Example: 0.25 stops new sizing at 25% below peak.
         #[arg(long, default_value = "1.0")]
         clip_drawdown_hard_pct: f64,
+        /// Bonereaper v2 minimum composite direction for early/mid/late lanes.
+        #[arg(long, default_value = "0.10")]
+        br2_min_composite_direction: f32,
+        /// Bonereaper v2 early directional clip multiplier.
+        #[arg(long, default_value = "0.00")]
+        br2_early_clip_frac: f32,
+        /// Bonereaper v2 mid-ladder clip multiplier.
+        #[arg(long, default_value = "0.00")]
+        br2_mid_clip_frac: f32,
         /// Bonereaper v2 late confirmation clip multiplier.
         #[arg(long, default_value = "1.0")]
         br2_late_clip_frac: f32,
@@ -307,6 +316,9 @@ enum Cmd {
         /// Bonereaper v2 maximum high-skew load clips.
         #[arg(long, default_value = "5")]
         br2_high_skew_max_clips: usize,
+        /// Bonereaper v2 seconds into market before late-favourite loads begin.
+        #[arg(long, default_value = "180.0")]
+        br2_late_favourite_start_secs: f32,
         /// Bonereaper v2 late-favourite absolute skew threshold from 0.5.
         #[arg(long, default_value = "0.22")]
         br2_late_favourite_threshold: f32,
@@ -708,6 +720,9 @@ async fn main() -> Result<()> {
             clip_fraction_of_equity,
             clip_drawdown_soft_pct,
             clip_drawdown_hard_pct,
+            br2_min_composite_direction,
+            br2_early_clip_frac,
+            br2_mid_clip_frac,
             br2_late_clip_frac,
             br2_late_max_fires,
             br2_late_confirm_min_model_confidence,
@@ -715,6 +730,7 @@ async fn main() -> Result<()> {
             br2_late_confirm_min_model_side_p,
             br2_high_skew_clip_frac,
             br2_high_skew_max_clips,
+            br2_late_favourite_start_secs,
             br2_late_favourite_threshold,
             br2_late_favourite_clip_frac,
             br2_late_favourite_max_clips,
@@ -761,6 +777,9 @@ async fn main() -> Result<()> {
                 clip_fraction_of_equity,
                 clip_drawdown_soft_pct,
                 clip_drawdown_hard_pct,
+                br2_min_composite_direction,
+                br2_early_clip_frac,
+                br2_mid_clip_frac,
                 br2_late_clip_frac,
                 br2_late_max_fires,
                 br2_late_confirm_min_model_confidence,
@@ -768,6 +787,7 @@ async fn main() -> Result<()> {
                 br2_late_confirm_min_model_side_p,
                 br2_high_skew_clip_frac,
                 br2_high_skew_max_clips,
+                br2_late_favourite_start_secs,
                 br2_late_favourite_threshold,
                 br2_late_favourite_clip_frac,
                 br2_late_favourite_max_clips,
@@ -1247,6 +1267,9 @@ async fn walk_forward(
     clip_fraction_of_equity: Option<f64>,
     clip_drawdown_soft_pct: f64,
     clip_drawdown_hard_pct: f64,
+    br2_min_composite_direction: f32,
+    br2_early_clip_frac: f32,
+    br2_mid_clip_frac: f32,
     br2_late_clip_frac: f32,
     br2_late_max_fires: usize,
     br2_late_confirm_min_model_confidence: f32,
@@ -1254,6 +1277,7 @@ async fn walk_forward(
     br2_late_confirm_min_model_side_p: f32,
     br2_high_skew_clip_frac: f32,
     br2_high_skew_max_clips: usize,
+    br2_late_favourite_start_secs: f32,
     br2_late_favourite_threshold: f32,
     br2_late_favourite_clip_frac: f32,
     br2_late_favourite_max_clips: usize,
@@ -1334,6 +1358,9 @@ async fn walk_forward(
         clip_fraction_of_equity,
         clip_drawdown_soft_pct,
         clip_drawdown_hard_pct,
+        br2_min_composite_direction,
+        br2_early_clip_frac,
+        br2_mid_clip_frac,
         br2_late_clip_frac,
         br2_late_max_fires,
         br2_late_confirm_min_model_confidence,
@@ -1341,6 +1368,7 @@ async fn walk_forward(
         br2_late_confirm_min_model_side_p,
         br2_high_skew_clip_frac,
         br2_high_skew_max_clips,
+        br2_late_favourite_start_secs,
         br2_late_favourite_threshold,
         br2_late_favourite_clip_frac,
         br2_late_favourite_max_clips,
