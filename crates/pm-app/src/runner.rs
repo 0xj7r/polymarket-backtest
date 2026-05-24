@@ -174,6 +174,9 @@ pub struct RunnerConfig {
     /// Frozen meta-calibrator snapshot loaded into a local canonical model
     /// state. Intended for walk-forward test folds.
     pub meta_calibrator_snapshot: Option<OnlineMetaCalibratorSnapshot>,
+    /// Enable the online meta-calibrator adjustment in the canonical model.
+    /// Disable this for strategy-only A/B runs against the hand-crafted score.
+    pub enable_meta_calibration: bool,
     /// Log every Nth decision event to avoid enormous files.
     pub decision_log_every_n: usize,
     /// Gate per-tick orders by model-derived entry constraints.
@@ -203,6 +206,7 @@ impl Default for RunnerConfig {
             decision_log_parquet: None,
             shared_model_state: None,
             meta_calibrator_snapshot: None,
+            enable_meta_calibration: true,
             decision_log_every_n: 1,
             enforce_model_gate: false,
             model_gate_min_confidence: 0.68,
@@ -243,7 +247,10 @@ pub fn run_backtest<S: Strategy>(
     if let Some(snapshot) = cfg.meta_calibrator_snapshot.clone() {
         model_state.load_meta_calibrator_snapshot(snapshot);
     }
-    let model_cfg = ModelConfig::default();
+    let model_cfg = ModelConfig {
+        enable_meta_calibration: cfg.enable_meta_calibration,
+        ..ModelConfig::default()
+    };
     let market_open_ts_ns = events.first().map_or(0, |e| e.ts_ns).max(0);
 
     let mut portfolio = PortfolioState::new(cfg.starting_cash_usdc, cfg.portfolio_limits.clone());
@@ -623,6 +630,7 @@ pub fn run_backtest<S: Strategy>(
         .map(
             |(features, base_side_probability, predicted_yes)| MetaTrainingSample {
                 features,
+                market_idx: 0,
                 base_side_probability,
                 side_observed: if predicted_yes {
                     yes_resolved

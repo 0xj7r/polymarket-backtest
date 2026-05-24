@@ -385,6 +385,10 @@ enum Cmd {
         /// Write the trained meta-calibrator snapshot to this path.
         #[arg(long)]
         meta_calibrator_snapshot_out: Option<PathBuf>,
+        /// Disable the ML/meta-calibrator probability adjustment while keeping
+        /// the hand-crafted model and strategy gates active.
+        #[arg(long, default_value_t = false)]
+        disable_meta_calibration: bool,
         /// In portfolio mode, write partial outputs every N evaluated markets.
         /// Set to zero to disable.
         #[arg(long, default_value = "0")]
@@ -731,6 +735,7 @@ async fn main() -> Result<()> {
             meta_training_samples_cache,
             meta_calibrator_snapshot_in,
             meta_calibrator_snapshot_out,
+            disable_meta_calibration,
             portfolio_checkpoint_every_markets,
             local_cache_dir,
             out_markets,
@@ -782,6 +787,7 @@ async fn main() -> Result<()> {
                 meta_training_samples_cache,
                 meta_calibrator_snapshot_in,
                 meta_calibrator_snapshot_out,
+                disable_meta_calibration,
                 portfolio_checkpoint_every_markets,
                 local_cache_dir,
                 out_markets,
@@ -1267,6 +1273,7 @@ async fn walk_forward(
     meta_training_samples_cache: Option<PathBuf>,
     meta_calibrator_snapshot_in: Option<PathBuf>,
     meta_calibrator_snapshot_out: Option<PathBuf>,
+    disable_meta_calibration: bool,
     portfolio_checkpoint_every_markets: usize,
     local_cache_dir: Option<PathBuf>,
     out_markets: Option<PathBuf>,
@@ -1357,6 +1364,7 @@ async fn walk_forward(
         meta_training_samples_cache,
         meta_calibrator_snapshot_in,
         meta_calibrator_snapshot_out,
+        enable_meta_calibration: !disable_meta_calibration,
         portfolio_checkpoint_every_markets,
         checkpoint_markets_out: out_markets.clone(),
         checkpoint_summary_out: out_summary.clone(),
@@ -1651,6 +1659,7 @@ async fn run_market_backtest(
         decision_log_parquet: None,
         shared_model_state: None,
         meta_calibrator_snapshot: None,
+        enable_meta_calibration: true,
         decision_log_every_n,
         enforce_model_gate: true,
         model_gate_min_confidence: 0.68,

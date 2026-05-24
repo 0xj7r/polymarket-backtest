@@ -165,6 +165,8 @@ pub struct WalkForwardConfig {
     pub meta_calibrator_snapshot_in: Option<PathBuf>,
     /// Optional path to write the trained meta-calibrator snapshot.
     pub meta_calibrator_snapshot_out: Option<PathBuf>,
+    /// Disable to run strategy logic against the hand-crafted model only.
+    pub enable_meta_calibration: bool,
     /// In portfolio mode, write partial outputs every N evaluated markets.
     /// Set to zero to disable checkpointing.
     pub portfolio_checkpoint_every_markets: usize,
@@ -220,6 +222,7 @@ impl Default for WalkForwardConfig {
             meta_training_samples_cache: None,
             meta_calibrator_snapshot_in: None,
             meta_calibrator_snapshot_out: None,
+            enable_meta_calibration: true,
             portfolio_checkpoint_every_markets: 0,
             checkpoint_markets_out: None,
             checkpoint_summary_out: None,
@@ -315,6 +318,7 @@ pub struct SummaryRunConfig {
     pub meta_learning_rate: f32,
     pub meta_l2: f32,
     pub meta_weight_clip: f32,
+    pub enable_meta_calibration: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -367,16 +371,43 @@ pub struct WalkForwardFoldSummary {
 #[derive(Debug, Clone, Serialize)]
 pub struct MetaEvaluationSummary {
     pub samples: usize,
+    pub market_count: usize,
+    pub positive_rate: f32,
+    pub market_equal_weighted_positive_rate: f32,
+    pub base_distribution: PredictionDistribution,
+    pub calibrated_distribution: PredictionDistribution,
+    pub prior_log_loss: f32,
     pub base_log_loss: f32,
     pub calibrated_log_loss: f32,
     pub log_loss_delta: f32,
+    pub prior_log_loss_delta: f32,
+    pub prior_brier: f32,
     pub base_brier: f32,
     pub calibrated_brier: f32,
     pub brier_delta: f32,
+    pub prior_brier_delta: f32,
+    pub market_equal_weighted_prior_log_loss: f32,
+    pub market_equal_weighted_base_log_loss: f32,
+    pub market_equal_weighted_calibrated_log_loss: f32,
+    pub market_equal_weighted_prior_brier: f32,
+    pub market_equal_weighted_base_brier: f32,
+    pub market_equal_weighted_calibrated_brier: f32,
     pub base_accuracy: f32,
     pub calibrated_accuracy: f32,
     pub calibrated_ece: f32,
     pub calibration_bins: Vec<CalibrationBin>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub struct PredictionDistribution {
+    pub mean: f32,
+    pub p10: f32,
+    pub p50: f32,
+    pub p90: f32,
+    pub share_ge_55: f32,
+    pub share_ge_60: f32,
+    pub share_ge_65: f32,
+    pub share_ge_70: f32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -539,9 +570,13 @@ pub async fn run_walkforward(
     }
 
     if cfg.portfolio_mode {
-        let preloaded_snapshot = match cfg.meta_calibrator_snapshot_in.as_deref() {
-            Some(path) => Some(read_meta_snapshot(path)?),
-            None => None,
+        let preloaded_snapshot = if cfg.enable_meta_calibration {
+            match cfg.meta_calibrator_snapshot_in.as_deref() {
+                Some(path) => Some(read_meta_snapshot(path)?),
+                None => None,
+            }
+        } else {
+            None
         };
         if cfg.min_train_markets > 0 {
             if cfg.min_train_markets >= markets.len() {
@@ -551,7 +586,13 @@ pub async fn run_walkforward(
                 ));
             }
             let mut meta_report = None;
-            let meta_snapshot = if let Some(snapshot) = preloaded_snapshot.clone() {
+            let meta_snapshot = if !cfg.enable_meta_calibration {
+                tracing::info!(
+                    min_train_markets = cfg.min_train_markets,
+                    "meta-calibration disabled; preserving train/eval split without training snapshot"
+                );
+                None
+            } else if let Some(snapshot) = preloaded_snapshot.clone() {
                 meta_report = Some(MetaCalibrationReport {
                     train_markets: 0,
                     train_samples: 0,
@@ -641,7 +682,8 @@ pub async fn run_walkforward(
     for (fold_idx, (train_end_exclusive, test_start, test_end)) in fold_plan.iter().enumerate() {
         let mut meta_train_samples = 0usize;
         let mut meta_train_log_loss = None;
-        let meta_snapshot = if use_folds && *train_end_exclusive > 0 {
+        let meta_snapshot = if cfg.enable_meta_calibration && use_folds && *train_end_exclusive > 0
+        {
             if *train_end_exclusive > training_loaded_until {
                 let new_samples = collect_training_samples(
                     store,
@@ -673,7 +715,7 @@ pub async fn run_walkforward(
         } else {
             None
         };
-        let meta_oos = if use_folds {
+        let meta_oos = if cfg.enable_meta_calibration && use_folds {
             if let Some(snapshot) = meta_snapshot.as_ref() {
                 let test_samples = collect_training_samples(
                     store,
@@ -803,14 +845,23 @@ async fn load_or_collect_training_samples(
         if path.exists() {
             let file = File::open(path)
                 .with_context(|| format!("open meta training samples cache {}", path.display()))?;
-            let samples: Vec<MetaTrainingSample> = serde_json::from_reader(BufReader::new(file))
-                .with_context(|| format!("read meta training samples cache {}", path.display()))?;
-            tracing::info!(
-                samples = samples.len(),
-                path = %path.display(),
-                "loaded meta training samples cache"
-            );
-            return Ok(samples);
+            match serde_json::from_reader::<_, Vec<MetaTrainingSample>>(BufReader::new(file)) {
+                Ok(samples) => {
+                    tracing::info!(
+                        samples = samples.len(),
+                        path = %path.display(),
+                        "loaded meta training samples cache"
+                    );
+                    return Ok(samples);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        %error,
+                        "ignoring incompatible meta training samples cache"
+                    );
+                }
+            }
         }
 
         let samples = collect_training_samples(store, markets, cfg, spot_map).await?;
@@ -931,7 +982,17 @@ fn train_validated_meta_calibrator(
         let snapshot = state.meta_calibrator_snapshot();
         let validation = evaluate_meta_calibration(&snapshot, validation_samples);
         let validation_passed = validation.calibrated_log_loss < validation.base_log_loss
-            && validation.calibrated_brier <= validation.base_brier;
+            && validation.calibrated_log_loss < validation.prior_log_loss
+            && validation.calibrated_brier <= validation.base_brier
+            && validation.calibrated_brier <= validation.prior_brier
+            && validation.market_equal_weighted_calibrated_log_loss
+                < validation.market_equal_weighted_base_log_loss
+            && validation.market_equal_weighted_calibrated_log_loss
+                < validation.market_equal_weighted_prior_log_loss
+            && validation.market_equal_weighted_calibrated_brier
+                <= validation.market_equal_weighted_base_brier
+            && validation.market_equal_weighted_calibrated_brier
+                <= validation.market_equal_weighted_prior_brier;
         if validation_passed {
             let replace = best
                 .as_ref()
@@ -986,8 +1047,25 @@ fn train_validated_meta_calibrator(
         updates = stats.updates,
         train_markets,
         train_log_loss = stats.log_loss,
+        validation_market_count = validation.market_count,
+        validation_positive_rate = validation.positive_rate,
+        validation_market_equal_weighted_positive_rate =
+            validation.market_equal_weighted_positive_rate,
+        validation_prior_log_loss = validation.prior_log_loss,
         validation_base_log_loss = validation.base_log_loss,
         validation_calibrated_log_loss = validation.calibrated_log_loss,
+        validation_market_equal_weighted_prior_log_loss =
+            validation.market_equal_weighted_prior_log_loss,
+        validation_market_equal_weighted_base_log_loss =
+            validation.market_equal_weighted_base_log_loss,
+        validation_market_equal_weighted_calibrated_log_loss =
+            validation.market_equal_weighted_calibrated_log_loss,
+        validation_calibrated_mean = validation.calibrated_distribution.mean,
+        validation_calibrated_p50 = validation.calibrated_distribution.p50,
+        validation_calibrated_p90 = validation.calibrated_distribution.p90,
+        validation_calibrated_share_ge_60 = validation.calibrated_distribution.share_ge_60,
+        validation_calibrated_share_ge_65 = validation.calibrated_distribution.share_ge_65,
+        validation_prior_brier = validation.prior_brier,
         validation_base_brier = validation.base_brier,
         validation_calibrated_brier = validation.calibrated_brier,
         selected = validation_passed,
@@ -997,7 +1075,10 @@ fn train_validated_meta_calibrator(
     let rejected_reason = if validation_passed {
         None
     } else {
-        Some("validation log loss or brier did not improve over base model".to_string())
+        Some(
+            "validation log loss or brier did not improve over sample and market-equal base/prior baselines"
+                .to_string(),
+        )
     };
     let report = meta_calibration_report(
         train_markets,
@@ -1098,12 +1179,27 @@ fn evaluate_meta_calibration(
     if samples.is_empty() {
         return MetaEvaluationSummary {
             samples: 0,
+            market_count: 0,
+            positive_rate: 0.0,
+            market_equal_weighted_positive_rate: 0.0,
+            base_distribution: PredictionDistribution::default(),
+            calibrated_distribution: PredictionDistribution::default(),
+            prior_log_loss: 0.0,
             base_log_loss: 0.0,
             calibrated_log_loss: 0.0,
             log_loss_delta: 0.0,
+            prior_log_loss_delta: 0.0,
+            prior_brier: 0.0,
             base_brier: 0.0,
             calibrated_brier: 0.0,
             brier_delta: 0.0,
+            prior_brier_delta: 0.0,
+            market_equal_weighted_prior_log_loss: 0.0,
+            market_equal_weighted_base_log_loss: 0.0,
+            market_equal_weighted_calibrated_log_loss: 0.0,
+            market_equal_weighted_prior_brier: 0.0,
+            market_equal_weighted_base_brier: 0.0,
+            market_equal_weighted_calibrated_brier: 0.0,
             base_accuracy: 0.0,
             calibrated_accuracy: 0.0,
             calibrated_ece: 0.0,
@@ -1117,11 +1213,17 @@ fn evaluate_meta_calibration(
     let mut calibrated_brier = 0.0f32;
     let mut base_correct = 0usize;
     let mut calibrated_correct = 0usize;
+    let mut observed_count = 0usize;
+    let mut base_predictions = Vec::with_capacity(samples.len());
+    let mut calibrated_predictions = Vec::with_capacity(samples.len());
     let mut bins = [CalibrationBinAccumulator::default(); 10];
+    let mut market_accumulators: std::collections::BTreeMap<u32, MarketCalibrationAccumulator> =
+        std::collections::BTreeMap::new();
 
     for sample in samples {
         let observed = sample.side_observed;
         let target = if observed { 1.0 } else { 0.0 };
+        observed_count += usize::from(observed);
         let base = sample.base_side_probability.clamp(1.0e-6, 1.0 - 1.0e-6);
         let calibrated = calibrator
             .predict_side_win_probability(base, &sample.features)
@@ -1131,6 +1233,15 @@ fn evaluate_meta_calibration(
         calibrated_log_loss += binary_log_loss(calibrated, observed);
         base_brier += (base - target) * (base - target);
         calibrated_brier += (calibrated - target) * (calibrated - target);
+        let market_acc = market_accumulators.entry(sample.market_idx).or_default();
+        market_acc.samples += 1;
+        market_acc.observed += usize::from(observed);
+        market_acc.base_log_loss += binary_log_loss(base, observed);
+        market_acc.calibrated_log_loss += binary_log_loss(calibrated, observed);
+        market_acc.base_brier += (base - target) * (base - target);
+        market_acc.calibrated_brier += (calibrated - target) * (calibrated - target);
+        base_predictions.push(base);
+        calibrated_predictions.push(calibrated);
         base_correct += usize::from((base >= 0.5) == observed);
         calibrated_correct += usize::from((calibrated >= 0.5) == observed);
         let bin = ((calibrated * bins.len() as f32).floor() as usize).min(bins.len() - 1);
@@ -1140,10 +1251,50 @@ fn evaluate_meta_calibration(
     }
 
     let n = samples.len() as f32;
+    let positive_rate = observed_count as f32 / n;
+    let prior = positive_rate.clamp(1.0e-6, 1.0 - 1.0e-6);
+    let prior_log_loss = -(positive_rate * prior.ln() + (1.0 - positive_rate) * (1.0 - prior).ln());
+    let prior_brier = samples
+        .iter()
+        .map(|sample| {
+            let target = if sample.side_observed { 1.0 } else { 0.0 };
+            (prior - target) * (prior - target)
+        })
+        .sum::<f32>()
+        / n;
     let base_log_loss = base_log_loss / n;
     let calibrated_log_loss = calibrated_log_loss / n;
     let base_brier = base_brier / n;
     let calibrated_brier = calibrated_brier / n;
+    let market_count = market_accumulators.len();
+    let mut market_positive_rate = 0.0f32;
+    let mut market_prior_log_loss = 0.0f32;
+    let mut market_base_log_loss = 0.0f32;
+    let mut market_calibrated_log_loss = 0.0f32;
+    let mut market_prior_brier = 0.0f32;
+    let mut market_base_brier = 0.0f32;
+    let mut market_calibrated_brier = 0.0f32;
+    for market in market_accumulators.values() {
+        let market_n = market.samples.max(1) as f32;
+        let observed_rate = market.observed as f32 / market_n;
+        market_positive_rate += observed_rate;
+        market_prior_log_loss +=
+            -(observed_rate * prior.ln() + (1.0 - observed_rate) * (1.0 - prior).ln());
+        market_base_log_loss += market.base_log_loss / market_n;
+        market_calibrated_log_loss += market.calibrated_log_loss / market_n;
+        market_prior_brier +=
+            observed_rate * (1.0 - prior) * (1.0 - prior) + (1.0 - observed_rate) * prior * prior;
+        market_base_brier += market.base_brier / market_n;
+        market_calibrated_brier += market.calibrated_brier / market_n;
+    }
+    let market_denom = market_count.max(1) as f32;
+    let market_positive_rate = market_positive_rate / market_denom;
+    let market_prior_log_loss = market_prior_log_loss / market_denom;
+    let market_base_log_loss = market_base_log_loss / market_denom;
+    let market_calibrated_log_loss = market_calibrated_log_loss / market_denom;
+    let market_prior_brier = market_prior_brier / market_denom;
+    let market_base_brier = market_base_brier / market_denom;
+    let market_calibrated_brier = market_calibrated_brier / market_denom;
     let mut calibrated_ece = 0.0f32;
     let calibration_bins: Vec<CalibrationBin> = bins
         .iter()
@@ -1167,16 +1318,58 @@ fn evaluate_meta_calibration(
         .collect();
     MetaEvaluationSummary {
         samples: samples.len(),
+        market_count,
+        positive_rate,
+        market_equal_weighted_positive_rate: market_positive_rate,
+        base_distribution: prediction_distribution(&mut base_predictions),
+        calibrated_distribution: prediction_distribution(&mut calibrated_predictions),
+        prior_log_loss,
         base_log_loss,
         calibrated_log_loss,
         log_loss_delta: calibrated_log_loss - base_log_loss,
+        prior_log_loss_delta: calibrated_log_loss - prior_log_loss,
+        prior_brier,
         base_brier,
         calibrated_brier,
         brier_delta: calibrated_brier - base_brier,
+        prior_brier_delta: calibrated_brier - prior_brier,
+        market_equal_weighted_prior_log_loss: market_prior_log_loss,
+        market_equal_weighted_base_log_loss: market_base_log_loss,
+        market_equal_weighted_calibrated_log_loss: market_calibrated_log_loss,
+        market_equal_weighted_prior_brier: market_prior_brier,
+        market_equal_weighted_base_brier: market_base_brier,
+        market_equal_weighted_calibrated_brier: market_calibrated_brier,
         base_accuracy: base_correct as f32 / n,
         calibrated_accuracy: calibrated_correct as f32 / n,
         calibrated_ece,
         calibration_bins,
+    }
+}
+
+fn prediction_distribution(predictions: &mut [f32]) -> PredictionDistribution {
+    if predictions.is_empty() {
+        return PredictionDistribution::default();
+    }
+    predictions.sort_by(|a, b| a.total_cmp(b));
+    let n = predictions.len();
+    let mean = predictions.iter().sum::<f32>() / n as f32;
+    let percentile = |q: f32| -> f32 {
+        let idx = ((n - 1) as f32 * q).round() as usize;
+        predictions[idx.min(n - 1)]
+    };
+    let share_ge = |threshold: f32| -> f32 {
+        let count = predictions.iter().filter(|p| **p >= threshold).count();
+        count as f32 / n as f32
+    };
+    PredictionDistribution {
+        mean,
+        p10: percentile(0.10),
+        p50: percentile(0.50),
+        p90: percentile(0.90),
+        share_ge_55: share_ge(0.55),
+        share_ge_60: share_ge(0.60),
+        share_ge_65: share_ge(0.65),
+        share_ge_70: share_ge(0.70),
     }
 }
 
@@ -1185,6 +1378,16 @@ struct CalibrationBinAccumulator {
     samples: usize,
     sum_predicted: f32,
     observed: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct MarketCalibrationAccumulator {
+    samples: usize,
+    observed: usize,
+    base_log_loss: f32,
+    calibrated_log_loss: f32,
+    base_brier: f32,
+    calibrated_brier: f32,
 }
 
 fn binary_log_loss(p: f32, observed: bool) -> f32 {
@@ -1299,6 +1502,7 @@ async fn collect_training_samples_for_market(
         decision_log_parquet: None,
         shared_model_state: None,
         meta_calibrator_snapshot: None,
+        enable_meta_calibration: true,
         decision_log_every_n: 1_000_000,
         max_inventory_imbalance_shares: 1.5,
         taker_slippage_bps: 0.0,
@@ -1315,7 +1519,13 @@ async fn collect_training_samples_for_market(
         &mut strat,
         &runner_cfg,
     ) {
-        Ok(report) => report.model_training_samples,
+        Ok(report) => {
+            let mut samples = report.model_training_samples;
+            for sample in &mut samples {
+                sample.market_idx = idx as u32;
+            }
+            samples
+        }
         Err(e) => {
             tracing::warn!(market = %m.slug, error = %e, "training sample extraction failed");
             Vec::new()
@@ -1413,6 +1623,7 @@ async fn run_markets(
                 decision_log_parquet: None,
                 shared_model_state: None,
                 meta_calibrator_snapshot,
+                enable_meta_calibration: cfg_arc.enable_meta_calibration,
                 decision_log_every_n: 1_000_000,
                 // Hard inventory cap: never let |yes - no| exceed 1.5 shares
                 // per market (paired-MM safety net).
@@ -1438,7 +1649,10 @@ async fn run_markets(
                     None,
                     None,
                 ) {
-                    Ok(r) => {
+                    Ok(mut r) => {
+                        for sample in &mut r.model_training_samples {
+                            sample.market_idx = (idx + market_id_offset) as u32;
+                        }
                         per_strategy.insert(strat.name(), r);
                     }
                     Err(e) => {
@@ -1773,6 +1987,7 @@ async fn run_portfolio(
                 decision_log_parquet: None,
                 shared_model_state: None,
                 meta_calibrator_snapshot: meta_calibrator_snapshot.clone(),
+                enable_meta_calibration: cfg.enable_meta_calibration,
                 decision_log_every_n: 1_000_000,
                 max_inventory_imbalance_shares: 1.5,
                 taker_slippage_bps: 15.0,
@@ -1793,7 +2008,10 @@ async fn run_portfolio(
                 shared_skew_tables.get(strat.name()).cloned(),
                 shared_model_states.get(strat.name()).cloned(),
             ) {
-                Ok(r) => {
+                Ok(mut r) => {
+                    for sample in &mut r.model_training_samples {
+                        sample.market_idx = idx as u32;
+                    }
                     if !captured_meta_sample_for_market && !r.model_training_samples.is_empty() {
                         oos_meta_samples.extend(r.model_training_samples.iter().copied());
                         captured_meta_sample_for_market = true;
@@ -2212,6 +2430,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         meta_learning_rate: cfg.meta_training_config.learning_rate,
         meta_l2: cfg.meta_training_config.l2,
         meta_weight_clip: cfg.meta_training_config.weight_clip,
+        enable_meta_calibration: cfg.enable_meta_calibration,
     }
 }
 

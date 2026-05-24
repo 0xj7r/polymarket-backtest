@@ -6,14 +6,14 @@
 #![forbid(unsafe_code)]
 
 use pm_types::{ReplayEvent, SpotHistory};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 const NS_PER_SECOND: i64 = 1_000_000_000;
 const MOMENTUM_WINDOWS_SECONDS: [i64; 5] = [10, 30, 60, 120, 300];
 const MOMENTUM_WEIGHTS: [f32; 5] = [0.45, 0.25, 0.15, 0.10, 0.05];
 const SKEW_BINS: usize = 10;
 const HOUR_BINS: usize = 24;
-const META_FEATURES: usize = 32;
+const META_FEATURES: usize = 40;
 const META_CALIBRATOR_LR: f32 = 0.08;
 const META_CALIBRATOR_MIN_UPDATES: u32 = 12;
 const META_CALIBRATOR_WEIGHT_DECAY: f32 = 1.0e-3;
@@ -38,6 +38,14 @@ const ISOTONIC_SHRINKAGE: f32 = 500.0;
 pub const META_FEATURE_NAMES: [&str; META_FEATURES] = [
     "direction_score_side",
     "momentum_side",
+    "momentum_10s_side",
+    "momentum_30s_side",
+    "momentum_60s_side",
+    "momentum_120s_side",
+    "momentum_300s_side",
+    "momentum_10_60_accel_side",
+    "momentum_30_300_accel_side",
+    "spot_momentum_side",
     "ofi_side",
     "microprice_dev_side",
     "microprice_spot_alignment_side",
@@ -326,6 +334,14 @@ impl TimedRing {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DirectionScore {
     pub momentum: f32,
+    pub momentum_10s: f32,
+    pub momentum_30s: f32,
+    pub momentum_60s: f32,
+    pub momentum_120s: f32,
+    pub momentum_300s: f32,
+    pub momentum_10_60_accel: f32,
+    pub momentum_30_300_accel: f32,
+    pub spot_momentum: f32,
     pub ofi: f32,
     pub microprice_dev: f32,
     pub microprice_spot_alignment: f32,
@@ -515,9 +531,21 @@ impl TimeOfDayTable {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct MetaFeatures {
+    #[serde(
+        serialize_with = "serialize_f32_array",
+        deserialize_with = "deserialize_f32_array"
+    )]
     pub values: [f32; META_FEATURES],
+}
+
+impl Default for MetaFeatures {
+    fn default() -> Self {
+        Self {
+            values: [0.0; META_FEATURES],
+        }
+    }
 }
 
 impl MetaFeatures {
@@ -538,6 +566,22 @@ impl MetaFeatures {
         values[idx] = (direction_score * side).clamp(-1.0, 1.0);
         idx += 1;
         values[idx] = direction.momentum * side;
+        idx += 1;
+        values[idx] = direction.momentum_10s * side;
+        idx += 1;
+        values[idx] = direction.momentum_30s * side;
+        idx += 1;
+        values[idx] = direction.momentum_60s * side;
+        idx += 1;
+        values[idx] = direction.momentum_120s * side;
+        idx += 1;
+        values[idx] = direction.momentum_300s * side;
+        idx += 1;
+        values[idx] = direction.momentum_10_60_accel * side;
+        idx += 1;
+        values[idx] = direction.momentum_30_300_accel * side;
+        idx += 1;
+        values[idx] = direction.spot_momentum * side;
         idx += 1;
         values[idx] = direction.ofi * side;
         idx += 1;
@@ -609,6 +653,8 @@ impl MetaFeatures {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct MetaTrainingSample {
     pub features: MetaFeatures,
+    #[serde(default)]
+    pub market_idx: u32,
     /// Predicted-side probability before the meta-calibrator adjustment.
     pub base_side_probability: f32,
     /// True if the predicted side won at resolution.
@@ -662,6 +708,10 @@ pub struct OnlineMetaCalibrator {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OnlineMetaCalibratorSnapshot {
+    #[serde(
+        serialize_with = "serialize_f32_array",
+        deserialize_with = "deserialize_f32_array"
+    )]
     pub weights: [f32; META_FEATURES],
     pub bias: f32,
     #[serde(default)]
@@ -671,6 +721,26 @@ pub struct OnlineMetaCalibratorSnapshot {
     #[serde(default)]
     pub trees: TreeEnsembleSnapshot,
     pub updates: u32,
+}
+
+fn serialize_f32_array<S, const N: usize>(
+    values: &[f32; N],
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    values.as_slice().serialize(serializer)
+}
+
+fn deserialize_f32_array<'de, D, const N: usize>(deserializer: D) -> Result<[f32; N], D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let values = Vec::<f32>::deserialize(deserializer)?;
+    values.try_into().map_err(|values: Vec<f32>| {
+        serde::de::Error::custom(format!("expected {N} f32 values, got {}", values.len()))
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1184,7 +1254,8 @@ fn best_split(
     let parent_gain = split_score(parent.0, parent.1);
     let mut best = SplitCandidate::default();
     for feature in 0..META_FEATURES {
-        for threshold in candidate_thresholds(feature).iter().copied() {
+        let thresholds = candidate_thresholds(samples, indices, feature);
+        for threshold in thresholds {
             let left = gradient_sums(
                 samples,
                 indices,
@@ -1217,33 +1288,39 @@ fn best_split(
     (best.gain > 0.0).then_some(best)
 }
 
-fn candidate_thresholds(feature: usize) -> &'static [f32] {
-    if matches!(
-        META_FEATURE_NAMES[feature],
-        "stability"
-            | "sign_persistence"
-            | "markov_persistence"
-            | "early_market_penalty"
-            | "confidence_composite"
-            | "whipsaw"
-            | "liquidity"
-            | "path_risk"
-            | "imbalance_turn"
-            | "markov_reversal_risk"
-            | "skew_penalty"
-            | "risk_composite"
-            | "market_mid"
-            | "volatility_penalty"
-            | "time_of_day_penalty"
-            | "volatility_regime"
-            | "abs_direction_score"
-            | "mid_distance_from_half"
-            | "confidence_liquidity_interaction"
-    ) {
-        &[0.15, 0.30, 0.45, 0.60, 0.75, 0.90]
-    } else {
-        &[-0.75, -0.50, -0.25, 0.0, 0.25, 0.50, 0.75]
+fn candidate_thresholds(
+    samples: &[MetaTrainingSample],
+    indices: &[usize],
+    feature: usize,
+) -> Vec<f32> {
+    if indices.len() < 2 {
+        return Vec::new();
     }
+    let mut values = Vec::with_capacity(indices.len());
+    for idx in indices {
+        values.push(samples[*idx].features.values[feature]);
+    }
+    values.sort_by(|a, b| a.total_cmp(b));
+    values.dedup_by(|a, b| (*a - *b).abs() <= 1.0e-6);
+    if values.len() < 2 {
+        return Vec::new();
+    }
+
+    const QUANTILES: [f32; 11] = [
+        0.02, 0.05, 0.10, 0.20, 0.35, 0.50, 0.65, 0.80, 0.90, 0.95, 0.98,
+    ];
+    let mut thresholds = Vec::with_capacity(QUANTILES.len());
+    for q in QUANTILES {
+        let left_idx = ((values.len() - 2) as f32 * q).round() as usize;
+        let left_idx = left_idx.min(values.len() - 2);
+        let left = values[left_idx];
+        let right = values[left_idx + 1];
+        if (right - left).abs() > 1.0e-6 {
+            thresholds.push(0.5 * (left + right));
+        }
+    }
+    thresholds.dedup_by(|a, b| (*a - *b).abs() <= 1.0e-6);
+    thresholds
 }
 
 fn gradient_sums(
@@ -1682,7 +1759,7 @@ impl ModelState {
         book_dir.top3_delta_15s = delta_15s;
         let imbalance_boost = (0.3 * delta_5s + 0.2 * delta_15s).clamp(-1.0, 1.0);
 
-        let spot_score = spot_score(event.ts_ns, spot);
+        let spot_score = book_dir.spot_momentum;
         let direction_raw = (book_dir.composite + 0.12 * imbalance_boost).clamp(-1.0, 1.0);
         let direction_score =
             (cfg.book_weight * direction_raw + cfg.spot_weight * spot_score).clamp(-1.0, 1.0);
@@ -1821,8 +1898,10 @@ pub fn direction_score(
     spot: &SpotHistory,
     micro_dev_scale: f32,
 ) -> DirectionScore {
-    let momentum = weighted_mid_momentum(event, recent_mids);
+    let momentum_features = mid_momentum_features(event, recent_mids);
+    let momentum = momentum_features.weighted;
     let ofi_v = top_n_ofi(event, 3);
+    let spot_momentum = spot_score(event.ts_ns, spot);
 
     let mp = microprice(
         event.yes_bid,
@@ -1832,7 +1911,7 @@ pub fn direction_score(
     );
     let spread = (event.yes_ask - event.yes_bid).max(1e-6);
     let microprice_dev = (((mp - event.yes_mid) / spread) * micro_dev_scale).clamp(-1.0, 1.0);
-    let micro_divergence = (microprice_dev - spot_score(event.ts_ns, spot)).abs();
+    let micro_divergence = (microprice_dev - spot_momentum).abs();
     let microprice_spot_alignment =
         (1.0 - (micro_divergence * 1.3).clamp(0.0, 1.0)).clamp(0.0, 1.0);
     let composite = (0.42 * momentum
@@ -1843,6 +1922,16 @@ pub fn direction_score(
 
     DirectionScore {
         momentum,
+        momentum_10s: momentum_features.by_window[0],
+        momentum_30s: momentum_features.by_window[1],
+        momentum_60s: momentum_features.by_window[2],
+        momentum_120s: momentum_features.by_window[3],
+        momentum_300s: momentum_features.by_window[4],
+        momentum_10_60_accel: (momentum_features.by_window[0] - momentum_features.by_window[2])
+            .clamp(-1.0, 1.0),
+        momentum_30_300_accel: (momentum_features.by_window[1] - momentum_features.by_window[4])
+            .clamp(-1.0, 1.0),
+        spot_momentum,
         ofi: ofi_v,
         microprice_dev,
         microprice_spot_alignment,
@@ -1852,22 +1941,34 @@ pub fn direction_score(
     }
 }
 
-fn weighted_mid_momentum(event: &ReplayEvent, recent_mids: &TimedRing) -> f32 {
+#[derive(Debug, Clone, Copy)]
+struct MomentumFeatures {
+    by_window: [f32; 5],
+    weighted: f32,
+}
+
+fn mid_momentum_features(event: &ReplayEvent, recent_mids: &TimedRing) -> MomentumFeatures {
+    let mut by_window = [0.0f32; 5];
     let mut numerator = 0.0f32;
     let mut denom = 0.0f32;
-    for i in 0..MOMENTUM_WINDOWS_SECONDS.len() {
-        let secs = MOMENTUM_WINDOWS_SECONDS[i];
+    for (idx, secs) in MOMENTUM_WINDOWS_SECONDS.iter().enumerate() {
         let target = event.ts_ns.saturating_sub(secs * NS_PER_SECOND);
         if let Some((_, past_mid)) = recent_mids.value_at_or_before(target) {
             let raw = ((event.yes_mid - past_mid) * 25.0).clamp(-1.0, 1.0);
-            numerator += MOMENTUM_WEIGHTS[i] * raw;
-            denom += MOMENTUM_WEIGHTS[i];
+            by_window[idx] = raw;
+            numerator += MOMENTUM_WEIGHTS[idx] * raw;
+            denom += MOMENTUM_WEIGHTS[idx];
         }
     }
-    if denom <= 0.0 {
-        return 0.0;
+    let weighted = if denom <= 0.0 {
+        0.0
+    } else {
+        (numerator / denom).clamp(-1.0, 1.0)
+    };
+    MomentumFeatures {
+        by_window,
+        weighted,
     }
-    (numerator / denom).clamp(-1.0, 1.0)
 }
 
 pub fn confidence_score(
@@ -2470,45 +2571,29 @@ mod tests {
         let mut samples = Vec::new();
         for i in 0..80 {
             let side_observed = i % 2 == 0;
-            let signal = if side_observed { 0.85 } else { -0.85 };
-            let features = MetaFeatures {
-                values: [
-                    signal,
-                    signal,
-                    signal,
-                    signal,
-                    signal,
-                    signal,
-                    signal,
-                    signal,
-                    signal,
-                    0.9,
-                    0.9,
-                    0.8,
-                    0.0,
-                    0.85,
-                    0.0,
-                    0.8,
-                    0.1,
-                    0.0,
-                    0.1,
-                    0.0,
-                    0.1,
-                    0.5,
-                    0.1,
-                    0.0,
-                    0.0,
-                    0.2,
-                    signal,
-                    signal,
-                    signal,
-                    signal.abs(),
-                    0.0,
-                    0.72,
-                ],
-            };
+            let signal: f32 = if side_observed { 0.85 } else { -0.85 };
+            let mut values = [0.0; META_FEATURES];
+            values[..9].fill(signal);
+            values[9] = 0.9;
+            values[10] = 0.9;
+            values[11] = 0.8;
+            values[13] = 0.85;
+            values[15] = 0.8;
+            values[16] = 0.1;
+            values[18] = 0.1;
+            values[20] = 0.1;
+            values[21] = 0.5;
+            values[22] = 0.1;
+            values[25] = 0.2;
+            values[26] = signal;
+            values[27] = signal;
+            values[28] = signal;
+            values[29] = signal.abs();
+            values[31] = 0.72;
+            let features = MetaFeatures { values };
             samples.push(MetaTrainingSample {
                 features,
+                market_idx: i as u32,
                 base_side_probability: 0.55,
                 side_observed,
             });
@@ -2535,15 +2620,16 @@ mod tests {
 
     #[test]
     fn trained_meta_calibrator_snapshot_preserves_predictions() {
-        let features = MetaFeatures {
-            values: [
-                0.9, 0.8, 0.7, 0.5, 0.5, 0.2, 0.1, 0.7, 0.7, 0.9, 0.9, 0.8, 0.0, 0.85, 0.0, 0.8,
-                0.1, 0.0, 0.1, 0.0, 0.1, 0.5, 0.1, 0.0, 0.0, 0.2, 0.8, 0.8, 0.4, 0.9, 0.0, 0.72,
-            ],
-        };
+        let mut values = [0.0; META_FEATURES];
+        values[..32].copy_from_slice(&[
+            0.9, 0.8, 0.7, 0.5, 0.5, 0.2, 0.1, 0.7, 0.7, 0.9, 0.9, 0.8, 0.0, 0.85, 0.0, 0.8, 0.1,
+            0.0, 0.1, 0.0, 0.1, 0.5, 0.1, 0.0, 0.0, 0.2, 0.8, 0.8, 0.4, 0.9, 0.0, 0.72,
+        ]);
+        let features = MetaFeatures { values };
         let samples = vec![
             MetaTrainingSample {
                 features,
+                market_idx: 0,
                 base_side_probability: 0.56,
                 side_observed: true,
             };
@@ -2569,7 +2655,6 @@ mod tests {
             let mut values = [0.0; META_FEATURES];
             values[0] = x0;
             values[1] = x1;
-            values[2] = x0 * x1;
             values[9] = 0.8;
             values[10] = 0.8;
             values[13] = 0.8;
@@ -2577,6 +2662,7 @@ mod tests {
             values[21] = 0.55;
             samples.push(MetaTrainingSample {
                 features: MetaFeatures { values },
+                market_idx: i as u32,
                 base_side_probability: 0.56,
                 side_observed,
             });
@@ -2615,6 +2701,7 @@ mod tests {
                 features: MetaFeatures {
                     values: [0.0; META_FEATURES],
                 },
+                market_idx: i as u32,
                 base_side_probability: if high_bucket { 0.60 } else { 0.40 },
                 side_observed,
             });

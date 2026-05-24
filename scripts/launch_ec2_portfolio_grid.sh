@@ -64,10 +64,14 @@ META_EPOCHS="24"
 META_LEARNING_RATE="0.04"
 META_L2="0.001"
 META_WEIGHT_CLIP="1.50"
+DISABLE_META_CALIBRATION="0"
 CLIP_FRACTIONS="0.015,0.02,0.03"
 GROSS_CAPS="250,500,750"
 SPOT_SYMBOL="BTCUSDT"
 MAX_CONCURRENT_FETCHES="32"
+USE_LOCAL_CACHE="0"
+LOCAL_CACHE_DIR="/opt/pm/cache"
+PREP_CACHE_MAX_CONCURRENT="128"
 DISCOVERY_MAX_CONCURRENT="4"
 PORTFOLIO_CHECKPOINT_EVERY_MARKETS="250"
 SYNC_SOURCE="1"
@@ -109,10 +113,14 @@ while [ $# -gt 0 ]; do
         --meta-learning-rate) META_LEARNING_RATE="$2"; shift 2 ;;
         --meta-l2) META_L2="$2"; shift 2 ;;
         --meta-weight-clip) META_WEIGHT_CLIP="$2"; shift 2 ;;
+        --disable-meta-calibration) DISABLE_META_CALIBRATION="1"; shift ;;
         --clip-fractions) CLIP_FRACTIONS="$2"; shift 2 ;;
         --gross-caps) GROSS_CAPS="$2"; shift 2 ;;
         --spot-symbol) SPOT_SYMBOL="$2"; shift 2 ;;
         --max-concurrent-fetches) MAX_CONCURRENT_FETCHES="$2"; shift 2 ;;
+        --use-local-cache) USE_LOCAL_CACHE="1"; shift ;;
+        --local-cache-dir) LOCAL_CACHE_DIR="$2"; shift 2 ;;
+        --prep-cache-max-concurrent) PREP_CACHE_MAX_CONCURRENT="$2"; shift 2 ;;
         --discovery-max-concurrent) DISCOVERY_MAX_CONCURRENT="$2"; shift 2 ;;
         --portfolio-checkpoint-every-markets) PORTFOLIO_CHECKPOINT_EVERY_MARKETS="$2"; shift 2 ;;
         --instance-type) INSTANCE_TYPE="$2"; shift 2 ;;
@@ -196,6 +204,17 @@ if [ -n "${META_TRAINING_SAMPLES_CACHE_S3_URI}" ]; then
   aws s3 cp "${META_TRAINING_SAMPLES_CACHE_S3_URI}" /opt/pm/artifacts/meta-training-samples.json
 fi
 
+LOCAL_CACHE_ARGS=()
+if [ "${USE_LOCAL_CACHE}" = "1" ]; then
+  echo "[\$(date -u)] prewarming local Telonex cache at ${LOCAL_CACHE_DIR}"
+  PM_TELONEX_REGION="${REGION}" ./target/release/pm-app prep-cache \\
+    --markets /opt/pm/markets.jsonl \\
+    --cache-dir "${LOCAL_CACHE_DIR}" \\
+    --spot-symbol "${SPOT_SYMBOL}" \\
+    --max-concurrent "${PREP_CACHE_MAX_CONCURRENT}"
+  LOCAL_CACHE_ARGS=(--local-cache-dir "${LOCAL_CACHE_DIR}")
+fi
+
 IFS=',' read -r -a CLIPS <<< "${CLIP_FRACTIONS}"
 IFS=',' read -r -a GROSS_CAPS <<< "${GROSS_CAPS}"
 FIRST=1
@@ -208,7 +227,11 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
     echo "[\$(date -u)] running \${LABEL}"
 
     EXTRA_MODEL_ARGS=()
-    if [ -n "\${SNAPSHOT_IN}" ]; then
+    if [ "${DISABLE_META_CALIBRATION}" = "1" ]; then
+      EXTRA_MODEL_ARGS=(
+        --disable-meta-calibration
+      )
+    elif [ -n "\${SNAPSHOT_IN}" ]; then
       EXTRA_MODEL_ARGS=(
         --meta-calibrator-snapshot-in "\${SNAPSHOT_IN}"
       )
@@ -273,6 +296,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --meta-weight-clip "${META_WEIGHT_CLIP}" \\
       --max-concurrent-fetches "${MAX_CONCURRENT_FETCHES}" \\
       --portfolio-checkpoint-every-markets "${PORTFOLIO_CHECKPOINT_EVERY_MARKETS}" \\
+      "\${LOCAL_CACHE_ARGS[@]}" \\
       "\${EXTRA_MODEL_ARGS[@]}" \\
       --out-markets "\${OUT_DIR}/markets.jsonl" \\
       --out-summary "\${OUT_DIR}/summary.json" \\
@@ -292,8 +316,10 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
   done
 done
 
-aws s3 cp /opt/pm/artifacts/meta-training-samples.json "s3://${RESULTS_BUCKET}/results/${RUN_ID}/artifacts/meta-training-samples.json" || true
-aws s3 cp /opt/pm/artifacts/meta-calibrator-snapshot.json "s3://${RESULTS_BUCKET}/results/${RUN_ID}/artifacts/meta-calibrator-snapshot.json" || true
+if [ "${DISABLE_META_CALIBRATION}" != "1" ]; then
+  aws s3 cp /opt/pm/artifacts/meta-training-samples.json "s3://${RESULTS_BUCKET}/results/${RUN_ID}/artifacts/meta-training-samples.json" || true
+  aws s3 cp /opt/pm/artifacts/meta-calibrator-snapshot.json "s3://${RESULTS_BUCKET}/results/${RUN_ID}/artifacts/meta-calibrator-snapshot.json" || true
+fi
 aws s3 cp /var/log/pm-bootstrap.log "s3://${RESULTS_BUCKET}/results/${RUN_ID}/bootstrap.log"
 
 echo "[\$(date -u)] portfolio grid complete; shutting down"
