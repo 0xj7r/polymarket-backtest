@@ -56,6 +56,7 @@ BR2_LATE_FAVOURITE_MIN_MODEL_CONFIDENCE="0.68"
 BR2_LATE_FAVOURITE_MAX_MODEL_RISK="0.72"
 BR2_LATE_FAVOURITE_MIN_MODEL_SIDE_P="0.62"
 BR2_LATE_FAVOURITE_MIN_MODEL_EDGE="0.00"
+ENFORCE_MODEL_GATE="true"
 MODEL_GATE_MIN_CONFIDENCE="0.68"
 MODEL_GATE_MAX_RISK="0.72"
 MODEL_GATE_MIN_EDGE="0.00"
@@ -105,6 +106,7 @@ while [ $# -gt 0 ]; do
         --br2-late-favourite-max-model-risk) BR2_LATE_FAVOURITE_MAX_MODEL_RISK="$2"; shift 2 ;;
         --br2-late-favourite-min-model-side-p) BR2_LATE_FAVOURITE_MIN_MODEL_SIDE_P="$2"; shift 2 ;;
         --br2-late-favourite-min-model-edge) BR2_LATE_FAVOURITE_MIN_MODEL_EDGE="$2"; shift 2 ;;
+        --enforce-model-gate) ENFORCE_MODEL_GATE="$2"; shift 2 ;;
         --model-gate-min-confidence) MODEL_GATE_MIN_CONFIDENCE="$2"; shift 2 ;;
         --model-gate-max-risk) MODEL_GATE_MAX_RISK="$2"; shift 2 ;;
         --model-gate-min-edge) MODEL_GATE_MIN_EDGE="$2"; shift 2 ;;
@@ -286,6 +288,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-favourite-max-model-risk "${BR2_LATE_FAVOURITE_MAX_MODEL_RISK}" \\
       --br2-late-favourite-min-model-side-p "${BR2_LATE_FAVOURITE_MIN_MODEL_SIDE_P}" \\
       --br2-late-favourite-min-model-edge "${BR2_LATE_FAVOURITE_MIN_MODEL_EDGE}" \\
+      --enforce-model-gate "${ENFORCE_MODEL_GATE}" \\
       --model-gate-min-confidence "${MODEL_GATE_MIN_CONFIDENCE}" \\
       --model-gate-max-risk "${MODEL_GATE_MAX_RISK}" \\
       --model-gate-min-edge "${MODEL_GATE_MIN_EDGE}" \\
