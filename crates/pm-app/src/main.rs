@@ -340,6 +340,9 @@ enum Cmd {
         /// Bonereaper v2 late-favourite absolute skew threshold from 0.5.
         #[arg(long, default_value = "0.22")]
         br2_late_favourite_threshold: f32,
+        /// Bonereaper v2 minimum ask price for late-favourite loads.
+        #[arg(long, default_value = "0.70")]
+        br2_late_favourite_min_ask: f32,
         /// Bonereaper v2 late-favourite clip multiplier.
         #[arg(long, default_value = "1.00")]
         br2_late_favourite_clip_frac: f32,
@@ -364,6 +367,18 @@ enum Cmd {
         /// Bonereaper v2 maximum continuous whipsaw score for late-favourite loads.
         #[arg(long, default_value = "0.75")]
         br2_late_favourite_max_whipsaw_score: f32,
+        /// Bonereaper v2 convex-tail clip multiplier.
+        #[arg(long, default_value = "0.10")]
+        br2_tail_clip_frac: f32,
+        /// Bonereaper v2 maximum convex-tail clips.
+        #[arg(long, default_value = "3")]
+        br2_tail_max_clips: usize,
+        /// Bonereaper v2 maximum convex-tail ask price.
+        #[arg(long, default_value = "0.10")]
+        br2_tail_max_ask: f32,
+        /// Bonereaper v2 minimum absolute skew from 0.5 before tail laddering.
+        #[arg(long, default_value = "0.30")]
+        br2_tail_extreme_threshold: f32,
         /// Enable the runner-level model gate after strategy emission.
         #[arg(long, default_value_t = true)]
         enforce_model_gate: bool,
@@ -771,6 +786,7 @@ async fn main() -> Result<()> {
             br2_high_skew_max_whipsaw_score,
             br2_late_favourite_start_secs,
             br2_late_favourite_threshold,
+            br2_late_favourite_min_ask,
             br2_late_favourite_clip_frac,
             br2_late_favourite_max_clips,
             br2_late_favourite_sweep_depth,
@@ -779,6 +795,10 @@ async fn main() -> Result<()> {
             br2_late_favourite_min_model_side_p,
             br2_late_favourite_min_model_edge,
             br2_late_favourite_max_whipsaw_score,
+            br2_tail_clip_frac,
+            br2_tail_max_clips,
+            br2_tail_max_ask,
+            br2_tail_extreme_threshold,
             enforce_model_gate,
             disable_model_gate,
             model_gate_min_confidence,
@@ -839,6 +859,7 @@ async fn main() -> Result<()> {
                 br2_high_skew_max_whipsaw_score,
                 br2_late_favourite_start_secs,
                 br2_late_favourite_threshold,
+                br2_late_favourite_min_ask,
                 br2_late_favourite_clip_frac,
                 br2_late_favourite_max_clips,
                 br2_late_favourite_sweep_depth,
@@ -847,6 +868,10 @@ async fn main() -> Result<()> {
                 br2_late_favourite_min_model_side_p,
                 br2_late_favourite_min_model_edge,
                 br2_late_favourite_max_whipsaw_score,
+                br2_tail_clip_frac,
+                br2_tail_max_clips,
+                br2_tail_max_ask,
+                br2_tail_extreme_threshold,
                 enforce_model_gate && !disable_model_gate,
                 model_gate_min_confidence,
                 model_gate_max_risk,
@@ -1340,6 +1365,7 @@ async fn walk_forward(
     br2_high_skew_max_whipsaw_score: f32,
     br2_late_favourite_start_secs: f32,
     br2_late_favourite_threshold: f32,
+    br2_late_favourite_min_ask: f32,
     br2_late_favourite_clip_frac: f32,
     br2_late_favourite_max_clips: usize,
     br2_late_favourite_sweep_depth: usize,
@@ -1348,6 +1374,10 @@ async fn walk_forward(
     br2_late_favourite_min_model_side_p: f32,
     br2_late_favourite_min_model_edge: f32,
     br2_late_favourite_max_whipsaw_score: f32,
+    br2_tail_clip_frac: f32,
+    br2_tail_max_clips: usize,
+    br2_tail_max_ask: f32,
+    br2_tail_extreme_threshold: f32,
     enforce_model_gate: bool,
     model_gate_min_confidence: f32,
     model_gate_max_risk: f32,
@@ -1442,6 +1472,7 @@ async fn walk_forward(
         br2_high_skew_max_whipsaw_score,
         br2_late_favourite_start_secs,
         br2_late_favourite_threshold,
+        br2_late_favourite_min_ask,
         br2_late_favourite_clip_frac,
         br2_late_favourite_max_clips,
         br2_late_favourite_sweep_depth,
@@ -1450,6 +1481,10 @@ async fn walk_forward(
         br2_late_favourite_min_model_side_p,
         br2_late_favourite_min_model_edge,
         br2_late_favourite_max_whipsaw_score,
+        br2_tail_clip_frac,
+        br2_tail_max_clips,
+        br2_tail_max_ask,
+        br2_tail_extreme_threshold,
         enforce_model_gate,
         model_gate_min_confidence,
         model_gate_max_risk,

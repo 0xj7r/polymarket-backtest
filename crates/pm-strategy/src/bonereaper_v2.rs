@@ -207,6 +207,8 @@ pub struct BonereaperV2Config {
     pub tail_refresh_secs: f32,
     pub tail_min_ask: f32,
     pub tail_max_ask: f32,
+    pub tail_budget_favourite_spend_frac: f32,
+    pub tail_budget_favourite_upside_frac: f32,
 }
 
 impl Default for BonereaperV2Config {
@@ -275,13 +277,15 @@ impl Default for BonereaperV2Config {
             // keep the standalone convex-tail ladder, disable the automatic
             // hedge emitted alongside every late confirmation.
             paired_tail_clip_frac: 0.00,
-            tail_clip_frac: 0.30,
-            tail_extreme_threshold: 0.22, // same skew band as late favourite
+            tail_clip_frac: 0.10,
+            tail_extreme_threshold: 0.30,
             tail_min_skew_step: 0.02,
-            tail_max_clips: 4,
+            tail_max_clips: 3,
             tail_refresh_secs: 5.0,
             tail_min_ask: 0.01,
-            tail_max_ask: 0.15,
+            tail_max_ask: 0.10,
+            tail_budget_favourite_spend_frac: 0.05,
+            tail_budget_favourite_upside_frac: 0.25,
         }
     }
 }
@@ -307,6 +311,7 @@ pub struct BonereaperV2 {
     tail_clips: usize,
     last_tail_skew_mag: f32,
     last_tail_ns: i64,
+    tail_notional_emitted: f64,
     gate_stats: BonereaperV2GateStats,
 }
 
@@ -333,6 +338,7 @@ impl BonereaperV2 {
             tail_clips: 0,
             last_tail_skew_mag: 0.0,
             last_tail_ns: i64::MIN / 2,
+            tail_notional_emitted: 0.0,
             gate_stats: BonereaperV2GateStats::default(),
         }
     }
@@ -984,11 +990,14 @@ impl Strategy for BonereaperV2 {
                         self.late_favourite_notional_emitted / self.late_favourite_shares_emitted;
                     let favourite_win_upside =
                         self.late_favourite_shares_emitted * (1.0 - avg_favourite_px);
-                    let cap_by_fav_spend = self.late_favourite_notional_emitted * 0.10;
-                    let cap_by_win_upside = favourite_win_upside * 0.30;
+                    let cap_by_fav_spend = self.late_favourite_notional_emitted
+                        * self.cfg.tail_budget_favourite_spend_frac as f64;
+                    let cap_by_win_upside =
+                        favourite_win_upside * self.cfg.tail_budget_favourite_upside_frac as f64;
+                    let remaining_tail_budget =
+                        cap_by_fav_spend.min(cap_by_win_upside) - self.tail_notional_emitted;
                     let clip = (self.cfg.max_clip_usdc * self.cfg.tail_clip_frac as f64)
-                        .min(cap_by_fav_spend)
-                        .min(cap_by_win_upside);
+                        .min(remaining_tail_budget.max(0.0));
                     let shares = if clip > 0.0 {
                         shares_capped(clip, tail_px)
                     } else {
@@ -1003,6 +1012,7 @@ impl Strategy for BonereaperV2 {
                             tag: "br2_convex_tail",
                         });
                         self.tail_clips += 1;
+                        self.tail_notional_emitted += shares * tail_px;
                         self.last_tail_skew_mag = skew_mag;
                         self.last_tail_ns = event.ts_ns;
                     }
