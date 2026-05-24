@@ -1825,10 +1825,13 @@ name = "pm-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrow",
  "chrono",
  "clap",
  "futures",
  "object_store",
+ "parquet",
+ "pm-model",
  "pm-risk",
  "pm-strategy",
  "pm-telonex-loader",
@@ -1840,6 +1843,14 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "pm-model"
+version = "0.1.0"
+dependencies = [
+ "pm-types",
+ "serde",
 ]
 
 [[package]]
@@ -1857,6 +1868,7 @@ name = "pm-strategy"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "pm-model",
  "pm-risk",
  "pm-types",
  "serde",

@@ -6,14 +6,18 @@
 //!   * rayon for in-process matcher (the matcher itself is so fast that this
 //!     is largely irrelevant, but we keep the structure for when it matters).
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
+use pm_model::{
+    MetaFeatureWeight, MetaTrainingConfig, MetaTrainingSample, MetaTrainingStats, ModelState,
+    OnlineMetaCalibrator, OnlineMetaCalibratorSnapshot, SkewWinRateTable,
+};
 use pm_risk::PortfolioLimits;
 use pm_strategy::{
     BonereaperLite, BonereaperV2, BuyYesAtOpen, DeltaNeutralMm, LateBigBet, LateConfirmation,
-    LateConvexTail, PairedMmDense, ReactiveDirectional, SpotMomentumFollower, Strategy,
+    LateConvexTail, NoopStrategy, PairedMmDense, ReactiveDirectional, SpotMomentumFollower,
     bonereaper::BonereaperLiteConfig,
-    bonereaper_v2::BonereaperV2Config,
+    bonereaper_v2::{BonereaperV2Config, BonereaperV2GateStats},
     delta_neutral_mm::DeltaNeutralMmConfig,
     late_big_bet::LateBigBetConfig,
     late_confirmation::LateConfirmationConfig,
@@ -27,9 +31,13 @@ use pm_telonex_loader::{
     load_pm_trades_async, resolve_binance_day, resolve_pm_trades_day,
 };
 use pm_types::{MarketId, SpotHistory, TradeHistory};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::discovery::MarketHandle;
@@ -47,6 +55,21 @@ pub enum StratId {
     DeltaNeutralMm,
     LateConfirmation,
     LateConvexTail,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+pub enum VolatilityBand {
+    Low,
+    High,
+}
+
+impl VolatilityBand {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low_vol",
+            Self::High => "high_vol",
+        }
+    }
 }
 
 impl StratId {
@@ -71,6 +94,8 @@ pub struct WalkForwardConfig {
     pub starting_cash_usdc: f64,
     pub kelly_fraction: f64,
     pub max_clip_usdc: f64,
+    pub max_order_clip_multiplier: f64,
+    pub max_per_market_exposure_usdc: f64,
     pub spot_symbol: String,
     pub strategies: Vec<StratId>,
     pub max_concurrent_fetches: usize,
@@ -88,6 +113,65 @@ pub struct WalkForwardConfig {
     /// the static `max_clip_usdc` regardless of bankroll. Typical: 0.005
     /// (0.5% of equity per bet).
     pub clip_fraction_of_equity: Option<f64>,
+    /// Portfolio-level drawdown where clips begin scaling down. Expressed as
+    /// a fraction below peak equity, e.g. `0.12` for 12%. Disabled when this
+    /// is greater than or equal to `clip_drawdown_hard_pct`.
+    pub clip_drawdown_soft_pct: f64,
+    /// Portfolio-level drawdown where clips scale to zero. Expressed as a
+    /// fraction below peak equity, e.g. `0.25` for 25%.
+    pub clip_drawdown_hard_pct: f64,
+    pub br2_late_clip_frac: f32,
+    pub br2_late_max_fires: usize,
+    pub br2_late_confirm_min_model_confidence: f32,
+    pub br2_late_confirm_max_model_risk: f32,
+    pub br2_late_confirm_min_model_side_p: f32,
+    pub br2_high_skew_clip_frac: f32,
+    pub br2_high_skew_max_clips: usize,
+    pub br2_late_favourite_threshold: f32,
+    pub br2_late_favourite_clip_frac: f32,
+    pub br2_late_favourite_max_clips: usize,
+    pub br2_late_favourite_sweep_depth: usize,
+    pub br2_late_favourite_min_model_confidence: f32,
+    pub br2_late_favourite_max_model_risk: f32,
+    pub br2_late_favourite_min_model_side_p: f32,
+    pub br2_late_favourite_min_model_edge: f32,
+    pub enforce_model_gate: bool,
+    pub model_gate_min_confidence: f32,
+    pub model_gate_max_risk: f32,
+    pub model_gate_min_edge: f32,
+    /// Split aggregate reporting by per-market price range in YES mid: high
+    /// volatility if `range > threshold`.
+    pub volatility_regime_threshold: f64,
+    /// Enable walk-forward folds. Mutually exclusive with `fold_size`.
+    /// If set, markets are split into this many chronological folds.
+    pub walk_forward_folds: Option<usize>,
+    /// Enable walk-forward folds with explicit fold-size (in markets).
+    /// Mutually exclusive with `walk_forward_folds`.
+    pub fold_size: Option<usize>,
+    /// Purge this many markets around each train/test boundary.
+    /// With forward-purged CV this excludes the immediately adjacent markets
+    /// from training to reduce label leakage.
+    pub purge_markets: usize,
+    /// Do not evaluate a test fold until at least this many prior markets are
+    /// available for walk-forward meta-calibrator training.
+    pub min_train_markets: usize,
+    /// Online meta-calibrator fit hyperparameters. These are intentionally
+    /// runtime-tunable because validation often rejects overfit settings.
+    pub meta_training_config: MetaTrainingConfig,
+    /// Optional JSON cache for extracted meta-calibrator training samples.
+    /// Intended for AWS Batch/local sweeps where the train window is fixed.
+    pub meta_training_samples_cache: Option<PathBuf>,
+    /// Optional frozen meta-calibrator snapshot to load instead of training.
+    pub meta_calibrator_snapshot_in: Option<PathBuf>,
+    /// Optional path to write the trained meta-calibrator snapshot.
+    pub meta_calibrator_snapshot_out: Option<PathBuf>,
+    /// In portfolio mode, write partial outputs every N evaluated markets.
+    /// Set to zero to disable checkpointing.
+    pub portfolio_checkpoint_every_markets: usize,
+    /// Optional per-market JSONL path used for portfolio checkpoints.
+    pub checkpoint_markets_out: Option<PathBuf>,
+    /// Optional summary JSON path used for portfolio checkpoints.
+    pub checkpoint_summary_out: Option<PathBuf>,
 }
 
 impl Default for WalkForwardConfig {
@@ -95,18 +179,50 @@ impl Default for WalkForwardConfig {
         Self {
             starting_cash_usdc: 100.0,
             kelly_fraction: 0.25,
-            max_clip_usdc: 5.0,
+            max_clip_usdc: 20.0,
+            max_order_clip_multiplier: 2.0,
+            max_per_market_exposure_usdc: 50.0,
             spot_symbol: "BTCUSDT".to_string(),
-            strategies: vec![
-                StratId::ReactiveDirectional,
-                StratId::PairedMm,
-            ],
+            strategies: vec![StratId::ReactiveDirectional, StratId::PairedMm],
             max_concurrent_fetches: 16,
             use_outcome_label: false,
             maker_rebate_bps: 0.0,
             taker_fee_bps: 0.0,
             portfolio_mode: false,
             clip_fraction_of_equity: None,
+            clip_drawdown_soft_pct: 1.0,
+            clip_drawdown_hard_pct: 1.0,
+            br2_late_clip_frac: 1.0,
+            br2_late_max_fires: 3,
+            br2_late_confirm_min_model_confidence: 0.58,
+            br2_late_confirm_max_model_risk: 0.80,
+            br2_late_confirm_min_model_side_p: 0.58,
+            br2_high_skew_clip_frac: 0.60,
+            br2_high_skew_max_clips: 5,
+            br2_late_favourite_threshold: 0.22,
+            br2_late_favourite_clip_frac: 1.00,
+            br2_late_favourite_max_clips: 12,
+            br2_late_favourite_sweep_depth: 7,
+            br2_late_favourite_min_model_confidence: 0.68,
+            br2_late_favourite_max_model_risk: 0.72,
+            br2_late_favourite_min_model_side_p: 0.62,
+            br2_late_favourite_min_model_edge: 0.00,
+            enforce_model_gate: true,
+            model_gate_min_confidence: 0.68,
+            model_gate_max_risk: 0.72,
+            model_gate_min_edge: 0.00,
+            volatility_regime_threshold: 0.08,
+            walk_forward_folds: None,
+            fold_size: None,
+            purge_markets: 0,
+            min_train_markets: 0,
+            meta_training_config: MetaTrainingConfig::default(),
+            meta_training_samples_cache: None,
+            meta_calibrator_snapshot_in: None,
+            meta_calibrator_snapshot_out: None,
+            portfolio_checkpoint_every_markets: 0,
+            checkpoint_markets_out: None,
+            checkpoint_summary_out: None,
         }
     }
 }
@@ -117,6 +233,8 @@ pub struct MarketResult {
     pub slug: String,
     pub close_ts: i64,
     pub outcome_label: String,
+    pub volatility_range: f64,
+    pub volatility_band: VolatilityBand,
     pub per_strategy: HashMap<&'static str, StrategyMarketResult>,
 }
 
@@ -124,6 +242,10 @@ pub struct MarketResult {
 pub struct StrategyMarketResult {
     pub orders_submitted: usize,
     pub orders_filled: usize,
+    pub orders_rejected_model_gate: usize,
+    pub orders_rejected_model_gate_confidence: usize,
+    pub orders_rejected_model_gate_risk: usize,
+    pub orders_rejected_model_gate_edge: usize,
     pub pnl_usdc: f64,
     pub start_equity_usdc: f64,
     pub end_equity_usdc: f64,
@@ -131,30 +253,229 @@ pub struct StrategyMarketResult {
     pub fills: usize,
     pub maker_rebates_usdc: f64,
     pub clip_used_usdc: f64,
+    pub yes_resolved: bool,
     /// Per-fill detail: ts, side, shares, price, notional, tag, maker, rebate.
     /// Empty if `fills_count == 0`. Use sparingly for large runs (per-market
     /// rows can grow large).
     pub fills_detail: Vec<crate::runner::Fill>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bonereaper_v2_gate_stats: Option<BonereaperV2GateStats>,
+    #[serde(skip_serializing)]
+    pub model_training_samples: Vec<MetaTrainingSample>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WalkForwardSummary {
     pub markets_attempted: usize,
     pub markets_succeeded: usize,
+    /// Key runtime controls used to produce this summary.
+    pub run_config: Option<SummaryRunConfig>,
+    /// Overall aggregate for all markets.
     pub per_strategy: HashMap<&'static str, StrategyAggregate>,
+    /// Aggregate split by volatility regime (Low/High).
+    pub by_volatility_band: HashMap<VolatilityBand, HashMap<&'static str, StrategyAggregate>>,
+    /// Per-fold summaries when walk-forward mode is enabled.
+    pub fold_summaries: Vec<WalkForwardFoldSummary>,
+    /// Meta-calibrator training/evaluation evidence for train-once portfolio
+    /// runs. Empty for legacy independent-market runs without ML training.
+    pub meta_calibration: Option<MetaCalibrationReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SummaryRunConfig {
+    pub starting_cash_usdc: f64,
+    pub kelly_fraction: f64,
+    pub max_clip_usdc: f64,
+    pub max_order_clip_multiplier: f64,
+    pub max_per_market_exposure_usdc: f64,
+    pub clip_fraction_of_equity: Option<f64>,
+    pub clip_drawdown_soft_pct: f64,
+    pub clip_drawdown_hard_pct: f64,
+    pub br2_late_clip_frac: f32,
+    pub br2_late_max_fires: usize,
+    pub br2_late_confirm_min_model_confidence: f32,
+    pub br2_late_confirm_max_model_risk: f32,
+    pub br2_late_confirm_min_model_side_p: f32,
+    pub br2_high_skew_clip_frac: f32,
+    pub br2_high_skew_max_clips: usize,
+    pub br2_late_favourite_threshold: f32,
+    pub br2_late_favourite_clip_frac: f32,
+    pub br2_late_favourite_max_clips: usize,
+    pub br2_late_favourite_sweep_depth: usize,
+    pub br2_late_favourite_min_model_confidence: f32,
+    pub br2_late_favourite_max_model_risk: f32,
+    pub br2_late_favourite_min_model_side_p: f32,
+    pub br2_late_favourite_min_model_edge: f32,
+    pub enforce_model_gate: bool,
+    pub model_gate_min_confidence: f32,
+    pub model_gate_max_risk: f32,
+    pub model_gate_min_edge: f32,
+    pub min_train_markets: usize,
+    pub meta_epochs: usize,
+    pub meta_learning_rate: f32,
+    pub meta_l2: f32,
+    pub meta_weight_clip: f32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MetaCalibrationReport {
+    pub train_markets: usize,
+    pub train_samples: usize,
+    pub train_updates: u32,
+    pub train_log_loss: Option<f32>,
+    pub selected_training_config: Option<MetaTrainingConfig>,
+    pub candidate_evaluations: Vec<MetaCandidateEvaluation>,
+    pub validation_samples: usize,
+    pub validation: Option<MetaEvaluationSummary>,
+    pub selected: bool,
+    pub rejected_reason: Option<String>,
+    pub oos_samples: usize,
+    pub oos: Option<MetaEvaluationSummary>,
+    pub beta_enabled: bool,
+    pub beta_coefficients: (f32, f32, f32),
+    pub top_feature_weights: Vec<MetaFeatureWeight>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MetaCandidateEvaluation {
+    pub training_config: MetaTrainingConfig,
+    pub train_log_loss: f32,
+    pub updates: u32,
+    pub beta_enabled: bool,
+    pub beta_coefficients: (f32, f32, f32),
+    pub isotonic_bins: usize,
+    pub tree_count: usize,
+    pub tree_split_count: usize,
+    pub top_feature_weights: Vec<MetaFeatureWeight>,
+    pub validation: MetaEvaluationSummary,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WalkForwardFoldSummary {
+    pub fold_idx: usize,
+    pub train_end_exclusive: usize,
+    pub purge_markets: usize,
+    pub test_start: usize,
+    pub test_end: usize,
+    pub meta_train_samples: usize,
+    pub meta_train_log_loss: Option<f32>,
+    pub meta_oos: Option<MetaEvaluationSummary>,
+    pub fold_results: WalkForwardSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MetaEvaluationSummary {
+    pub samples: usize,
+    pub base_log_loss: f32,
+    pub calibrated_log_loss: f32,
+    pub log_loss_delta: f32,
+    pub base_brier: f32,
+    pub calibrated_brier: f32,
+    pub brier_delta: f32,
+    pub base_accuracy: f32,
+    pub calibrated_accuracy: f32,
+    pub calibrated_ece: f32,
+    pub calibration_bins: Vec<CalibrationBin>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct CalibrationBin {
+    pub lower: f32,
+    pub upper: f32,
+    pub samples: usize,
+    pub avg_predicted: f32,
+    pub observed_rate: f32,
+}
+
+fn market_volatility_range(events: &[pm_types::ReplayEvent]) -> f64 {
+    if events.is_empty() {
+        return 0.0;
+    }
+    let mut low = f64::INFINITY;
+    let mut high = f64::NEG_INFINITY;
+    for e in events {
+        if !e.yes_mid.is_finite() {
+            continue;
+        }
+        let v = e.yes_mid as f64;
+        if v < low {
+            low = v;
+        }
+        if v > high {
+            high = v;
+        }
+    }
+    if !low.is_finite() {
+        return 0.0;
+    }
+    high - low
+}
+
+fn volatility_band(range: f64, threshold: f64) -> VolatilityBand {
+    if range.is_nan() {
+        return VolatilityBand::Low;
+    }
+    if range > threshold {
+        VolatilityBand::High
+    } else {
+        VolatilityBand::Low
+    }
+}
+
+fn drawdown_clip_multiplier(drawdown_pct: f64, soft_pct: f64, hard_pct: f64) -> f64 {
+    if !drawdown_pct.is_finite()
+        || !soft_pct.is_finite()
+        || !hard_pct.is_finite()
+        || soft_pct >= hard_pct
+    {
+        return 1.0;
+    }
+    if drawdown_pct <= soft_pct {
+        1.0
+    } else if drawdown_pct >= hard_pct {
+        0.0
+    } else {
+        1.0 - (drawdown_pct - soft_pct) / (hard_pct - soft_pct)
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct StrategyAggregate {
     pub total_pnl_usdc: f64,
+    pub first_start_equity_usdc: f64,
+    pub last_end_equity_usdc: f64,
+    pub min_end_equity_usdc: f64,
+    pub max_end_equity_usdc: f64,
+    pub compounded_return_pct: f64,
+    pub path_max_drawdown_pct: f64,
     pub mean_pnl_usdc: f64,
     pub median_pnl_usdc: f64,
     pub stdev_pnl_usdc: f64,
     pub hit_rate: f64,
     pub markets_with_orders: usize,
+    pub total_orders_submitted: usize,
     pub total_orders_filled: usize,
+    pub total_orders_rejected_model_gate: usize,
+    pub total_orders_rejected_model_gate_confidence: usize,
+    pub total_orders_rejected_model_gate_risk: usize,
+    pub total_orders_rejected_model_gate_edge: usize,
     pub worst_market_pnl: f64,
     pub best_market_pnl: f64,
+    pub sharpe_ratio: f64,
+    pub by_fill_tag: HashMap<String, FillTagAggregate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bonereaper_v2_gate_stats: Option<BonereaperV2GateStats>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct FillTagAggregate {
+    pub fills: usize,
+    pub total_notional_usdc: f64,
+    pub total_pnl_usdc: f64,
+    pub mean_pnl_usdc: f64,
+    pub avg_fill_price: f64,
+    pub hit_rate: f64,
 }
 
 /// Per-market spot-history cache so we don't re-download the same Binance day.
@@ -211,27 +532,818 @@ pub async fn run_walkforward(
         }
     }
     let spot_map_top: HashMap<String, Arc<SpotHistory>> = spot_cache.inner.clone();
-
-    if cfg.portfolio_mode {
-        return run_portfolio(store, markets, cfg, &spot_map_top).await;
+    if cfg.portfolio_mode && (cfg.walk_forward_folds.is_some() || cfg.fold_size.is_some()) {
+        return Err(anyhow!(
+            "walk-forward fold configuration is not supported in portfolio mode"
+        ));
     }
 
-    // Snapshot the spot cache so worker futures can share Arc<SpotHistory>s
-    // without holding a mutable reference to the cache.
-    let spot_map: HashMap<String, Arc<SpotHistory>> = spot_cache.inner.clone();
-    let empty_spot = Arc::new(SpotHistory::default());
+    if cfg.portfolio_mode {
+        let preloaded_snapshot = match cfg.meta_calibrator_snapshot_in.as_deref() {
+            Some(path) => Some(read_meta_snapshot(path)?),
+            None => None,
+        };
+        if cfg.min_train_markets > 0 {
+            if cfg.min_train_markets >= markets.len() {
+                return Err(anyhow!(
+                    "min_train_markets={} leaves no markets for portfolio evaluation",
+                    cfg.min_train_markets
+                ));
+            }
+            let mut meta_report = None;
+            let meta_snapshot = if let Some(snapshot) = preloaded_snapshot.clone() {
+                meta_report = Some(MetaCalibrationReport {
+                    train_markets: 0,
+                    train_samples: 0,
+                    train_updates: snapshot.updates,
+                    train_log_loss: None,
+                    selected_training_config: None,
+                    candidate_evaluations: Vec::new(),
+                    validation_samples: 0,
+                    validation: None,
+                    selected: true,
+                    rejected_reason: None,
+                    oos_samples: 0,
+                    oos: None,
+                    beta_enabled: snapshot.beta_enabled(),
+                    beta_coefficients: snapshot.beta_coefficients(),
+                    top_feature_weights: snapshot.top_feature_weights(12),
+                });
+                Some(snapshot)
+            } else {
+                let training_samples = load_or_collect_training_samples(
+                    store,
+                    &markets[..cfg.min_train_markets],
+                    cfg,
+                    &spot_map_top,
+                )
+                .await?;
+                if training_samples.is_empty() {
+                    None
+                } else {
+                    let selected = train_validated_meta_calibrator(
+                        cfg.min_train_markets,
+                        &training_samples,
+                        cfg.meta_training_config,
+                        cfg.meta_calibrator_snapshot_out.as_deref(),
+                    )?;
+                    meta_report = Some(selected.report);
+                    Some(selected.snapshot)
+                }
+            };
+            return run_portfolio(
+                store,
+                &markets[cfg.min_train_markets..],
+                cfg,
+                &spot_map_top,
+                meta_snapshot,
+                meta_report,
+            )
+            .await;
+        }
+        let meta_report = preloaded_snapshot
+            .as_ref()
+            .map(|snapshot| MetaCalibrationReport {
+                train_markets: 0,
+                train_samples: 0,
+                train_updates: snapshot.updates,
+                train_log_loss: None,
+                selected_training_config: None,
+                candidate_evaluations: Vec::new(),
+                validation_samples: 0,
+                validation: None,
+                selected: true,
+                rejected_reason: None,
+                oos_samples: 0,
+                oos: None,
+                beta_enabled: snapshot.beta_enabled(),
+                beta_coefficients: snapshot.beta_coefficients(),
+                top_feature_weights: snapshot.top_feature_weights(12),
+            });
+        return run_portfolio(
+            store,
+            markets,
+            cfg,
+            &spot_map_top,
+            preloaded_snapshot,
+            meta_report,
+        )
+        .await;
+    }
+
+    let mut fold_summaries = Vec::new();
+    let fold_plan = build_fold_plan(markets.len(), cfg)?;
+    let use_folds = cfg.walk_forward_folds.is_some() || cfg.fold_size.is_some();
+
+    let mut results = Vec::new();
+    let mut training_samples = Vec::new();
+    let mut training_loaded_until = 0usize;
+    for (fold_idx, (train_end_exclusive, test_start, test_end)) in fold_plan.iter().enumerate() {
+        let mut meta_train_samples = 0usize;
+        let mut meta_train_log_loss = None;
+        let meta_snapshot = if use_folds && *train_end_exclusive > 0 {
+            if *train_end_exclusive > training_loaded_until {
+                let new_samples = collect_training_samples(
+                    store,
+                    &markets[training_loaded_until..*train_end_exclusive],
+                    cfg,
+                    &spot_map_top,
+                )
+                .await?;
+                training_samples.extend(new_samples);
+                training_loaded_until = *train_end_exclusive;
+            }
+            if training_samples.is_empty() {
+                None
+            } else {
+                let mut state = ModelState::new();
+                let stats = state.fit_meta_calibrator(&training_samples, cfg.meta_training_config);
+                meta_train_samples = stats.samples;
+                meta_train_log_loss = Some(stats.log_loss);
+                tracing::info!(
+                    fold = fold_idx,
+                    samples = stats.samples,
+                    updates = stats.updates,
+                    train_markets = training_loaded_until,
+                    log_loss = stats.log_loss,
+                    "trained fold meta-calibrator"
+                );
+                Some(state.meta_calibrator_snapshot())
+            }
+        } else {
+            None
+        };
+        let meta_oos = if use_folds {
+            if let Some(snapshot) = meta_snapshot.as_ref() {
+                let test_samples = collect_training_samples(
+                    store,
+                    &markets[*test_start..*test_end],
+                    cfg,
+                    &spot_map_top,
+                )
+                .await?;
+                Some(evaluate_meta_calibration(snapshot, &test_samples))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let fold_markets = &markets[*test_start..*test_end];
+        let fold_markets = run_markets(
+            store,
+            fold_markets,
+            cfg,
+            &spot_map_top,
+            *test_start,
+            cfg.max_concurrent_fetches,
+            meta_snapshot,
+        )
+        .await?;
+        if use_folds {
+            let mut fold_summary = aggregate(&fold_markets, &cfg.strategies);
+            fold_summary.run_config = Some(summary_run_config(cfg));
+            fold_summaries.push(WalkForwardFoldSummary {
+                fold_idx,
+                train_end_exclusive: *train_end_exclusive,
+                purge_markets: cfg.purge_markets,
+                test_start: *test_start,
+                test_end: *test_end,
+                meta_train_samples,
+                meta_train_log_loss,
+                meta_oos,
+                fold_results: fold_summary,
+            });
+        }
+        results.extend(fold_markets);
+    }
+
+    let mut summary = aggregate(&results, &cfg.strategies);
+    summary.run_config = Some(summary_run_config(cfg));
+    if use_folds {
+        summary.fold_summaries = fold_summaries;
+    }
+    Ok((results, summary))
+}
+
+fn build_fold_plan(total: usize, cfg: &WalkForwardConfig) -> Result<Vec<(usize, usize, usize)>> {
+    if cfg.walk_forward_folds.is_some() && cfg.fold_size.is_some() {
+        return Err(anyhow!(
+            "cannot set both --walk-forward-folds and --fold-size"
+        ));
+    }
+    if total == 0 {
+        return Ok(vec![(0, 0, 0)]);
+    }
+    if let Some(folds) = cfg.walk_forward_folds {
+        if folds == 0 {
+            return Err(anyhow!("walk-forward-folds must be >= 1"));
+        }
+        if folds > total {
+            return Err(anyhow!(
+                "walk-forward-folds ({folds}) cannot exceed number of markets ({total})"
+            ));
+        }
+        let base = total / folds;
+        let remainder = total % folds;
+        let mut test_start = 0usize;
+        let mut out = Vec::with_capacity(folds);
+        for fold_idx in 0..folds {
+            let size = base + usize::from(fold_idx < remainder);
+            let test_end = (test_start + size).min(total);
+            if size == 0 || test_start >= total || test_end <= test_start {
+                break;
+            }
+            let train_end_exclusive = test_start.saturating_sub(cfg.purge_markets);
+            if train_end_exclusive >= cfg.min_train_markets {
+                out.push((train_end_exclusive, test_start, test_end));
+            }
+            test_start = test_end;
+        }
+        if out.is_empty() {
+            return Err(anyhow!(
+                "no walk-forward folds satisfy min_train_markets={} with total markets={total}",
+                cfg.min_train_markets
+            ));
+        }
+        Ok(out)
+    } else if let Some(fold_size) = cfg.fold_size {
+        if fold_size == 0 {
+            return Err(anyhow!("fold-size must be >= 1"));
+        }
+        let mut out = Vec::new();
+        let mut test_start = 0usize;
+        while test_start < total {
+            let test_end = (test_start + fold_size).min(total);
+            let train_end_exclusive = test_start.saturating_sub(cfg.purge_markets);
+            if train_end_exclusive >= cfg.min_train_markets {
+                out.push((train_end_exclusive, test_start, test_end));
+            }
+            test_start = test_end;
+        }
+        if out.is_empty() {
+            return Err(anyhow!(
+                "no walk-forward folds satisfy min_train_markets={} with total markets={total}",
+                cfg.min_train_markets
+            ));
+        }
+        Ok(out)
+    } else {
+        Ok(vec![(0, 0, total)])
+    }
+}
+
+async fn load_or_collect_training_samples(
+    store: &TelonexStore,
+    markets: &[MarketHandle],
+    cfg: &WalkForwardConfig,
+    spot_map: &HashMap<String, Arc<SpotHistory>>,
+) -> Result<Vec<MetaTrainingSample>> {
+    if let Some(path) = cfg.meta_training_samples_cache.as_deref() {
+        if path.exists() {
+            let file = File::open(path)
+                .with_context(|| format!("open meta training samples cache {}", path.display()))?;
+            let samples: Vec<MetaTrainingSample> = serde_json::from_reader(BufReader::new(file))
+                .with_context(|| format!("read meta training samples cache {}", path.display()))?;
+            tracing::info!(
+                samples = samples.len(),
+                path = %path.display(),
+                "loaded meta training samples cache"
+            );
+            return Ok(samples);
+        }
+
+        let samples = collect_training_samples(store, markets, cfg, spot_map).await?;
+        write_meta_training_samples(path, &samples)?;
+        return Ok(samples);
+    }
+
+    collect_training_samples(store, markets, cfg, spot_map).await
+}
+
+fn write_meta_training_samples(
+    path: &std::path::Path,
+    samples: &[MetaTrainingSample],
+) -> Result<()> {
+    ensure_parent_dir(path)?;
+    let file = File::create(path)
+        .with_context(|| format!("create meta training samples cache {}", path.display()))?;
+    serde_json::to_writer(BufWriter::new(file), samples)
+        .with_context(|| format!("write meta training samples cache {}", path.display()))?;
+    tracing::info!(
+        samples = samples.len(),
+        path = %path.display(),
+        "wrote meta training samples cache"
+    );
+    Ok(())
+}
+
+fn read_meta_snapshot(path: &std::path::Path) -> Result<OnlineMetaCalibratorSnapshot> {
+    let file = File::open(path)
+        .with_context(|| format!("open meta-calibrator snapshot {}", path.display()))?;
+    let snapshot = serde_json::from_reader(BufReader::new(file))
+        .with_context(|| format!("read meta-calibrator snapshot {}", path.display()))?;
+    tracing::info!(
+        path = %path.display(),
+        "loaded meta-calibrator snapshot"
+    );
+    Ok(snapshot)
+}
+
+fn write_meta_snapshot(
+    path: &std::path::Path,
+    snapshot: &OnlineMetaCalibratorSnapshot,
+) -> Result<()> {
+    ensure_parent_dir(path)?;
+    let file = File::create(path)
+        .with_context(|| format!("create meta-calibrator snapshot {}", path.display()))?;
+    serde_json::to_writer_pretty(BufWriter::new(file), snapshot)
+        .with_context(|| format!("write meta-calibrator snapshot {}", path.display()))?;
+    tracing::info!(
+        updates = snapshot.updates,
+        path = %path.display(),
+        "wrote meta-calibrator snapshot"
+    );
+    Ok(())
+}
+
+fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create parent directory {}", parent.display()))?;
+    }
+    Ok(())
+}
+
+struct SelectedMetaCalibrator {
+    snapshot: OnlineMetaCalibratorSnapshot,
+    report: MetaCalibrationReport,
+}
+
+fn train_validated_meta_calibrator(
+    train_markets: usize,
+    training_samples: &[MetaTrainingSample],
+    training_config: MetaTrainingConfig,
+    snapshot_out: Option<&std::path::Path>,
+) -> Result<SelectedMetaCalibrator> {
+    if training_samples.len() < 2 {
+        let snapshot = OnlineMetaCalibrator::default().snapshot();
+        if let Some(path) = snapshot_out {
+            write_meta_snapshot(path, &snapshot)?;
+        }
+        let stats = MetaTrainingStats {
+            samples: 0,
+            epochs: 0,
+            updates: 0,
+            log_loss: 0.0,
+        };
+        return Ok(SelectedMetaCalibrator {
+            report: meta_calibration_report(
+                train_markets,
+                &[],
+                &stats,
+                &snapshot,
+                None,
+                Vec::new(),
+                0,
+                None,
+                false,
+                Some("not enough training samples".to_string()),
+            ),
+            snapshot,
+        });
+    }
+    let split_at = ((training_samples.len() as f64) * 0.80).round() as usize;
+    let split_at = split_at.clamp(1, training_samples.len().saturating_sub(1));
+    let (fit_samples, validation_samples) = training_samples.split_at(split_at);
+
+    let candidates = meta_training_candidates(training_config);
+    let mut candidate_evaluations = Vec::with_capacity(candidates.len());
+    let mut best: Option<(
+        MetaTrainingConfig,
+        MetaTrainingStats,
+        OnlineMetaCalibratorSnapshot,
+        MetaEvaluationSummary,
+    )> = None;
+    for candidate_cfg in candidates {
+        let mut state = ModelState::new();
+        let stats = state.fit_meta_calibrator(fit_samples, candidate_cfg);
+        let snapshot = state.meta_calibrator_snapshot();
+        let validation = evaluate_meta_calibration(&snapshot, validation_samples);
+        let validation_passed = validation.calibrated_log_loss < validation.base_log_loss
+            && validation.calibrated_brier <= validation.base_brier;
+        if validation_passed {
+            let replace = best
+                .as_ref()
+                .map(|(_, _, _, best_validation)| {
+                    validation.calibrated_log_loss < best_validation.calibrated_log_loss
+                })
+                .unwrap_or(true);
+            if replace {
+                best = Some((candidate_cfg, stats, snapshot.clone(), validation.clone()));
+            }
+        }
+        candidate_evaluations.push(MetaCandidateEvaluation {
+            training_config: candidate_cfg,
+            train_log_loss: stats.log_loss,
+            updates: stats.updates,
+            beta_enabled: snapshot.beta_enabled(),
+            beta_coefficients: snapshot.beta_coefficients(),
+            isotonic_bins: snapshot.isotonic_bins(),
+            tree_count: snapshot.tree_count(),
+            tree_split_count: snapshot.tree_split_count(),
+            top_feature_weights: snapshot.top_feature_weights(8),
+            validation,
+            selected: false,
+        });
+    }
+    let (selected_training_config, stats, selected_snapshot, validation, validation_passed) =
+        if let Some((selected_cfg, stats, snapshot, validation)) = best {
+            if let Some(candidate) = candidate_evaluations
+                .iter_mut()
+                .find(|candidate| candidate.training_config == selected_cfg)
+            {
+                candidate.selected = true;
+            }
+            (Some(selected_cfg), stats, snapshot, validation, true)
+        } else {
+            let stats = MetaTrainingStats {
+                samples: fit_samples.len(),
+                epochs: training_config.epochs,
+                updates: 0,
+                log_loss: 0.0,
+            };
+            let snapshot = OnlineMetaCalibrator::default().snapshot();
+            let validation = evaluate_meta_calibration(&snapshot, validation_samples);
+            (None, stats, snapshot, validation, false)
+        };
+    if let Some(path) = snapshot_out {
+        write_meta_snapshot(path, &selected_snapshot)?;
+    }
+    tracing::info!(
+        fit_samples = stats.samples,
+        validation_samples = validation.samples,
+        updates = stats.updates,
+        train_markets,
+        train_log_loss = stats.log_loss,
+        validation_base_log_loss = validation.base_log_loss,
+        validation_calibrated_log_loss = validation.calibrated_log_loss,
+        validation_base_brier = validation.base_brier,
+        validation_calibrated_brier = validation.calibrated_brier,
+        selected = validation_passed,
+        ?selected_training_config,
+        "validated portfolio meta-calibrator"
+    );
+    let rejected_reason = if validation_passed {
+        None
+    } else {
+        Some("validation log loss or brier did not improve over base model".to_string())
+    };
+    let report = meta_calibration_report(
+        train_markets,
+        fit_samples,
+        &stats,
+        &selected_snapshot,
+        selected_training_config,
+        candidate_evaluations,
+        validation_samples.len(),
+        Some(validation),
+        validation_passed,
+        rejected_reason,
+    );
+    Ok(SelectedMetaCalibrator {
+        snapshot: selected_snapshot,
+        report,
+    })
+}
+
+fn meta_training_candidates(primary: MetaTrainingConfig) -> Vec<MetaTrainingConfig> {
+    let candidates = [
+        primary,
+        MetaTrainingConfig {
+            epochs: 4,
+            learning_rate: 0.005,
+            l2: 0.01,
+            weight_clip: 0.25,
+            reset_before_fit: true,
+        },
+        MetaTrainingConfig {
+            epochs: 8,
+            learning_rate: 0.01,
+            l2: 0.01,
+            weight_clip: 0.50,
+            reset_before_fit: true,
+        },
+        MetaTrainingConfig {
+            epochs: 12,
+            learning_rate: 0.02,
+            l2: 0.005,
+            weight_clip: 0.75,
+            reset_before_fit: true,
+        },
+        MetaTrainingConfig {
+            epochs: 16,
+            learning_rate: 0.02,
+            l2: 0.01,
+            weight_clip: 1.00,
+            reset_before_fit: true,
+        },
+    ];
+
+    let mut deduped = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        if !deduped.contains(&candidate) {
+            deduped.push(candidate);
+        }
+    }
+    deduped
+}
+
+fn meta_calibration_report(
+    train_markets: usize,
+    training_samples: &[MetaTrainingSample],
+    stats: &MetaTrainingStats,
+    snapshot: &OnlineMetaCalibratorSnapshot,
+    selected_training_config: Option<MetaTrainingConfig>,
+    candidate_evaluations: Vec<MetaCandidateEvaluation>,
+    validation_samples: usize,
+    validation: Option<MetaEvaluationSummary>,
+    selected: bool,
+    rejected_reason: Option<String>,
+) -> MetaCalibrationReport {
+    MetaCalibrationReport {
+        train_markets,
+        train_samples: training_samples.len(),
+        train_updates: stats.updates,
+        train_log_loss: Some(stats.log_loss),
+        selected_training_config,
+        candidate_evaluations,
+        validation_samples,
+        validation,
+        selected,
+        rejected_reason,
+        oos_samples: 0,
+        oos: None,
+        beta_enabled: snapshot.beta_enabled(),
+        beta_coefficients: snapshot.beta_coefficients(),
+        top_feature_weights: snapshot.top_feature_weights(12),
+    }
+}
+
+fn evaluate_meta_calibration(
+    snapshot: &OnlineMetaCalibratorSnapshot,
+    samples: &[MetaTrainingSample],
+) -> MetaEvaluationSummary {
+    let calibrator = OnlineMetaCalibrator::from_snapshot(snapshot.clone());
+    if samples.is_empty() {
+        return MetaEvaluationSummary {
+            samples: 0,
+            base_log_loss: 0.0,
+            calibrated_log_loss: 0.0,
+            log_loss_delta: 0.0,
+            base_brier: 0.0,
+            calibrated_brier: 0.0,
+            brier_delta: 0.0,
+            base_accuracy: 0.0,
+            calibrated_accuracy: 0.0,
+            calibrated_ece: 0.0,
+            calibration_bins: Vec::new(),
+        };
+    }
+
+    let mut base_log_loss = 0.0f32;
+    let mut calibrated_log_loss = 0.0f32;
+    let mut base_brier = 0.0f32;
+    let mut calibrated_brier = 0.0f32;
+    let mut base_correct = 0usize;
+    let mut calibrated_correct = 0usize;
+    let mut bins = [CalibrationBinAccumulator::default(); 10];
+
+    for sample in samples {
+        let observed = sample.side_observed;
+        let target = if observed { 1.0 } else { 0.0 };
+        let base = sample.base_side_probability.clamp(1.0e-6, 1.0 - 1.0e-6);
+        let calibrated = calibrator
+            .predict_side_win_probability(base, &sample.features)
+            .clamp(1.0e-6, 1.0 - 1.0e-6);
+
+        base_log_loss += binary_log_loss(base, observed);
+        calibrated_log_loss += binary_log_loss(calibrated, observed);
+        base_brier += (base - target) * (base - target);
+        calibrated_brier += (calibrated - target) * (calibrated - target);
+        base_correct += usize::from((base >= 0.5) == observed);
+        calibrated_correct += usize::from((calibrated >= 0.5) == observed);
+        let bin = ((calibrated * bins.len() as f32).floor() as usize).min(bins.len() - 1);
+        bins[bin].samples += 1;
+        bins[bin].sum_predicted += calibrated;
+        bins[bin].observed += usize::from(observed);
+    }
+
+    let n = samples.len() as f32;
+    let base_log_loss = base_log_loss / n;
+    let calibrated_log_loss = calibrated_log_loss / n;
+    let base_brier = base_brier / n;
+    let calibrated_brier = calibrated_brier / n;
+    let mut calibrated_ece = 0.0f32;
+    let calibration_bins: Vec<CalibrationBin> = bins
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, bin)| {
+            if bin.samples == 0 {
+                return None;
+            }
+            let samples_f = bin.samples as f32;
+            let avg_predicted = bin.sum_predicted / samples_f;
+            let observed_rate = bin.observed as f32 / samples_f;
+            calibrated_ece += (samples_f / n) * (avg_predicted - observed_rate).abs();
+            Some(CalibrationBin {
+                lower: idx as f32 / 10.0,
+                upper: (idx + 1) as f32 / 10.0,
+                samples: bin.samples,
+                avg_predicted,
+                observed_rate,
+            })
+        })
+        .collect();
+    MetaEvaluationSummary {
+        samples: samples.len(),
+        base_log_loss,
+        calibrated_log_loss,
+        log_loss_delta: calibrated_log_loss - base_log_loss,
+        base_brier,
+        calibrated_brier,
+        brier_delta: calibrated_brier - base_brier,
+        base_accuracy: base_correct as f32 / n,
+        calibrated_accuracy: calibrated_correct as f32 / n,
+        calibrated_ece,
+        calibration_bins,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct CalibrationBinAccumulator {
+    samples: usize,
+    sum_predicted: f32,
+    observed: usize,
+}
+
+fn binary_log_loss(p: f32, observed: bool) -> f32 {
+    let p = p.clamp(1.0e-6, 1.0 - 1.0e-6);
+    if observed { -p.ln() } else { -(1.0 - p).ln() }
+}
+
+async fn collect_training_samples(
+    store: &TelonexStore,
+    markets: &[MarketHandle],
+    cfg: &WalkForwardConfig,
+    spot_map: &HashMap<String, Arc<SpotHistory>>,
+) -> Result<Vec<MetaTrainingSample>> {
+    if markets.is_empty() {
+        return Ok(Vec::new());
+    }
 
     let store_inner = store.store();
-    let cfg_arc = Arc::new(cfg.clone());
+    let empty_spot = Arc::new(SpotHistory::default());
+    let total = markets.len();
+    let completed = Arc::new(AtomicUsize::new(0));
+    let concurrency = cfg.max_concurrent_fetches.max(1);
+    tracing::info!(markets = total, concurrency, "collecting training samples");
 
-    // Per-market futures: each one does fetch + matcher in sequence, but many
-    // run concurrently via `buffer_unordered`. While market N's matcher runs,
-    // market N+1's tape is being fetched.
+    let mut indexed_samples =
+        futures::stream::iter(markets.iter().cloned().enumerate().map(|(idx, m)| {
+            let store = store.clone();
+            let store_inner = store_inner.clone();
+            let spot = if cfg.spot_symbol.is_empty() {
+                empty_spot.clone()
+            } else {
+                spot_map
+                    .get(&m.date)
+                    .cloned()
+                    .unwrap_or_else(|| empty_spot.clone())
+            };
+            let use_outcome_label = cfg.use_outcome_label;
+            let starting_cash_usdc = cfg.starting_cash_usdc;
+            let completed = completed.clone();
+            async move {
+                let samples = collect_training_samples_for_market(
+                    &store,
+                    store_inner,
+                    idx,
+                    &m,
+                    spot,
+                    use_outcome_label,
+                    starting_cash_usdc,
+                )
+                .await;
+                let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                if done % 100 == 0 || done == total {
+                    tracing::info!(done, total, "training sample progress");
+                }
+                (idx, samples)
+            }
+        }))
+        .buffer_unordered(concurrency)
+        .collect::<Vec<_>>()
+        .await;
+
+    indexed_samples.sort_by_key(|(idx, _)| *idx);
+    let mut samples = Vec::with_capacity(markets.len());
+    for (_, market_samples) in indexed_samples {
+        samples.extend(market_samples);
+    }
+    Ok(samples)
+}
+
+async fn collect_training_samples_for_market(
+    store: &TelonexStore,
+    store_inner: Arc<dyn object_store::ObjectStore>,
+    idx: usize,
+    m: &MarketHandle,
+    spot: Arc<SpotHistory>,
+    use_outcome_label: bool,
+    starting_cash_usdc: f64,
+) -> Vec<MetaTrainingSample> {
+    let path = match store
+        .resolve_asset_day("polymarket", Channel::BookSnapshot25, &m.date, &m.asset_id)
+        .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(market = %m.slug, error = %e, "training resolve path failed");
+            return Vec::new();
+        }
+    };
+    let (events, _stats) =
+        match load_book_snapshot_async(store_inner, path, MarketId(idx as u32 + 1)).await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(market = %m.slug, error = %e, "training tape load failed");
+                return Vec::new();
+            }
+        };
+    let resolved_yes = if use_outcome_label {
+        Some(matches!(m.outcome.as_str(), "Up" | "Yes" | "yes" | "UP"))
+    } else {
+        None
+    };
+    let runner_cfg = RunnerConfig {
+        starting_cash_usdc,
+        market_close_ns: m.close_ts.saturating_mul(1_000_000_000),
+        resolved_yes,
+        portfolio_limits: PortfolioLimits::default(),
+        equity_curve_jsonl: None,
+        snapshot_every_n: 1_000_000,
+        maker_rebate_bps: 0.0,
+        taker_fee_bps: 0.0,
+        decision_log_jsonl: None,
+        decision_log_parquet: None,
+        shared_model_state: None,
+        meta_calibrator_snapshot: None,
+        decision_log_every_n: 1_000_000,
+        max_inventory_imbalance_shares: 1.5,
+        taker_slippage_bps: 0.0,
+        enforce_model_gate: false,
+        model_gate_min_confidence: 0.68,
+        model_gate_max_risk: 0.72,
+        model_gate_min_edge: 0.05,
+    };
+    let mut strat = NoopStrategy;
+    match run_backtest(
+        &events,
+        &spot,
+        &TradeHistory::default(),
+        &mut strat,
+        &runner_cfg,
+    ) {
+        Ok(report) => report.model_training_samples,
+        Err(e) => {
+            tracing::warn!(market = %m.slug, error = %e, "training sample extraction failed");
+            Vec::new()
+        }
+    }
+}
+
+async fn run_markets(
+    store: &TelonexStore,
+    markets: &[MarketHandle],
+    cfg: &WalkForwardConfig,
+    spot_map: &HashMap<String, Arc<SpotHistory>>,
+    market_id_offset: usize,
+    max_concurrent_fetches: usize,
+    meta_calibrator_snapshot: Option<OnlineMetaCalibratorSnapshot>,
+) -> Result<Vec<MarketResult>> {
+    if markets.is_empty() {
+        return Ok(Vec::new());
+    }
+    let spot_empty = Arc::new(SpotHistory::default());
+    let store_inner = store.store();
+    let cfg_arc = Arc::new(cfg.clone());
     let stream = futures::stream::iter(markets.iter().enumerate().map(|(idx, m)| {
         let store_inner = store_inner.clone();
         let spot_map = spot_map.clone();
-        let empty_spot = empty_spot.clone();
+        let spot_empty = spot_empty.clone();
         let cfg_arc = cfg_arc.clone();
+        let meta_calibrator_snapshot = meta_calibrator_snapshot.clone();
         let store_for_resolve = store.clone();
         async move {
             let started = Instant::now();
@@ -253,7 +1365,7 @@ pub async fn run_walkforward(
             let (events, _stats) = match load_book_snapshot_async(
                 store_inner.clone(),
                 path,
-                MarketId(idx as u32 + 1),
+                MarketId((idx + market_id_offset) as u32 + 1),
             )
             .await
             {
@@ -275,9 +1387,9 @@ pub async fn run_walkforward(
                 Err(_) => Arc::new(TradeHistory::default()),
             };
             let spot = if cfg_arc.spot_symbol.is_empty() {
-                empty_spot
+                spot_empty
             } else {
-                spot_map.get(&m.date).cloned().unwrap_or(empty_spot)
+                spot_map.get(&m.date).cloned().unwrap_or(spot_empty)
             };
             let resolved_yes = if cfg_arc.use_outcome_label {
                 Some(matches!(m.outcome.as_str(), "Up" | "Yes" | "yes" | "UP"))
@@ -289,17 +1401,27 @@ pub async fn run_walkforward(
                 market_close_ns: m.close_ts.saturating_mul(1_000_000_000),
                 resolved_yes,
                 portfolio_limits: PortfolioLimits {
-                    max_clip_usdc: cfg_arc.max_clip_usdc,
+                    max_clip_usdc: cfg_arc.max_clip_usdc * cfg_arc.max_order_clip_multiplier,
+                    max_per_market_exposure_usdc: cfg_arc.max_per_market_exposure_usdc,
                     ..PortfolioLimits::default()
                 },
                 equity_curve_jsonl: None,
                 snapshot_every_n: 1_000_000,
                 maker_rebate_bps: cfg_arc.maker_rebate_bps,
                 taker_fee_bps: cfg_arc.taker_fee_bps,
+                decision_log_jsonl: None,
+                decision_log_parquet: None,
+                shared_model_state: None,
+                meta_calibrator_snapshot,
+                decision_log_every_n: 1_000_000,
                 // Hard inventory cap: never let |yes - no| exceed 1.5 shares
                 // per market (paired-MM safety net).
                 max_inventory_imbalance_shares: 1.5,
                 taker_slippage_bps: 15.0,
+                enforce_model_gate: cfg_arc.enforce_model_gate,
+                model_gate_min_confidence: cfg_arc.model_gate_min_confidence,
+                model_gate_max_risk: cfg_arc.model_gate_max_risk,
+                model_gate_min_edge: cfg_arc.model_gate_min_edge,
             };
 
             let mut per_strategy = HashMap::new();
@@ -313,6 +1435,8 @@ pub async fn run_walkforward(
                     &runner_cfg,
                     cfg_arc.starting_cash_usdc,
                     cfg_arc.max_clip_usdc,
+                    None,
+                    None,
                 ) {
                     Ok(r) => {
                         per_strategy.insert(strat.name(), r);
@@ -322,6 +1446,9 @@ pub async fn run_walkforward(
                     }
                 }
             }
+
+            let volatility_range = market_volatility_range(&events);
+            let volatility_band = volatility_band(volatility_range, cfg_arc.volatility_regime_threshold);
 
             tracing::debug!(
                 market = %m.slug,
@@ -335,13 +1462,14 @@ pub async fn run_walkforward(
                 slug: m.slug.clone(),
                 close_ts: m.close_ts,
                 outcome_label: m.outcome.clone(),
+                volatility_range,
+                volatility_band,
                 per_strategy,
             })
         }
     }))
-    .buffer_unordered(cfg.max_concurrent_fetches);
+    .buffer_unordered(max_concurrent_fetches);
 
-    use futures::StreamExt as _;
     let mut results = Vec::with_capacity(markets.len());
     let mut stream = std::pin::pin!(stream);
     let mut completed = 0usize;
@@ -355,8 +1483,8 @@ pub async fn run_walkforward(
         }
     }
 
-    let summary = aggregate(&results, &cfg.strategies);
-    Ok((results, summary))
+    results.sort_by_key(|r| r.close_ts);
+    Ok(results)
 }
 
 fn run_one_strategy(
@@ -368,11 +1496,16 @@ fn run_one_strategy(
     runner_cfg: &RunnerConfig,
     bankroll: f64,
     clip: f64,
+    shared_skew_table: Option<Arc<Mutex<SkewWinRateTable>>>,
+    shared_model_state: Option<Arc<Mutex<ModelState>>>,
 ) -> Result<StrategyMarketResult> {
-    let report = match strat {
+    let (report, bonereaper_v2_gate_stats) = match strat {
         StratId::BuyYesAtOpen => {
             let mut s = BuyYesAtOpen::new(10.0);
-            run_backtest(events, spot, trades, &mut s, runner_cfg)?
+            (
+                run_backtest(events, spot, trades, &mut s, runner_cfg)?,
+                None,
+            )
         }
         StratId::ReactiveDirectional => {
             let mut s = ReactiveDirectional::new(ReactiveDirectionalConfig {
@@ -380,12 +1513,17 @@ fn run_one_strategy(
                 kelly_fraction: cfg.kelly_fraction,
                 max_clip_usdc: clip,
                 early_pair_clip_usdc: 0.5,
-                conviction_threshold_yes: 0.20,
-                conviction_threshold_no: 0.20,
+                conviction_threshold_yes: 0.68,
+                conviction_threshold_no: 0.68,
                 book_weight: 0.3,
                 spot_weight: 0.7,
+                shared_model_state,
+                shared_skew_table,
             });
-            run_backtest(events, spot, trades, &mut s, runner_cfg)?
+            (
+                run_backtest(events, spot, trades, &mut s, runner_cfg)?,
+                None,
+            )
         }
         StratId::PairedMm => {
             let mut s = PairedMmDense::new(PairedMmDenseConfig {
@@ -396,14 +1534,20 @@ fn run_one_strategy(
                 min_refresh_ns: 2_000_000_000,
                 ..PairedMmDenseConfig::default()
             });
-            run_backtest(events, spot, trades, &mut s, runner_cfg)?
+            (
+                run_backtest(events, spot, trades, &mut s, runner_cfg)?,
+                None,
+            )
         }
         StratId::SpotMomentumFollower => {
             let mut s = SpotMomentumFollower::new(SpotMomentumFollowerConfig {
                 clip_usdc: clip,
                 ..SpotMomentumFollowerConfig::default()
             });
-            run_backtest(events, spot, trades, &mut s, runner_cfg)?
+            (
+                run_backtest(events, spot, trades, &mut s, runner_cfg)?,
+                None,
+            )
         }
         StratId::LateBigBet => {
             let mut s = LateBigBet::new(LateBigBetConfig {
@@ -415,7 +1559,10 @@ fn run_one_strategy(
                 max_ask_yes: 0.94,
                 min_bid_yes: 0.06,
             });
-            run_backtest(events, spot, trades, &mut s, runner_cfg)?
+            (
+                run_backtest(events, spot, trades, &mut s, runner_cfg)?,
+                None,
+            )
         }
         StratId::BonereaperLite => {
             let mut s = BonereaperLite::new(BonereaperLiteConfig {
@@ -423,7 +1570,10 @@ fn run_one_strategy(
                 max_clip_usdc: clip,
                 ..BonereaperLiteConfig::default()
             });
-            run_backtest(events, spot, trades, &mut s, runner_cfg)?
+            (
+                run_backtest(events, spot, trades, &mut s, runner_cfg)?,
+                None,
+            )
         }
         StratId::DeltaNeutralMm => {
             let mut s = DeltaNeutralMm::new(DeltaNeutralMmConfig {
@@ -432,15 +1582,34 @@ fn run_one_strategy(
                 max_inventory_delta_shares: 1.0,
                 ..DeltaNeutralMmConfig::default()
             });
-            run_backtest(events, spot, trades, &mut s, runner_cfg)?
+            (
+                run_backtest(events, spot, trades, &mut s, runner_cfg)?,
+                None,
+            )
         }
         StratId::BonereaperV2 => {
             let mut s = BonereaperV2::new(BonereaperV2Config {
                 bankroll_usdc: bankroll,
                 max_clip_usdc: clip,
+                late_clip_frac: cfg.br2_late_clip_frac,
+                late_max_fires: cfg.br2_late_max_fires,
+                late_confirm_min_model_confidence: cfg.br2_late_confirm_min_model_confidence,
+                late_confirm_max_model_risk: cfg.br2_late_confirm_max_model_risk,
+                late_confirm_min_model_side_p: cfg.br2_late_confirm_min_model_side_p,
+                high_skew_clip_frac: cfg.br2_high_skew_clip_frac,
+                high_skew_max_clips: cfg.br2_high_skew_max_clips,
+                late_favourite_threshold: cfg.br2_late_favourite_threshold,
+                late_favourite_clip_frac: cfg.br2_late_favourite_clip_frac,
+                late_favourite_max_clips: cfg.br2_late_favourite_max_clips,
+                late_favourite_sweep_depth: cfg.br2_late_favourite_sweep_depth,
+                late_favourite_min_model_confidence: cfg.br2_late_favourite_min_model_confidence,
+                late_favourite_max_model_risk: cfg.br2_late_favourite_max_model_risk,
+                late_favourite_min_model_side_p: cfg.br2_late_favourite_min_model_side_p,
+                late_favourite_min_model_edge: cfg.br2_late_favourite_min_model_edge,
                 ..BonereaperV2Config::default()
             });
-            run_backtest(events, spot, trades, &mut s, runner_cfg)?
+            let report = run_backtest(events, spot, trades, &mut s, runner_cfg)?;
+            (report, Some(s.gate_stats()))
         }
         StratId::LateConfirmation => {
             let mut s = LateConfirmation::new(LateConfirmationConfig {
@@ -448,7 +1617,10 @@ fn run_one_strategy(
                 max_clip_usdc: clip,
                 ..LateConfirmationConfig::default()
             });
-            run_backtest(events, spot, trades, &mut s, runner_cfg)?
+            (
+                run_backtest(events, spot, trades, &mut s, runner_cfg)?,
+                None,
+            )
         }
         StratId::LateConvexTail => {
             let mut s = LateConvexTail::new(LateConvexTailConfig {
@@ -456,12 +1628,21 @@ fn run_one_strategy(
                 max_clip_usdc: clip * 0.2,
                 ..LateConvexTailConfig::default()
             });
-            run_backtest(events, spot, trades, &mut s, runner_cfg)?
+            (
+                run_backtest(events, spot, trades, &mut s, runner_cfg)?,
+                None,
+            )
         }
     };
     Ok(StrategyMarketResult {
         orders_submitted: report.counters.orders_submitted,
         orders_filled: report.counters.orders_filled_taker + report.counters.orders_filled_maker,
+        orders_rejected_model_gate: report.counters.orders_rejected_model_gate,
+        orders_rejected_model_gate_confidence: report
+            .counters
+            .orders_rejected_model_gate_confidence,
+        orders_rejected_model_gate_risk: report.counters.orders_rejected_model_gate_risk,
+        orders_rejected_model_gate_edge: report.counters.orders_rejected_model_gate_edge,
         pnl_usdc: report.pnl_usdc,
         start_equity_usdc: bankroll,
         end_equity_usdc: report.end_equity_usdc,
@@ -469,7 +1650,10 @@ fn run_one_strategy(
         fills: report.fills.len(),
         maker_rebates_usdc: report.maker_rebates_usdc,
         clip_used_usdc: clip,
+        yes_resolved: report.yes_resolved,
         fills_detail: report.fills,
+        bonereaper_v2_gate_stats,
+        model_training_samples: report.model_training_samples,
     })
 }
 
@@ -481,6 +1665,8 @@ async fn run_portfolio(
     markets: &[MarketHandle],
     cfg: &WalkForwardConfig,
     spot_map: &HashMap<String, Arc<SpotHistory>>,
+    meta_calibrator_snapshot: Option<OnlineMetaCalibratorSnapshot>,
+    mut meta_report: Option<MetaCalibrationReport>,
 ) -> Result<(Vec<MarketResult>, WalkForwardSummary)> {
     let store_inner = store.store();
     let empty_spot = Arc::new(SpotHistory::default());
@@ -489,7 +1675,18 @@ async fn run_portfolio(
         .iter()
         .map(|s| (s.name(), cfg.starting_cash_usdc))
         .collect();
+    let mut peak_equity_by_strategy = equity_by_strategy.clone();
+    let mut shared_skew_tables: HashMap<&'static str, Arc<Mutex<SkewWinRateTable>>> =
+        HashMap::new();
+    let mut shared_model_states: HashMap<&'static str, Arc<Mutex<ModelState>>> = HashMap::new();
+    for strat in &cfg.strategies {
+        if *strat == StratId::ReactiveDirectional {
+            shared_skew_tables.insert(strat.name(), Arc::new(Mutex::new(SkewWinRateTable::new())));
+            shared_model_states.insert(strat.name(), Arc::new(Mutex::new(ModelState::new())));
+        }
+    }
     let mut results: Vec<MarketResult> = Vec::with_capacity(markets.len());
+    let mut oos_meta_samples: Vec<MetaTrainingSample> = Vec::with_capacity(markets.len());
 
     for (idx, m) in markets.iter().enumerate() {
         let path = match store
@@ -502,19 +1699,16 @@ async fn run_portfolio(
                 continue;
             }
         };
-        let (events, _stats) = match load_book_snapshot_async(
-            store_inner.clone(),
-            path,
-            MarketId(idx as u32 + 1),
-        )
-        .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::warn!(market = %m.slug, error = %e, "tape load failed");
-                continue;
-            }
-        };
+        let (events, _stats) =
+            match load_book_snapshot_async(store_inner.clone(), path, MarketId(idx as u32 + 1))
+                .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!(market = %m.slug, error = %e, "tape load failed");
+                    continue;
+                }
+            };
         let trades = match resolve_pm_trades_day(store, &m.date, &m.asset_id).await {
             Ok(tp) => match load_pm_trades_async(store_inner.clone(), tp).await {
                 Ok((ticks, _)) => Arc::new(TradeHistory::new(ticks)),
@@ -525,7 +1719,10 @@ async fn run_portfolio(
         let spot = if cfg.spot_symbol.is_empty() {
             empty_spot.clone()
         } else {
-            spot_map.get(&m.date).cloned().unwrap_or_else(|| empty_spot.clone())
+            spot_map
+                .get(&m.date)
+                .cloned()
+                .unwrap_or_else(|| empty_spot.clone())
         };
         let resolved_yes = if cfg.use_outcome_label {
             Some(matches!(m.outcome.as_str(), "Up" | "Yes" | "yes" | "UP"))
@@ -534,23 +1731,37 @@ async fn run_portfolio(
         };
 
         let mut per_strategy = HashMap::new();
+        let mut captured_meta_sample_for_market = false;
         for &strat in &cfg.strategies {
             let bankroll = *equity_by_strategy
                 .get(strat.name())
                 .unwrap_or(&cfg.starting_cash_usdc);
+            let peak_equity = *peak_equity_by_strategy
+                .get(strat.name())
+                .unwrap_or(&cfg.starting_cash_usdc);
+            let drawdown_pct = if peak_equity > 0.0 {
+                1.0 - bankroll / peak_equity
+            } else {
+                0.0
+            };
+            let clip_multiplier = drawdown_clip_multiplier(
+                drawdown_pct,
+                cfg.clip_drawdown_soft_pct,
+                cfg.clip_drawdown_hard_pct,
+            );
             // Per-market clip: a fraction of current equity (compounds), else
             // static fallback. Hard floor + ceiling for sanity.
             let clip = match cfg.clip_fraction_of_equity {
                 Some(frac) => (bankroll * frac).clamp(0.50, bankroll * 0.10),
                 None => cfg.max_clip_usdc,
-            };
+            } * clip_multiplier;
             let runner_cfg = RunnerConfig {
                 starting_cash_usdc: bankroll,
                 market_close_ns: m.close_ts.saturating_mul(1_000_000_000),
                 resolved_yes,
                 portfolio_limits: PortfolioLimits {
-                    max_clip_usdc: clip,
-                    max_per_market_exposure_usdc: (clip * 10.0).max(50.0),
+                    max_clip_usdc: clip * cfg.max_order_clip_multiplier,
+                    max_per_market_exposure_usdc: cfg.max_per_market_exposure_usdc,
                     max_daily_exposure_usdc: bankroll * 5.0,
                     ..PortfolioLimits::default()
                 },
@@ -558,13 +1769,40 @@ async fn run_portfolio(
                 snapshot_every_n: 1_000_000,
                 maker_rebate_bps: cfg.maker_rebate_bps,
                 taker_fee_bps: cfg.taker_fee_bps,
+                decision_log_jsonl: None,
+                decision_log_parquet: None,
+                shared_model_state: None,
+                meta_calibrator_snapshot: meta_calibrator_snapshot.clone(),
+                decision_log_every_n: 1_000_000,
                 max_inventory_imbalance_shares: 1.5,
                 taker_slippage_bps: 15.0,
+                enforce_model_gate: cfg.enforce_model_gate,
+                model_gate_min_confidence: cfg.model_gate_min_confidence,
+                model_gate_max_risk: cfg.model_gate_max_risk,
+                model_gate_min_edge: cfg.model_gate_min_edge,
             };
-            match run_one_strategy(strat, cfg, &events, &spot, &trades, &runner_cfg, bankroll, clip)
-            {
+            match run_one_strategy(
+                strat,
+                cfg,
+                &events,
+                &spot,
+                &trades,
+                &runner_cfg,
+                bankroll,
+                clip,
+                shared_skew_tables.get(strat.name()).cloned(),
+                shared_model_states.get(strat.name()).cloned(),
+            ) {
                 Ok(r) => {
+                    if !captured_meta_sample_for_market && !r.model_training_samples.is_empty() {
+                        oos_meta_samples.extend(r.model_training_samples.iter().copied());
+                        captured_meta_sample_for_market = true;
+                    }
                     equity_by_strategy.insert(strat.name(), r.end_equity_usdc);
+                    peak_equity_by_strategy
+                        .entry(strat.name())
+                        .and_modify(|peak| *peak = peak.max(r.end_equity_usdc))
+                        .or_insert(r.end_equity_usdc);
                     per_strategy.insert(strat.name(), r);
                 }
                 Err(e) => {
@@ -573,11 +1811,20 @@ async fn run_portfolio(
             }
         }
 
+        let volatility_range = market_volatility_range(&events);
+        let volatility_band = volatility_band(volatility_range, cfg.volatility_regime_threshold);
+
         if (idx + 1) % 50 == 0 {
             let equity_strs: Vec<String> = cfg
                 .strategies
                 .iter()
-                .map(|s| format!("{}={:.2}", s.name(), equity_by_strategy.get(s.name()).copied().unwrap_or(0.0)))
+                .map(|s| {
+                    format!(
+                        "{}={:.2}",
+                        s.name(),
+                        equity_by_strategy.get(s.name()).copied().unwrap_or(0.0)
+                    )
+                })
                 .collect();
             tracing::info!(
                 done = idx + 1,
@@ -592,100 +1839,685 @@ async fn run_portfolio(
             slug: m.slug.clone(),
             close_ts: m.close_ts,
             outcome_label: m.outcome.clone(),
+            volatility_range,
+            volatility_band,
             per_strategy,
         });
+
+        if cfg.portfolio_checkpoint_every_markets > 0
+            && results.len() % cfg.portfolio_checkpoint_every_markets == 0
+        {
+            write_portfolio_checkpoint(
+                cfg,
+                &results,
+                meta_report.as_ref(),
+                meta_calibrator_snapshot.as_ref(),
+                &oos_meta_samples,
+            )
+            .with_context(|| {
+                format!("write portfolio checkpoint after {} markets", results.len())
+            })?;
+        }
     }
 
-    let summary = aggregate(&results, &cfg.strategies);
+    let mut summary = aggregate(&results, &cfg.strategies);
+    summary.run_config = Some(summary_run_config(cfg));
+    if let Some(report) = meta_report.as_mut() {
+        report.oos_samples = oos_meta_samples.len();
+        if let Some(snapshot) = meta_calibrator_snapshot.as_ref() {
+            report.oos = Some(evaluate_meta_calibration(snapshot, &oos_meta_samples));
+        }
+        summary.meta_calibration = meta_report;
+    }
     Ok((results, summary))
+}
+
+fn write_portfolio_checkpoint(
+    cfg: &WalkForwardConfig,
+    results: &[MarketResult],
+    meta_report: Option<&MetaCalibrationReport>,
+    meta_calibrator_snapshot: Option<&OnlineMetaCalibratorSnapshot>,
+    oos_meta_samples: &[MetaTrainingSample],
+) -> Result<()> {
+    let mut summary = aggregate(results, &cfg.strategies);
+    summary.run_config = Some(summary_run_config(cfg));
+    if let Some(report) = meta_report {
+        let mut report = report.clone();
+        report.oos_samples = oos_meta_samples.len();
+        if let Some(snapshot) = meta_calibrator_snapshot {
+            report.oos = Some(evaluate_meta_calibration(snapshot, oos_meta_samples));
+        }
+        summary.meta_calibration = Some(report);
+    }
+    if let Some(path) = cfg.checkpoint_markets_out.as_deref() {
+        write_market_results_jsonl_atomic(path, results)?;
+        tracing::info!(
+            ?path,
+            markets = results.len(),
+            "wrote portfolio markets checkpoint"
+        );
+    }
+    if let Some(path) = cfg.checkpoint_summary_out.as_deref() {
+        write_summary_json_atomic(path, &summary)?;
+        tracing::info!(
+            ?path,
+            markets = results.len(),
+            "wrote portfolio summary checkpoint"
+        );
+    }
+    Ok(())
+}
+
+pub fn write_market_results_jsonl_atomic(
+    path: &std::path::Path,
+    results: &[MarketResult],
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create output directory {}", parent.display()))?;
+    }
+    let tmp = temp_sibling_path(path);
+    {
+        let mut file = std::fs::File::create(&tmp)
+            .with_context(|| format!("create temp results {}", tmp.display()))?;
+        for result in results {
+            writeln!(file, "{}", serde_json::to_string(result)?)
+                .with_context(|| format!("write temp results {}", tmp.display()))?;
+        }
+        file.flush()
+            .with_context(|| format!("flush temp results {}", tmp.display()))?;
+    }
+    std::fs::rename(&tmp, path)
+        .with_context(|| format!("rename {} to {}", tmp.display(), path.display()))?;
+    Ok(())
+}
+
+pub fn write_summary_json_atomic(
+    path: &std::path::Path,
+    summary: &WalkForwardSummary,
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create output directory {}", parent.display()))?;
+    }
+    let tmp = temp_sibling_path(path);
+    std::fs::write(&tmp, serde_json::to_string_pretty(summary)?)
+        .with_context(|| format!("write temp summary {}", tmp.display()))?;
+    std::fs::rename(&tmp, path)
+        .with_context(|| format!("rename {} to {}", tmp.display(), path.display()))?;
+    Ok(())
+}
+
+fn temp_sibling_path(path: &std::path::Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_else(|| "checkpoint".into());
+    path.with_file_name(format!("{file_name}.tmp"))
+}
+
+fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregate {
+    let mut pnls: Vec<f64> = Vec::with_capacity(records.len());
+    let mut markets_with_orders = 0usize;
+    let mut total_orders_submitted = 0usize;
+    let mut total_orders_filled = 0usize;
+    let mut total_orders_rejected_model_gate = 0usize;
+    let mut total_orders_rejected_model_gate_confidence = 0usize;
+    let mut total_orders_rejected_model_gate_risk = 0usize;
+    let mut total_orders_rejected_model_gate_edge = 0usize;
+    let mut tag_fills: HashMap<String, Vec<(f64, f64, f64)>> = HashMap::new();
+    let mut bonereaper_v2_gate_stats: Option<BonereaperV2GateStats> = None;
+    let first_start_equity = records
+        .first()
+        .map(|r| r.start_equity_usdc)
+        .unwrap_or_default();
+    let mut last_end_equity = records
+        .last()
+        .map(|r| r.end_equity_usdc)
+        .unwrap_or_default();
+    let mut min_end_equity = f64::INFINITY;
+    let mut max_end_equity = f64::NEG_INFINITY;
+    let mut peak_end_equity = first_start_equity.max(0.0);
+    let mut path_max_drawdown = 0.0f64;
+
+    for r in records {
+        pnls.push(r.pnl_usdc);
+        if r.orders_filled > 0 {
+            markets_with_orders += 1;
+        }
+        total_orders_submitted += r.orders_submitted;
+        total_orders_filled += r.orders_filled;
+        total_orders_rejected_model_gate += r.orders_rejected_model_gate;
+        total_orders_rejected_model_gate_confidence += r.orders_rejected_model_gate_confidence;
+        total_orders_rejected_model_gate_risk += r.orders_rejected_model_gate_risk;
+        total_orders_rejected_model_gate_edge += r.orders_rejected_model_gate_edge;
+        for fill in &r.fills_detail {
+            let pnl = fill_resolution_pnl(fill, r.yes_resolved);
+            tag_fills.entry(fill.tag.clone()).or_default().push((
+                pnl,
+                fill.notional,
+                fill.price as f64,
+            ));
+        }
+        if let Some(stats) = r.bonereaper_v2_gate_stats {
+            bonereaper_v2_gate_stats
+                .get_or_insert_with(BonereaperV2GateStats::default)
+                .add_assign(stats);
+        }
+        last_end_equity = r.end_equity_usdc;
+        min_end_equity = min_end_equity.min(r.end_equity_usdc);
+        max_end_equity = max_end_equity.max(r.end_equity_usdc);
+        peak_end_equity = peak_end_equity.max(r.end_equity_usdc);
+        if peak_end_equity > 0.0 {
+            path_max_drawdown =
+                path_max_drawdown.max((peak_end_equity - r.end_equity_usdc) / peak_end_equity);
+        }
+    }
+
+    let total = pnls.iter().sum::<f64>();
+    let n = pnls.len();
+    let mean = if n > 0 { total / n as f64 } else { 0.0 };
+    let stdev = if n > 1 {
+        (pnls.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1) as f64).sqrt()
+    } else {
+        0.0
+    };
+    let mut sorted = pnls.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = if sorted.is_empty() {
+        0.0
+    } else if sorted.len() % 2 == 1 {
+        sorted[sorted.len() / 2]
+    } else {
+        0.5 * (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2])
+    };
+    let hit_rate = if pnls.is_empty() {
+        0.0
+    } else {
+        pnls.iter().filter(|p| **p > 0.0).count() as f64 / pnls.len() as f64
+    };
+    let best = sorted.last().copied().unwrap_or(0.0);
+    let worst = sorted.first().copied().unwrap_or(0.0);
+    if !min_end_equity.is_finite() {
+        min_end_equity = 0.0;
+    }
+    if !max_end_equity.is_finite() {
+        max_end_equity = 0.0;
+    }
+    let by_fill_tag = tag_fills
+        .into_iter()
+        .map(|(tag, fills)| {
+            let count = fills.len();
+            let total_pnl = fills.iter().map(|(pnl, _, _)| *pnl).sum::<f64>();
+            let total_notional = fills.iter().map(|(_, notional, _)| *notional).sum::<f64>();
+            let avg_fill_price = if count > 0 {
+                fills.iter().map(|(_, _, price)| *price).sum::<f64>() / count as f64
+            } else {
+                0.0
+            };
+            let hit_rate = if count > 0 {
+                fills.iter().filter(|(pnl, _, _)| *pnl > 0.0).count() as f64 / count as f64
+            } else {
+                0.0
+            };
+            (
+                tag,
+                FillTagAggregate {
+                    fills: count,
+                    total_notional_usdc: total_notional,
+                    total_pnl_usdc: total_pnl,
+                    mean_pnl_usdc: if count > 0 {
+                        total_pnl / count as f64
+                    } else {
+                        0.0
+                    },
+                    avg_fill_price,
+                    hit_rate,
+                },
+            )
+        })
+        .collect();
+    StrategyAggregate {
+        total_pnl_usdc: total,
+        first_start_equity_usdc: first_start_equity,
+        last_end_equity_usdc: last_end_equity,
+        min_end_equity_usdc: min_end_equity,
+        max_end_equity_usdc: max_end_equity,
+        compounded_return_pct: if first_start_equity > 0.0 {
+            (last_end_equity / first_start_equity - 1.0) * 100.0
+        } else {
+            0.0
+        },
+        path_max_drawdown_pct: path_max_drawdown * 100.0,
+        mean_pnl_usdc: mean,
+        median_pnl_usdc: median,
+        stdev_pnl_usdc: stdev,
+        hit_rate,
+        markets_with_orders,
+        total_orders_submitted,
+        total_orders_filled,
+        total_orders_rejected_model_gate,
+        total_orders_rejected_model_gate_confidence,
+        total_orders_rejected_model_gate_risk,
+        total_orders_rejected_model_gate_edge,
+        worst_market_pnl: worst,
+        best_market_pnl: best,
+        sharpe_ratio: if stdev > 0.0 {
+            mean / stdev * (records.len() as f64).sqrt()
+        } else {
+            0.0
+        },
+        by_fill_tag,
+        bonereaper_v2_gate_stats,
+    }
+}
+
+fn fill_resolution_pnl(fill: &crate::runner::Fill, yes_resolved: bool) -> f64 {
+    let payout = match fill.side.as_str() {
+        "BuyYes" => {
+            if yes_resolved {
+                fill.shares
+            } else {
+                0.0
+            }
+        }
+        "BuyNo" => {
+            if yes_resolved {
+                0.0
+            } else {
+                fill.shares
+            }
+        }
+        "SellYes" | "SellNo" => fill.notional,
+        _ => 0.0,
+    };
+    payout - fill.notional + fill.rebate_usdc
 }
 
 fn aggregate(results: &[MarketResult], strategies: &[StratId]) -> WalkForwardSummary {
     let mut per_strategy = HashMap::new();
     for &strat in strategies {
         let name = strat.name();
-        let mut pnls: Vec<f64> = Vec::new();
-        let mut markets_with_orders = 0usize;
-        let mut total_orders_filled = 0usize;
-        for r in results {
-            if let Some(sr) = r.per_strategy.get(name) {
-                pnls.push(sr.pnl_usdc);
-                if sr.orders_filled > 0 {
-                    markets_with_orders += 1;
-                }
-                total_orders_filled += sr.orders_filled;
-            }
-        }
-        let total = pnls.iter().sum::<f64>();
-        let n = pnls.len();
-        let mean = if n > 0 { total / n as f64 } else { 0.0 };
-        let stdev = if n > 1 {
-            (pnls.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1) as f64).sqrt()
-        } else {
-            0.0
-        };
-        let mut sorted = pnls.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let median = if sorted.is_empty() {
-            0.0
-        } else if sorted.len() % 2 == 1 {
-            sorted[sorted.len() / 2]
-        } else {
-            0.5 * (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2])
-        };
-        let hit_rate = if pnls.is_empty() {
-            0.0
-        } else {
-            pnls.iter().filter(|p| **p > 0.0).count() as f64 / pnls.len() as f64
-        };
-        let best = sorted.last().copied().unwrap_or(0.0);
-        let worst = sorted.first().copied().unwrap_or(0.0);
-        per_strategy.insert(
-            name,
-            StrategyAggregate {
-                total_pnl_usdc: total,
-                mean_pnl_usdc: mean,
-                median_pnl_usdc: median,
-                stdev_pnl_usdc: stdev,
-                hit_rate,
-                markets_with_orders,
-                total_orders_filled,
-                worst_market_pnl: worst,
-                best_market_pnl: best,
-            },
-        );
+        let records: Vec<_> = results
+            .iter()
+            .filter_map(|r| r.per_strategy.get(name))
+            .collect();
+        per_strategy.insert(name, aggregate_for_strategy(&records));
     }
+
+    let mut by_volatility_band: HashMap<VolatilityBand, HashMap<&'static str, StrategyAggregate>> =
+        HashMap::new();
+    for band in [VolatilityBand::Low, VolatilityBand::High] {
+        let mut band_per_strategy = HashMap::new();
+        let band_results: Vec<_> = results
+            .iter()
+            .filter(|r| r.volatility_band == band)
+            .collect();
+        for &strat in strategies {
+            let name = strat.name();
+            let records: Vec<_> = band_results
+                .iter()
+                .filter_map(|r| r.per_strategy.get(name))
+                .collect();
+            band_per_strategy.insert(name, aggregate_for_strategy(&records));
+        }
+        by_volatility_band.insert(band, band_per_strategy);
+    }
+
     WalkForwardSummary {
         markets_attempted: results.len(),
         markets_succeeded: results
             .iter()
             .filter(|r| !r.per_strategy.is_empty())
             .count(),
+        run_config: None,
         per_strategy,
+        by_volatility_band,
+        fold_summaries: Vec::new(),
+        meta_calibration: None,
+    }
+}
+
+fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
+    SummaryRunConfig {
+        starting_cash_usdc: cfg.starting_cash_usdc,
+        kelly_fraction: cfg.kelly_fraction,
+        max_clip_usdc: cfg.max_clip_usdc,
+        max_order_clip_multiplier: cfg.max_order_clip_multiplier,
+        max_per_market_exposure_usdc: cfg.max_per_market_exposure_usdc,
+        clip_fraction_of_equity: cfg.clip_fraction_of_equity,
+        clip_drawdown_soft_pct: cfg.clip_drawdown_soft_pct,
+        clip_drawdown_hard_pct: cfg.clip_drawdown_hard_pct,
+        br2_late_clip_frac: cfg.br2_late_clip_frac,
+        br2_late_max_fires: cfg.br2_late_max_fires,
+        br2_late_confirm_min_model_confidence: cfg.br2_late_confirm_min_model_confidence,
+        br2_late_confirm_max_model_risk: cfg.br2_late_confirm_max_model_risk,
+        br2_late_confirm_min_model_side_p: cfg.br2_late_confirm_min_model_side_p,
+        br2_high_skew_clip_frac: cfg.br2_high_skew_clip_frac,
+        br2_high_skew_max_clips: cfg.br2_high_skew_max_clips,
+        br2_late_favourite_threshold: cfg.br2_late_favourite_threshold,
+        br2_late_favourite_clip_frac: cfg.br2_late_favourite_clip_frac,
+        br2_late_favourite_max_clips: cfg.br2_late_favourite_max_clips,
+        br2_late_favourite_sweep_depth: cfg.br2_late_favourite_sweep_depth,
+        br2_late_favourite_min_model_confidence: cfg.br2_late_favourite_min_model_confidence,
+        br2_late_favourite_max_model_risk: cfg.br2_late_favourite_max_model_risk,
+        br2_late_favourite_min_model_side_p: cfg.br2_late_favourite_min_model_side_p,
+        br2_late_favourite_min_model_edge: cfg.br2_late_favourite_min_model_edge,
+        enforce_model_gate: cfg.enforce_model_gate,
+        model_gate_min_confidence: cfg.model_gate_min_confidence,
+        model_gate_max_risk: cfg.model_gate_max_risk,
+        model_gate_min_edge: cfg.model_gate_min_edge,
+        min_train_markets: cfg.min_train_markets,
+        meta_epochs: cfg.meta_training_config.epochs,
+        meta_learning_rate: cfg.meta_training_config.learning_rate,
+        meta_l2: cfg.meta_training_config.l2,
+        meta_weight_clip: cfg.meta_training_config.weight_clip,
     }
 }
 
 pub fn print_summary(summary: &WalkForwardSummary) {
-    println!("== walk-forward summary ==");
-    println!("markets: attempted={}  succeeded={}", summary.markets_attempted, summary.markets_succeeded);
-    println!();
-    println!(
-        "{:>22}  {:>10}  {:>10}  {:>10}  {:>10}  {:>8}  {:>14}  {:>10}",
-        "strategy", "total_pnl", "mean_pnl", "median", "stdev", "hit", "fills", "worst"
-    );
-    let mut rows: Vec<(&&str, &StrategyAggregate)> = summary.per_strategy.iter().collect();
-    rows.sort_by(|a, b| b.1.total_pnl_usdc.partial_cmp(&a.1.total_pnl_usdc).unwrap_or(std::cmp::Ordering::Equal));
-    for (name, agg) in rows {
+    fn print_table(title: &str, per_strategy: &HashMap<&'static str, StrategyAggregate>) {
+        println!("{title}");
         println!(
-            "{:>22}  {:>+10.4}  {:>+10.4}  {:>+10.4}  {:>10.4}  {:>7.1}%  {:>14}  {:>+10.4}",
-            name,
-            agg.total_pnl_usdc,
-            agg.mean_pnl_usdc,
-            agg.median_pnl_usdc,
-            agg.stdev_pnl_usdc,
-            agg.hit_rate * 100.0,
-            agg.total_orders_filled,
-            agg.worst_market_pnl,
+            "{:>22}  {:>10}  {:>10}  {:>9}  {:>8}  {:>10}  {:>10}  {:>10}  {:>8}  {:>9}  {:>14}  {:>10}",
+            "strategy",
+            "total_pnl",
+            "end_eq",
+            "return",
+            "max_dd",
+            "mean_pnl",
+            "median",
+            "stdev",
+            "hit",
+            "sharpe",
+            "fills",
+            "worst",
         );
+        let mut rows: Vec<(&&str, &StrategyAggregate)> = per_strategy.iter().collect();
+        rows.sort_by(|a, b| {
+            b.1.total_pnl_usdc
+                .partial_cmp(&a.1.total_pnl_usdc)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for (name, agg) in rows {
+            println!(
+                "{:>22}  {:>+10.4}  {:>10.2}  {:>+8.1}%  {:>7.1}%  {:>+10.4}  {:>+10.4}  {:>10.4}  {:>7.1}%  {:>+10.4}  {:>14}  {:>+10.4}",
+                name,
+                agg.total_pnl_usdc,
+                agg.last_end_equity_usdc,
+                agg.compounded_return_pct,
+                agg.path_max_drawdown_pct,
+                agg.mean_pnl_usdc,
+                agg.median_pnl_usdc,
+                agg.stdev_pnl_usdc,
+                agg.hit_rate * 100.0,
+                agg.sharpe_ratio,
+                agg.total_orders_filled,
+                agg.worst_market_pnl,
+            );
+        }
+        println!();
+    }
+
+    println!("== walk-forward summary ==");
+    println!(
+        "markets: attempted={}  succeeded={}",
+        summary.markets_attempted, summary.markets_succeeded
+    );
+    println!();
+
+    print_table("overall", &summary.per_strategy);
+
+    println!("volatility bands:");
+    print_table(
+        VolatilityBand::Low.as_str(),
+        summary
+            .by_volatility_band
+            .get(&VolatilityBand::Low)
+            .unwrap_or(&HashMap::new()),
+    );
+    print_table(
+        VolatilityBand::High.as_str(),
+        summary
+            .by_volatility_band
+            .get(&VolatilityBand::High)
+            .unwrap_or(&HashMap::new()),
+    );
+
+    if !summary.fold_summaries.is_empty() {
+        println!("folds:");
+        for fold in &summary.fold_summaries {
+            println!(
+                "  [{}] train_end={} purge={} test=[{}, {})",
+                fold.fold_idx,
+                fold.train_end_exclusive,
+                fold.purge_markets,
+                fold.test_start,
+                fold.test_end
+            );
+            if fold.test_start >= fold.test_end {
+                println!("    (empty)");
+                continue;
+            }
+            print_table(
+                &format!(
+                    "fold {} metrics ({}..{})",
+                    fold.fold_idx, fold.test_start, fold.test_end
+                ),
+                &fold.fold_results.per_strategy,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn aggregate_handles_per_strategy_metrics() {
+        let mut result_reactive = HashMap::new();
+        result_reactive.insert(
+            StratId::ReactiveDirectional.name(),
+            StrategyMarketResult {
+                orders_submitted: 10,
+                orders_filled: 6,
+                orders_rejected_model_gate: 0,
+                orders_rejected_model_gate_confidence: 0,
+                orders_rejected_model_gate_risk: 0,
+                orders_rejected_model_gate_edge: 0,
+                pnl_usdc: 4.0,
+                start_equity_usdc: 100.0,
+                end_equity_usdc: 104.0,
+                max_drawdown_pct: 0.12,
+                fills: 6,
+                maker_rebates_usdc: 0.1,
+                clip_used_usdc: 2.0,
+                yes_resolved: true,
+                fills_detail: vec![],
+                bonereaper_v2_gate_stats: None,
+                model_training_samples: vec![],
+            },
+        );
+
+        let mut result_bonereaper = HashMap::new();
+        result_bonereaper.insert(
+            StratId::BonereaperLite.name(),
+            StrategyMarketResult {
+                orders_submitted: 3,
+                orders_filled: 1,
+                orders_rejected_model_gate: 0,
+                orders_rejected_model_gate_confidence: 0,
+                orders_rejected_model_gate_risk: 0,
+                orders_rejected_model_gate_edge: 0,
+                pnl_usdc: -2.0,
+                start_equity_usdc: 100.0,
+                end_equity_usdc: 98.0,
+                max_drawdown_pct: 0.05,
+                fills: 1,
+                maker_rebates_usdc: 0.0,
+                clip_used_usdc: 1.5,
+                yes_resolved: false,
+                fills_detail: vec![],
+                bonereaper_v2_gate_stats: None,
+                model_training_samples: vec![],
+            },
+        );
+
+        let mut result_no_order = HashMap::new();
+        result_no_order.insert(
+            StratId::PairedMm.name(),
+            StrategyMarketResult {
+                orders_submitted: 0,
+                orders_filled: 0,
+                orders_rejected_model_gate: 0,
+                orders_rejected_model_gate_confidence: 0,
+                orders_rejected_model_gate_risk: 0,
+                orders_rejected_model_gate_edge: 0,
+                pnl_usdc: 0.0,
+                start_equity_usdc: 100.0,
+                end_equity_usdc: 100.0,
+                max_drawdown_pct: 0.0,
+                fills: 0,
+                maker_rebates_usdc: 0.0,
+                clip_used_usdc: 3.0,
+                yes_resolved: true,
+                fills_detail: vec![],
+                bonereaper_v2_gate_stats: None,
+                model_training_samples: vec![],
+            },
+        );
+
+        let results = vec![
+            MarketResult {
+                asset_id: "1".to_string(),
+                slug: "a".to_string(),
+                close_ts: 0,
+                outcome_label: "Yes".to_string(),
+                volatility_range: 0.02,
+                volatility_band: VolatilityBand::Low,
+                per_strategy: result_reactive,
+            },
+            MarketResult {
+                asset_id: "2".to_string(),
+                slug: "b".to_string(),
+                close_ts: 0,
+                outcome_label: "No".to_string(),
+                volatility_range: 0.20,
+                volatility_band: VolatilityBand::High,
+                per_strategy: result_bonereaper,
+            },
+            MarketResult {
+                asset_id: "3".to_string(),
+                slug: "c".to_string(),
+                close_ts: 0,
+                outcome_label: "Yes".to_string(),
+                volatility_range: 0.10,
+                volatility_band: VolatilityBand::Low,
+                per_strategy: result_no_order,
+            },
+        ];
+
+        let summary = aggregate(
+            &results,
+            &[
+                StratId::ReactiveDirectional,
+                StratId::BonereaperLite,
+                StratId::PairedMm,
+            ],
+        );
+        assert_eq!(summary.markets_attempted, 3);
+        assert_eq!(summary.markets_succeeded, 3);
+
+        let reactive = summary
+            .per_strategy
+            .get(StratId::ReactiveDirectional.name())
+            .expect("reactive missing");
+        assert_eq!(reactive.markets_with_orders, 1);
+        assert_eq!(reactive.total_orders_filled, 6);
+        assert_eq!(reactive.best_market_pnl, 4.0);
+        assert_eq!(reactive.worst_market_pnl, 4.0);
+        assert!((reactive.hit_rate - 1.0).abs() < f64::EPSILON);
+
+        let paired = summary
+            .per_strategy
+            .get(StratId::PairedMm.name())
+            .expect("paired missing");
+        assert_eq!(paired.markets_with_orders, 0);
+        assert_eq!(paired.total_orders_filled, 0);
+        assert_eq!(paired.total_pnl_usdc, 0.0);
+
+        let low = summary
+            .by_volatility_band
+            .get(&VolatilityBand::Low)
+            .expect("low band missing");
+        let low_reactive = low
+            .get(StratId::ReactiveDirectional.name())
+            .expect("low reactive missing");
+        assert_eq!(low_reactive.total_pnl_usdc, 4.0);
+
+        let high = summary
+            .by_volatility_band
+            .get(&VolatilityBand::High)
+            .expect("high band missing");
+        let high_bonereaper = high
+            .get(StratId::BonereaperLite.name())
+            .expect("high bonereaper missing");
+        assert_eq!(high_bonereaper.total_pnl_usdc, -2.0);
+        assert_eq!(reactive.sharpe_ratio, 0.0);
+    }
+
+    #[test]
+    fn fold_plan_with_fold_size() {
+        let cfg = WalkForwardConfig {
+            fold_size: Some(3),
+            ..WalkForwardConfig::default()
+        };
+        let plan = build_fold_plan(10, &cfg).expect("plan");
+        assert_eq!(plan, vec![(0, 0, 3), (3, 3, 6), (6, 6, 9), (9, 9, 10)]);
+    }
+
+    #[test]
+    fn fold_plan_skips_until_min_train_markets() {
+        let cfg = WalkForwardConfig {
+            fold_size: Some(3),
+            min_train_markets: 6,
+            ..WalkForwardConfig::default()
+        };
+        let plan = build_fold_plan(10, &cfg).expect("plan");
+        assert_eq!(plan, vec![(6, 6, 9), (9, 9, 10)]);
+    }
+
+    #[test]
+    fn fold_plan_errors_when_min_train_markets_impossible() {
+        let cfg = WalkForwardConfig {
+            fold_size: Some(3),
+            min_train_markets: 12,
+            ..WalkForwardConfig::default()
+        };
+        let err = build_fold_plan(10, &cfg).expect_err("should reject impossible min train");
+        assert!(
+            err.to_string().contains("no walk-forward folds satisfy"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn fold_plan_with_folds_and_purge() {
+        let cfg = WalkForwardConfig {
+            walk_forward_folds: Some(2),
+            purge_markets: 2,
+            ..WalkForwardConfig::default()
+        };
+        let plan = build_fold_plan(10, &cfg).expect("plan");
+        assert_eq!(plan, vec![(0, 0, 5), (3, 5, 10)]);
+    }
+
+    #[test]
+    fn no_fold_config_uses_single_window() {
+        let cfg = WalkForwardConfig::default();
+        let plan = build_fold_plan(7, &cfg).expect("plan");
+        assert_eq!(plan, vec![(0, 0, 7)]);
     }
 }

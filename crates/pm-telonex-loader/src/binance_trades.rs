@@ -72,11 +72,7 @@ pub async fn load_binance_agg_trades_async(
     let mut out: Vec<SpotTick> = Vec::new();
     let mut stats = BinanceLoadStats::default();
 
-    while let Some(batch) = stream
-        .try_next()
-        .await
-        .context("read next record batch")?
-    {
+    while let Some(batch) = stream.try_next().await.context("read next record batch")? {
         process(&batch, &cols, &mut out, &mut stats)?;
     }
     Ok((out, stats))
@@ -145,7 +141,9 @@ fn process(
         if !ts.is_valid(i) || !price.is_valid(i) {
             continue;
         }
-        let Ok(p) = price.value(i).parse::<f64>() else { continue };
+        let Ok(p) = price.value(i).parse::<f64>() else {
+            continue;
+        };
         if !p.is_finite() || p <= 0.0 {
             continue;
         }

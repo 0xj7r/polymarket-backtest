@@ -42,11 +42,7 @@ impl Ring {
         if self.len == 0 {
             return None;
         }
-        let idx = if self.len < self.cap {
-            0
-        } else {
-            self.head
-        };
+        let idx = if self.len < self.cap { 0 } else { self.head };
         Some(self.buf[idx])
     }
     pub fn newest(&self) -> Option<f32> {
@@ -137,10 +133,10 @@ pub fn top_n_depth(event: &ReplayEvent, n: usize) -> f32 {
 /// Aggregated direction signal. Positive => price expected to drift up (YES).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DirectionScore {
-    pub momentum: f32,   // recent mid drift, normalised to [-1, 1]
-    pub ofi: f32,        // [-1, 1]
+    pub momentum: f32,       // recent mid drift, normalised to [-1, 1]
+    pub ofi: f32,            // [-1, 1]
     pub microprice_dev: f32, // (microprice - mid) / spread, [-1, 1]
-    pub composite: f32,  // weighted combination, [-1, 1]
+    pub composite: f32,      // weighted combination, [-1, 1]
 }
 
 pub fn direction_score(
@@ -180,9 +176,9 @@ pub fn direction_score(
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ConfidenceScore {
-    pub stability: f32,         // [0, 1] — 1 = perfectly consistent recent signal
+    pub stability: f32,            // [0, 1] — 1 = perfectly consistent recent signal
     pub early_market_penalty: f32, // [0, 1] — 1 = fully damped (very early)
-    pub composite: f32,         // [0, 1]
+    pub composite: f32,            // [0, 1]
 }
 
 /// `recent_dir_scores` is the sliding window of recent composite direction
@@ -217,10 +213,10 @@ pub fn confidence_score(
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RiskScore {
-    pub whipsaw: f32,    // [0, 1] — 1 = lots of direction sign flips
-    pub liquidity: f32,  // [0, 1] — 1 = thick book
-    pub path_risk: f32,  // [0, 1] — 1 = mid pinned near 0.5 (high path risk)
-    pub composite: f32,  // [0, 1] — higher = MORE risk
+    pub whipsaw: f32,   // [0, 1] — 1 = lots of direction sign flips
+    pub liquidity: f32, // [0, 1] — 1 = thick book
+    pub path_risk: f32, // [0, 1] — 1 = mid pinned near 0.5 (high path risk)
+    pub composite: f32, // [0, 1] — higher = MORE risk
 }
 
 pub fn risk_score(
@@ -274,8 +270,14 @@ mod tests {
         use pm_types::{BookLevel, MarketId, ReplayFlags, tape::TAPE_DEPTH};
         let mut bids = [BookLevel::default(); TAPE_DEPTH];
         let mut asks = [BookLevel::default(); TAPE_DEPTH];
-        bids[0] = BookLevel { price: bid, size: bid_size };
-        asks[0] = BookLevel { price: ask, size: ask_size };
+        bids[0] = BookLevel {
+            price: bid,
+            size: bid_size,
+        };
+        asks[0] = BookLevel {
+            price: ask,
+            size: ask_size,
+        };
         ReplayEvent {
             ts_ns: 0,
             market_id: MarketId(1),

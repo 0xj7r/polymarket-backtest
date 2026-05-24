@@ -86,11 +86,7 @@ pub async fn load_pm_onchain_async(
     let mut out: Vec<OnchainFill> = Vec::new();
     let mut stats = OnchainLoadStats::default();
     let wallet_lower = wallet_filter.map(|s| s.to_ascii_lowercase());
-    while let Some(batch) = stream
-        .try_next()
-        .await
-        .context("read next record batch")?
-    {
+    while let Some(batch) = stream.try_next().await.context("read next record batch")? {
         process(&batch, &cols, wallet_lower.as_deref(), &mut out, &mut stats)?;
     }
     Ok((out, stats))
@@ -194,16 +190,24 @@ fn process(
                 continue;
             }
         }
-        let Ok(p) = price.value(i).parse::<f32>() else { continue };
-        let Ok(s) = amount.value(i).parse::<f32>() else { continue };
+        let Ok(p) = price.value(i).parse::<f32>() else {
+            continue;
+        };
+        let Ok(s) = amount.value(i).parse::<f32>() else {
+            continue;
+        };
         if !p.is_finite() || p <= 0.0 || !s.is_finite() || s <= 0.0 {
             continue;
         }
         let ts_ns = ts.value(i).saturating_mul(1_000);
         stats.first_ts_ns.get_or_insert(ts_ns);
         stats.last_ts_ns = Some(ts_ns);
-        let mk_side = maker_side.and_then(|a| a.is_valid(i).then(|| a.value(i).to_string())).unwrap_or_default();
-        let tk_side = taker_side.and_then(|a| a.is_valid(i).then(|| a.value(i).to_string())).unwrap_or_default();
+        let mk_side = maker_side
+            .and_then(|a| a.is_valid(i).then(|| a.value(i).to_string()))
+            .unwrap_or_default();
+        let tk_side = taker_side
+            .and_then(|a| a.is_valid(i).then(|| a.value(i).to_string()))
+            .unwrap_or_default();
         out.push(OnchainFill {
             ts_ns,
             maker: mk,
@@ -249,13 +253,24 @@ pub fn whale_net_flow(fills: &[OnchainFill], wallet: &str, now_ns: i64, lookback
 mod tests {
     use super::*;
 
-    fn fill(ts_ns: i64, maker: &str, taker: &str, maker_side: &str, size: f32, mirrored: bool) -> OnchainFill {
+    fn fill(
+        ts_ns: i64,
+        maker: &str,
+        taker: &str,
+        maker_side: &str,
+        size: f32,
+        mirrored: bool,
+    ) -> OnchainFill {
         OnchainFill {
             ts_ns,
             maker: maker.to_string(),
             taker: taker.to_string(),
             maker_side: maker_side.to_string(),
-            taker_side: if maker_side == "buy" { "sell".into() } else { "buy".into() },
+            taker_side: if maker_side == "buy" {
+                "sell".into()
+            } else {
+                "buy".into()
+            },
             price: 0.5,
             size,
             mirrored,

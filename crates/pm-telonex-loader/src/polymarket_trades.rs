@@ -61,11 +61,7 @@ pub async fn load_pm_trades_async(
     let mut stream = stream_builder.build().context("build batch stream")?;
     let mut out: Vec<TradeTick> = Vec::new();
     let mut stats = TradesLoadStats::default();
-    while let Some(batch) = stream
-        .try_next()
-        .await
-        .context("read next record batch")?
-    {
+    while let Some(batch) = stream.try_next().await.context("read next record batch")? {
         process(&batch, &cols, &mut out, &mut stats)?;
     }
     Ok((out, stats))
@@ -130,8 +126,12 @@ fn process(
         if !ts.is_valid(i) || !price.is_valid(i) || !size.is_valid(i) || !side.is_valid(i) {
             continue;
         }
-        let Ok(p) = price.value(i).parse::<f32>() else { continue };
-        let Ok(s) = size.value(i).parse::<f32>() else { continue };
+        let Ok(p) = price.value(i).parse::<f32>() else {
+            continue;
+        };
+        let Ok(s) = size.value(i).parse::<f32>() else {
+            continue;
+        };
         if !p.is_finite() || p <= 0.0 || !s.is_finite() || s <= 0.0 {
             continue;
         }

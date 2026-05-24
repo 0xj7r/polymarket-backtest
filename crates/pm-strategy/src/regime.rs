@@ -60,7 +60,10 @@ impl BtcRegimeSnapshot {
             .map(|t| ((now_ns - t).max(0) / 1_000_000) as u64)
             .unwrap_or(0);
 
-        let return_bps = |sec: i64| spot.simple_return(now_ns, sec * 1_000_000_000).map(|r| r * 10_000.0);
+        let return_bps = |sec: i64| {
+            spot.simple_return(now_ns, sec * 1_000_000_000)
+                .map(|r| r * 10_000.0)
+        };
         let return_30s_bps = return_bps(30);
         let return_60s_bps = return_bps(60);
         let return_120s_bps = return_bps(120);

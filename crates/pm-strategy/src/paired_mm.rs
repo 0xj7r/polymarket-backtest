@@ -93,7 +93,8 @@ impl Strategy for PairedMmDense {
         &mut self,
         event: &ReplayEvent,
         ctx: &Ctx,
-        _spot: &SpotHistory, _trades: &pm_types::TradeHistory,
+        _spot: &SpotHistory,
+        _trades: &pm_types::TradeHistory,
     ) -> StrategyOutput {
         if !book_valid(event) {
             return StrategyOutput::hold();
@@ -125,6 +126,7 @@ impl Strategy for PairedMmDense {
             orders.push(OrderRequest {
                 side: Side::BuyYes,
                 shares: self.cfg.clip_shares,
+                max_depth: 1,
                 limit_price: Some(yes_start as f32),
                 tag: "pmm_yes_rung",
             });
@@ -138,6 +140,7 @@ impl Strategy for PairedMmDense {
             orders.push(OrderRequest {
                 side: Side::BuyNo,
                 shares: self.cfg.clip_shares,
+                max_depth: 1,
                 limit_price: Some(no_start as f32),
                 tag: "pmm_no_rung",
             });
@@ -156,8 +159,14 @@ mod tests {
     fn evt(ts_ns: i64, bid: f32, ask: f32) -> ReplayEvent {
         let mut bids = [BookLevel::default(); TAPE_DEPTH];
         let mut asks = [BookLevel::default(); TAPE_DEPTH];
-        bids[0] = BookLevel { price: bid, size: 200.0 };
-        asks[0] = BookLevel { price: ask, size: 200.0 };
+        bids[0] = BookLevel {
+            price: bid,
+            size: 200.0,
+        };
+        asks[0] = BookLevel {
+            price: ask,
+            size: 200.0,
+        };
         ReplayEvent {
             ts_ns,
             market_id: MarketId(1),
@@ -175,19 +184,41 @@ mod tests {
     #[test]
     fn emits_paired_rungs_when_book_is_open() {
         let mut s = PairedMmDense::new(PairedMmDenseConfig::default());
-        let ctx = Ctx { events_seen: 1, yes_shares: 0.0, no_shares: 0.0, cash_usdc: 100.0, market_close_ns: 0 };
+        let ctx = Ctx {
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            model_output: None,
+            market_close_ns: 0,
+        };
         let spot = SpotHistory::default();
         // book 0.50/0.51 → no_ask = 1 - 0.50 = 0.50; pair_cost = 0.49 + 0.49 = 0.98? wait
         // yes_start = 0.50, no_start = 0.49, pair = 0.99 → above gate. Use tighter.
-        let out = s.on_event(&evt(1_000_000_000, 0.46, 0.48), &ctx, &spot, &pm_types::TradeHistory::default());
+        let _out = s.on_event(
+            &evt(1_000_000_000, 0.46, 0.48),
+            &ctx,
+            &spot,
+            &pm_types::TradeHistory::default(),
+        );
         // no_ask = 1 - 0.46 = 0.54; yes_start = 0.47, no_start = 0.53, pair = 1.00 → still high
         // need pair below 0.97. Use 0.40/0.42
         let mut s2 = PairedMmDense::new(PairedMmDenseConfig::default());
-        let out = s2.on_event(&evt(1_000_000_000, 0.40, 0.42), &ctx, &spot, &pm_types::TradeHistory::default());
+        let _out = s2.on_event(
+            &evt(1_000_000_000, 0.40, 0.42),
+            &ctx,
+            &spot,
+            &pm_types::TradeHistory::default(),
+        );
         // no_ask = 0.60; yes_start = 0.41, no_start = 0.59; pair = 1.00 → still high
         // Skewed market needs to give us edge. Try 0.30/0.32:
         let mut s3 = PairedMmDense::new(PairedMmDenseConfig::default());
-        let out = s3.on_event(&evt(1_000_000_000, 0.30, 0.32), &ctx, &spot, &pm_types::TradeHistory::default());
+        let _out = s3.on_event(
+            &evt(1_000_000_000, 0.30, 0.32),
+            &ctx,
+            &spot,
+            &pm_types::TradeHistory::default(),
+        );
         // no_ask = 0.70; yes_start = 0.31, no_start = 0.69; pair = 1.00 → still
         // For this gate to open, need yes_ask + no_ask - 2*tick < max
         // With symmetric mid the pair_cost = 1 - spread + (something) ... wait:
@@ -200,24 +231,36 @@ mod tests {
             max_entry_pair_cost: 1.5,
             ..PairedMmDenseConfig::default()
         });
-        let out = s4.on_event(&evt(1_000_000_000, 0.40, 0.42), &ctx, &spot, &pm_types::TradeHistory::default());
+        let out = s4.on_event(
+            &evt(1_000_000_000, 0.40, 0.42),
+            &ctx,
+            &spot,
+            &pm_types::TradeHistory::default(),
+        );
         assert_eq!(out.orders.len(), 2);
         assert!(out.orders.iter().any(|o| matches!(o.side, Side::BuyYes)));
         assert!(out.orders.iter().any(|o| matches!(o.side, Side::BuyNo)));
-        // Silence unused warnings from the earlier exploration calls.
-        let _ = out;
-        let _ = s;
-        let _ = s2;
-        let _ = s3;
     }
 
     #[test]
     fn skips_when_pair_cost_above_gate() {
         let mut s = PairedMmDense::new(PairedMmDenseConfig::default());
-        let ctx = Ctx { events_seen: 1, yes_shares: 0.0, no_shares: 0.0, cash_usdc: 100.0, market_close_ns: 0 };
+        let ctx = Ctx {
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            model_output: None,
+            market_close_ns: 0,
+        };
         let spot = SpotHistory::default();
         // Wide spread → yes_ask + (1-yes_bid) = 1 + spread > gate
-        let out = s.on_event(&evt(1_000_000_000, 0.40, 0.50), &ctx, &spot, &pm_types::TradeHistory::default());
+        let out = s.on_event(
+            &evt(1_000_000_000, 0.40, 0.50),
+            &ctx,
+            &spot,
+            &pm_types::TradeHistory::default(),
+        );
         assert!(out.orders.is_empty());
     }
 
@@ -228,13 +271,35 @@ mod tests {
             min_refresh_ns: 1_000_000_000,
             ..PairedMmDenseConfig::default()
         });
-        let ctx = Ctx { events_seen: 1, yes_shares: 0.0, no_shares: 0.0, cash_usdc: 100.0, market_close_ns: 0 };
+        let ctx = Ctx {
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            model_output: None,
+            market_close_ns: 0,
+        };
         let spot = SpotHistory::default();
-        let out1 = s.on_event(&evt(0, 0.40, 0.42), &ctx, &spot, &pm_types::TradeHistory::default());
+        let out1 = s.on_event(
+            &evt(0, 0.40, 0.42),
+            &ctx,
+            &spot,
+            &pm_types::TradeHistory::default(),
+        );
         assert_eq!(out1.orders.len(), 2);
-        let out2 = s.on_event(&evt(100_000_000, 0.40, 0.42), &ctx, &spot, &pm_types::TradeHistory::default()); // 100ms later
+        let out2 = s.on_event(
+            &evt(100_000_000, 0.40, 0.42),
+            &ctx,
+            &spot,
+            &pm_types::TradeHistory::default(),
+        ); // 100ms later
         assert!(out2.orders.is_empty(), "should rate-limit");
-        let out3 = s.on_event(&evt(2_000_000_000, 0.40, 0.42), &ctx, &spot, &pm_types::TradeHistory::default()); // 2s later
+        let out3 = s.on_event(
+            &evt(2_000_000_000, 0.40, 0.42),
+            &ctx,
+            &spot,
+            &pm_types::TradeHistory::default(),
+        ); // 2s later
         assert_eq!(out3.orders.len(), 2);
     }
 }

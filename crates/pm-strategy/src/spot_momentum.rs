@@ -67,11 +67,7 @@ impl MomentumSignal {
 }
 
 /// Compute multi-timeframe momentum over the trailing windows ending at `now_ns`.
-pub fn compute_momentum(
-    now_ns: i64,
-    spot: &SpotHistory,
-    cfg: &MomentumConfig,
-) -> MomentumSignal {
+pub fn compute_momentum(now_ns: i64, spot: &SpotHistory, cfg: &MomentumConfig) -> MomentumSignal {
     if cfg.window_ns <= 0 || cfg.lookback_windows == 0 || spot.is_empty() {
         return MomentumSignal::default();
     }
@@ -79,8 +75,12 @@ pub fn compute_momentum(
     for window_idx in 0..cfg.lookback_windows {
         let end_ns = now_ns - (window_idx as i64) * cfg.window_ns;
         let start_ns = end_ns - cfg.window_ns;
-        let Some(start_price) = spot.price_at_or_after(start_ns) else { break };
-        let Some(end_price) = spot.price_at_or_before(end_ns) else { break };
+        let Some(start_price) = spot.price_at_or_after(start_ns) else {
+            break;
+        };
+        let Some(end_price) = spot.price_at_or_before(end_ns) else {
+            break;
+        };
         if start_price <= 0.0 || end_price <= 0.0 {
             break;
         }
@@ -95,10 +95,7 @@ pub fn compute_momentum(
         weighted += ret.signum() * w;
     }
     let latest = returns.first().copied();
-    let accel = returns
-        .first()
-        .zip(returns.get(1))
-        .map(|(a, b)| a - b);
+    let accel = returns.first().zip(returns.get(1)).map(|(a, b)| a - b);
     MomentumSignal {
         direction: SignalDirection::from_signed(weighted, cfg.directional_deadband),
         score: weighted,
@@ -126,11 +123,26 @@ pub fn weighted_multi_tf_return(now_ns: i64, spot: &SpotHistory) -> Option<f64> 
     }
     let mut sum = 0.0f64;
     let mut wsum = 0.0f64;
-    if let Some(r) = r10 { sum += 0.45 * r; wsum += 0.45; }
-    if let Some(r) = r30 { sum += 0.25 * r; wsum += 0.25; }
-    if let Some(r) = r60 { sum += 0.15 * r; wsum += 0.15; }
-    if let Some(r) = r120 { sum += 0.10 * r; wsum += 0.10; }
-    if let Some(r) = r300 { sum += 0.05 * r; wsum += 0.05; }
+    if let Some(r) = r10 {
+        sum += 0.45 * r;
+        wsum += 0.45;
+    }
+    if let Some(r) = r30 {
+        sum += 0.25 * r;
+        wsum += 0.25;
+    }
+    if let Some(r) = r60 {
+        sum += 0.15 * r;
+        wsum += 0.15;
+    }
+    if let Some(r) = r120 {
+        sum += 0.10 * r;
+        wsum += 0.10;
+    }
+    if let Some(r) = r300 {
+        sum += 0.05 * r;
+        wsum += 0.05;
+    }
     if wsum <= 0.0 {
         return None;
     }

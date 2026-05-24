@@ -121,10 +121,7 @@ mod tests {
 
     #[test]
     fn flow_window_excludes_old() {
-        let h = TradeHistory::new(vec![
-            tt(0, 100.0, false),
-            tt(2_000_000_000, 5.0, true),
-        ]);
+        let h = TradeHistory::new(vec![tt(0, 100.0, false), tt(2_000_000_000, 5.0, true)]);
         let f = compute_trade_flow(2_500_000_000, 1_000_000_000, &h);
         // Only the second trade is in window
         assert_eq!(f.trade_count, 1);

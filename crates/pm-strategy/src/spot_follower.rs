@@ -57,7 +57,8 @@ impl Strategy for SpotMomentumFollower {
         &mut self,
         event: &ReplayEvent,
         ctx: &Ctx,
-        spot: &SpotHistory, _trades: &pm_types::TradeHistory,
+        spot: &SpotHistory,
+        _trades: &pm_types::TradeHistory,
     ) -> StrategyOutput {
         if self.fired {
             return StrategyOutput::hold();
@@ -67,7 +68,8 @@ impl Strategy for SpotMomentumFollower {
         }
         let window_open_ns = ctx.market_close_ns - BETTING_WINDOW_SECS * 1_000_000_000;
         let secs_in_window = ((event.ts_ns - window_open_ns) as f64 / 1e9) as f32;
-        if !(self.cfg.min_seconds_in_window..=BETTING_WINDOW_SECS as f32).contains(&secs_in_window) {
+        if !(self.cfg.min_seconds_in_window..=BETTING_WINDOW_SECS as f32).contains(&secs_in_window)
+        {
             return StrategyOutput::hold();
         }
         if spot.is_empty() {
@@ -103,6 +105,7 @@ impl Strategy for SpotMomentumFollower {
         StrategyOutput::one(OrderRequest {
             side,
             shares,
+            max_depth: 1,
             limit_price: None,
             tag: "smf_directional",
         })
@@ -117,8 +120,14 @@ mod tests {
     fn evt(ts_ns: i64, bid: f32, ask: f32) -> ReplayEvent {
         let mut bids = [BookLevel::default(); TAPE_DEPTH];
         let mut asks = [BookLevel::default(); TAPE_DEPTH];
-        bids[0] = BookLevel { price: bid, size: 200.0 };
-        asks[0] = BookLevel { price: ask, size: 200.0 };
+        bids[0] = BookLevel {
+            price: bid,
+            size: 200.0,
+        };
+        asks[0] = BookLevel {
+            price: ask,
+            size: 200.0,
+        };
         ReplayEvent {
             ts_ns,
             market_id: MarketId(1),
@@ -159,11 +168,17 @@ mod tests {
             yes_shares: 0.0,
             no_shares: 0.0,
             cash_usdc: 100.0,
+            model_output: None,
             market_close_ns: close_ns,
         };
         let mut s = SpotMomentumFollower::new(SpotMomentumFollowerConfig::default());
         let spot = spot_with_uptrend(now_ns);
-        let out = s.on_event(&evt(now_ns, 0.49, 0.51), &ctx, &spot, &pm_types::TradeHistory::default());
+        let out = s.on_event(
+            &evt(now_ns, 0.49, 0.51),
+            &ctx,
+            &spot,
+            &pm_types::TradeHistory::default(),
+        );
         assert_eq!(out.orders.len(), 1);
         assert_eq!(out.orders[0].side, Side::BuyYes);
     }
@@ -177,11 +192,17 @@ mod tests {
             yes_shares: 0.0,
             no_shares: 0.0,
             cash_usdc: 100.0,
+            model_output: None,
             market_close_ns: close_ns,
         };
         let mut s = SpotMomentumFollower::new(SpotMomentumFollowerConfig::default());
         let spot = spot_with_uptrend(now_ns);
-        let out = s.on_event(&evt(now_ns, 0.49, 0.51), &ctx, &spot, &pm_types::TradeHistory::default());
+        let out = s.on_event(
+            &evt(now_ns, 0.49, 0.51),
+            &ctx,
+            &spot,
+            &pm_types::TradeHistory::default(),
+        );
         assert!(out.orders.is_empty());
     }
 }

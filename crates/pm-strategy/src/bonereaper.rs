@@ -135,8 +135,8 @@ impl Strategy for BonereaperLite {
             0.0
         };
         // Empirical: aggressor flow CONTRA on 5m BTC binaries (see reactive.rs).
-        let composite_dir = (0.30 * book_dir.composite + 0.55 * spot_mom + 0.15 * (-trade_flow))
-            .clamp(-1.0, 1.0);
+        let composite_dir =
+            (0.30 * book_dir.composite + 0.55 * spot_mom + 0.15 * (-trade_flow)).clamp(-1.0, 1.0);
         self.recent_dirs.push(composite_dir);
 
         if event.yes_bid <= 0.0 || event.yes_ask <= 0.0 {
@@ -170,6 +170,7 @@ impl Strategy for BonereaperLite {
             orders.push(OrderRequest {
                 side: Side::BuyYes,
                 shares: shares_capped(self.cfg.paired_clip_usdc, event.yes_ask),
+                max_depth: 1,
                 limit_price: None,
                 tag: "br_paired_yes",
             });
@@ -177,6 +178,7 @@ impl Strategy for BonereaperLite {
             orders.push(OrderRequest {
                 side: Side::BuyNo,
                 shares: shares_capped(self.cfg.paired_clip_usdc, no_px),
+                max_depth: 1,
                 limit_price: None,
                 tag: "br_paired_no",
             });
@@ -200,6 +202,7 @@ impl Strategy for BonereaperLite {
                 orders.push(OrderRequest {
                     side,
                     shares: shares_capped(self.cfg.late_fav_clip_usdc, fill_px),
+                    max_depth: 1,
                     limit_price: None,
                     tag: "br_late_fav",
                 });
@@ -216,6 +219,7 @@ impl Strategy for BonereaperLite {
                     orders.push(OrderRequest {
                         side: Side::BuyNo,
                         shares: shares_capped(self.cfg.convex_clip_usdc, no_px),
+                        max_depth: 1,
                         limit_price: None,
                         tag: "br_convex_no",
                     });
@@ -227,6 +231,7 @@ impl Strategy for BonereaperLite {
                     orders.push(OrderRequest {
                         side: Side::BuyYes,
                         shares: shares_capped(self.cfg.convex_clip_usdc, event.yes_ask),
+                        max_depth: 1,
                         limit_price: None,
                         tag: "br_convex_yes",
                     });
@@ -253,6 +258,7 @@ impl Strategy for BonereaperLite {
                 orders.push(OrderRequest {
                     side,
                     shares: shares_capped(self.cfg.reversal_clip_usdc, fill_px),
+                    max_depth: 1,
                     limit_price: None,
                     tag: "br_reversal_hedge",
                 });
@@ -271,8 +277,14 @@ mod tests {
     fn evt(ts_ns: i64, bid: f32, ask: f32) -> ReplayEvent {
         let mut bids = [BookLevel::default(); TAPE_DEPTH];
         let mut asks = [BookLevel::default(); TAPE_DEPTH];
-        bids[0] = BookLevel { price: bid, size: 200.0 };
-        asks[0] = BookLevel { price: ask, size: 200.0 };
+        bids[0] = BookLevel {
+            price: bid,
+            size: 200.0,
+        };
+        asks[0] = BookLevel {
+            price: ask,
+            size: 200.0,
+        };
         ReplayEvent {
             ts_ns,
             market_id: MarketId(1),
@@ -291,7 +303,11 @@ mod tests {
     fn paired_core_fires_in_early_window() {
         let close_ns: i64 = 100_000_000_000_000;
         let ctx = Ctx {
-            events_seen: 1, yes_shares: 0.0, no_shares: 0.0, cash_usdc: 100.0,
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            model_output: None,
             market_close_ns: close_ns,
         };
         let mut s = BonereaperLite::new(BonereaperLiteConfig::default());
@@ -310,7 +326,11 @@ mod tests {
     fn convex_tail_fires_on_extreme_yes_mid() {
         let close_ns: i64 = 100_000_000_000_000;
         let ctx = Ctx {
-            events_seen: 1, yes_shares: 0.0, no_shares: 0.0, cash_usdc: 100.0,
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            model_output: None,
             market_close_ns: close_ns,
         };
         let mut s = BonereaperLite::new(BonereaperLiteConfig::default());
@@ -321,6 +341,10 @@ mod tests {
             &SpotHistory::default(),
             &TradeHistory::default(),
         );
-        assert!(out.orders.iter().any(|o| o.tag == "br_convex_no"), "got {:?}", out.orders.iter().map(|o| o.tag).collect::<Vec<_>>());
+        assert!(
+            out.orders.iter().any(|o| o.tag == "br_convex_no"),
+            "got {:?}",
+            out.orders.iter().map(|o| o.tag).collect::<Vec<_>>()
+        );
     }
 }

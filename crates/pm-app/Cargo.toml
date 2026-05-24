@@ -15,6 +15,7 @@ pm-types          = { workspace = true }
 pm-telonex-loader = { workspace = true }
 pm-strategy       = { workspace = true }
 pm-risk           = { workspace = true }
+pm-model          = { workspace = true }
 
 anyhow             = { workspace = true }
 clap               = { workspace = true }
@@ -28,3 +29,5 @@ futures            = { workspace = true }
 reqwest            = { workspace = true }
 rayon              = { workspace = true }
 object_store       = { workspace = true }
+arrow              = { workspace = true }
+parquet            = { workspace = true }

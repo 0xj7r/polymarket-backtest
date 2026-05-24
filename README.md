@@ -14,7 +14,8 @@ crates/
 │   ├── binance_trades      (Binance agg_trades — BTC spot)
 │   ├── nautilus_conv       (ReplayEvent → nautilus_model::QuoteTick)
 │   └── s3                  (object_store-based S3 client)
-├── pm-strategy/           # 7 strategies + signal stack
+├── pm-model/              # canonical 4-score model + online meta-calibrator
+├── pm-strategy/           # strategy candidates + execution lanes
 │   ├── signals             (direction/confidence/calibrated_p/risk scores)
 │   ├── regime              (BtcRegime: Flat/Whipsaw/DirectionalSmooth/TrendingVolatile)
 │   ├── spot_momentum       (multi-TF weighted spot returns)
@@ -61,6 +62,9 @@ btc5 = df[df['slug'].str.startswith('btc-updown-5m-', na=False) & (df['status'] 
     --out-markets /tmp/wf.jsonl --out-summary /tmp/wf-summary.json
 ```
 
+For full AWS portfolio runs, sizing grids, and checkpointed monitoring, see
+[docs/aws-backtest-runbook.md](docs/aws-backtest-runbook.md).
+
 ## Empirical findings (1-day, 288 BTC-5m markets, 2026-05-12)
 
 | Strategy | Total P&L | Hit | Fills | Worst | Notes |
@@ -95,16 +99,19 @@ cargo test --workspace
 
 ## Status
 
-The framework is feature-complete:
+The framework is a working research/backtest engine, but not production-live
+complete yet:
 - ✅ S3 streaming for book / trades / spot / onchain
 - ✅ Maker matcher with rebates + per-market cap + inventory cancel
 - ✅ Walk-forward harness (parallel pipelining)
 - ✅ Markets-dataset discovery (138 days, 39k+ resolved markets)
-- ✅ 7 strategies (1 baseline + 6 production candidates)
+- ✅ 4-score model + walk-forward online meta-calibrator
+- ✅ Strategy candidates, including BonereaperV2 late/favourite lanes
 - ✅ Nautilus QuoteTick conversion (linked, validated)
-- ✅ LateBigBet showing genuine positive edge (+$141/day day-1)
+- ✅ AWS portfolio-grid launcher with checkpointed result uploads
 
 Remaining for true production:
-- Multi-day walk-forward validation (network throttling has prevented exhaustive sweep)
-- Live execution via `nautilus-polymarket` adapter (Phase 6 not started)
+- Larger historical walk-forward validation across completed Telonex backfills
+- Paper/live execution adapter with the same strategy/model path
+- Robust nightly retraining and promotion gates
 - Whale-flow features only available on dates ≤ 2026-04-28 (archive boundary)

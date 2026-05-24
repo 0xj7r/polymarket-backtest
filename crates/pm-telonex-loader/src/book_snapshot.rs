@@ -17,6 +17,7 @@ pub struct LoadStats {
     pub batches: usize,
     pub first_ts_ns: Option<i64>,
     pub last_ts_ns: Option<i64>,
+    pub out_of_order_rows: usize,
 }
 
 /// Stream-load a Telonex book_snapshot parquet from S3 (or any object_store
@@ -36,16 +37,20 @@ pub async fn load_book_snapshot_async(
     let schema: SchemaRef = stream_builder.schema().clone();
     let cols = TelonexColumnIndex::resolve(&schema)?;
 
-    let mut stream = stream_builder.build().context("build record-batch stream")?;
+    let mut stream = stream_builder
+        .build()
+        .context("build record-batch stream")?;
     let mut stats = LoadStats::default();
     let mut out: Vec<ReplayEvent> = Vec::new();
 
-    while let Some(batch) = stream
-        .try_next()
-        .await
-        .context("read next record batch")?
-    {
+    while let Some(batch) = stream.try_next().await.context("read next record batch")? {
         process_batch(&batch, &cols, market_id, &mut out, &mut stats)?;
+    }
+
+    let out_of_order_rows = out.windows(2).filter(|w| w[1].ts_ns < w[0].ts_ns).count();
+    stats.out_of_order_rows = out_of_order_rows;
+    if out_of_order_rows > 0 {
+        out.sort_by_key(|e| e.ts_ns);
     }
 
     Ok((out, stats))
@@ -106,6 +111,8 @@ fn process_batch(
             bids[lvl] = read_level(bid_p[lvl], bid_s[lvl], i);
             asks[lvl] = read_level(ask_p[lvl], ask_s[lvl], i);
         }
+        normalize_levels(&mut bids, true);
+        normalize_levels(&mut asks, false);
 
         let yes_bid = bids[0].price;
         let yes_ask = asks[0].price;
@@ -118,8 +125,8 @@ fn process_batch(
         let ts_us = ts.value(i);
         let ts_ns = ts_us.saturating_mul(1_000);
 
-        stats.first_ts_ns.get_or_insert(ts_ns);
-        stats.last_ts_ns = Some(ts_ns);
+        stats.first_ts_ns = Some(stats.first_ts_ns.map_or(ts_ns, |v| v.min(ts_ns)));
+        stats.last_ts_ns = Some(stats.last_ts_ns.map_or(ts_ns, |v| v.max(ts_ns)));
 
         out.push(ReplayEvent {
             ts_ns,
@@ -204,4 +211,120 @@ fn read_level(prices: &StringArray, sizes: &StringArray, row: usize) -> BookLeve
         0.0
     };
     BookLevel { price, size }
+}
+
+fn normalize_levels(levels: &mut [BookLevel; TAPE_DEPTH], is_bid: bool) {
+    levels.sort_by(|a, b| {
+        let a_valid = a.price > 0.0 && a.price < 1.0 && a.size > 0.0;
+        let b_valid = b.price > 0.0 && b.price < 1.0 && b.size > 0.0;
+        match (a_valid, b_valid) {
+            (true, true) if is_bid => b
+                .price
+                .partial_cmp(&a.price)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            (true, true) => a
+                .price
+                .partial_cmp(&b.price)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            (false, false) => std::cmp::Ordering::Equal,
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::array::StringArray;
+    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::record_batch::RecordBatch;
+
+    #[test]
+    fn book_snapshot_tracks_timestamps_with_out_of_order_rows() {
+        let schema = Schema::new(
+            std::iter::once(Field::new("timestamp_us", DataType::Int64, false))
+                .chain((0..5).flat_map(|i| {
+                    [
+                        Field::new(format!("bid_price_{i}"), DataType::Utf8, false),
+                        Field::new(format!("bid_size_{i}"), DataType::Utf8, false),
+                        Field::new(format!("ask_price_{i}"), DataType::Utf8, false),
+                        Field::new(format!("ask_size_{i}"), DataType::Utf8, false),
+                    ]
+                }))
+                .collect::<Vec<_>>(),
+        );
+        let schema = SchemaRef::new(schema);
+        let mut cols: Vec<arrow::array::ArrayRef> = Vec::with_capacity(21);
+        cols.push(Arc::new(arrow::array::Int64Array::from(vec![
+            3000_i64, 1000_i64,
+        ])));
+        for _ in 0..5 {
+            cols.push(Arc::new(StringArray::from(vec!["0.50", "0.30"])));
+            cols.push(Arc::new(StringArray::from(vec!["2.0", "2.0"])));
+            cols.push(Arc::new(StringArray::from(vec!["0.52", "0.32"])));
+            cols.push(Arc::new(StringArray::from(vec!["2.0", "2.0"])));
+        }
+        let batch = RecordBatch::try_new(schema, cols).unwrap();
+        let cols = TelonexColumnIndex::resolve(&batch.schema()).unwrap();
+        let mut out = Vec::new();
+        let mut stats = LoadStats::default();
+        process_batch(&batch, &cols, MarketId(1), &mut out, &mut stats).unwrap();
+
+        assert_eq!(stats.rows_total, 2);
+        assert_eq!(stats.rows_emitted, 2);
+        assert_eq!(stats.first_ts_ns, Some(1_000_000));
+        assert_eq!(stats.last_ts_ns, Some(3_000_000));
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn normalize_levels_sorts_bid_desc_and_ask_asc() {
+        let mut bids = [
+            BookLevel {
+                price: 0.45,
+                size: 2.0,
+            },
+            BookLevel {
+                price: 0.51,
+                size: 1.0,
+            },
+            BookLevel {
+                price: 0.49,
+                size: 3.0,
+            },
+            BookLevel::default(),
+            BookLevel {
+                price: 0.30,
+                size: 0.0,
+            },
+        ];
+        let mut asks = [
+            BookLevel {
+                price: 0.56,
+                size: 2.0,
+            },
+            BookLevel {
+                price: 0.54,
+                size: 1.0,
+            },
+            BookLevel {
+                price: 0.58,
+                size: 3.0,
+            },
+            BookLevel::default(),
+            BookLevel {
+                price: 0.60,
+                size: 0.0,
+            },
+        ];
+
+        normalize_levels(&mut bids, true);
+        normalize_levels(&mut asks, false);
+
+        assert_eq!(bids[0].price, 0.51);
+        assert_eq!(bids[1].price, 0.49);
+        assert_eq!(asks[0].price, 0.54);
+        assert_eq!(asks[1].price, 0.56);
+    }
 }

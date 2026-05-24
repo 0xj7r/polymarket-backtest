@@ -109,6 +109,7 @@ impl Strategy for LateConvexTail {
         StrategyOutput::one(OrderRequest {
             side,
             shares,
+            max_depth: 1,
             limit_price: None,
             tag: "lctail",
         })

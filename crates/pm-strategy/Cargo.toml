@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 pm-types  = { workspace = true }
 pm-risk   = { workspace = true }
+pm-model  = { workspace = true }
 serde     = { workspace = true }
 chrono    = { workspace = true }
 tracing   = { workspace = true }

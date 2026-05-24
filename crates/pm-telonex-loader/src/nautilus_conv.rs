@@ -48,8 +48,14 @@ mod tests {
     fn evt(bid: f32, ask: f32) -> ReplayEvent {
         let mut bids = [BookLevel::default(); TAPE_DEPTH];
         let mut asks = [BookLevel::default(); TAPE_DEPTH];
-        bids[0] = BookLevel { price: bid, size: 200.0 };
-        asks[0] = BookLevel { price: ask, size: 150.0 };
+        bids[0] = BookLevel {
+            price: bid,
+            size: 200.0,
+        };
+        asks[0] = BookLevel {
+            price: ask,
+            size: 150.0,
+        };
         ReplayEvent {
             ts_ns: 1_778_500_800_000_000_000,
             market_id: MarketId(7),
@@ -74,6 +80,9 @@ mod tests {
         assert!((q.bid_size.as_f64() - 200.00).abs() < 1e-6);
         assert!((q.ask_size.as_f64() - 150.00).abs() < 1e-6);
         assert_eq!(u64::from(q.ts_event), 1_778_500_800_000_000_000);
-        assert_eq!(q.instrument_id, polymarket_instrument_id("BTCUP-5M-1778587500-UP"));
+        assert_eq!(
+            q.instrument_id,
+            polymarket_instrument_id("BTCUP-5M-1778587500-UP")
+        );
     }
 }

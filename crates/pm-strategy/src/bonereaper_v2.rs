@@ -29,12 +29,106 @@ use crate::signals::{Ring, direction_score};
 use crate::spot_momentum::weighted_multi_tf_return;
 use crate::{Ctx, OrderRequest, Side, Strategy, StrategyOutput};
 use pm_types::{ReplayEvent, SpotHistory, TradeHistory, compute_trade_flow};
+use serde::Serialize;
 
 const BETTING_WINDOW_SECS: i64 = 300;
 const MOM_WINDOW: usize = 32;
 const MICRO_DEV_SCALE: f32 = 0.6;
 const SPOT_SCALE: f32 = 300.0;
 const TRADE_FLOW_LOOKBACK_NS: i64 = 60 * 1_000_000_000;
+
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+pub struct BonereaperV2GateStats {
+    pub late_confirm_checks: u64,
+    pub late_confirm_price_fail: u64,
+    pub late_confirm_book_favourite_fail: u64,
+    pub late_confirm_model_missing: u64,
+    pub late_confirm_model_side_fail: u64,
+    pub late_confirm_model_confidence_fail: u64,
+    pub late_confirm_model_risk_fail: u64,
+    pub late_confirm_model_side_p_fail: u64,
+    pub late_confirm_model_edge_fail: u64,
+    pub late_confirm_shares_fail: u64,
+    pub late_confirm_emits: u64,
+
+    pub high_skew_checks: u64,
+    pub high_skew_regime_fail: u64,
+    pub high_skew_threshold_fail: u64,
+    pub high_skew_sustain_fail: u64,
+    pub high_skew_spot_alignment_fail: u64,
+    pub high_skew_price_fail: u64,
+    pub high_skew_model_missing: u64,
+    pub high_skew_model_side_fail: u64,
+    pub high_skew_model_confidence_fail: u64,
+    pub high_skew_model_risk_fail: u64,
+    pub high_skew_model_side_p_fail: u64,
+    pub high_skew_model_edge_fail: u64,
+    pub high_skew_shares_fail: u64,
+    pub high_skew_emits: u64,
+
+    pub late_favourite_window_checks: u64,
+    pub late_favourite_capacity_fail: u64,
+    pub late_favourite_refresh_fail: u64,
+    pub late_favourite_checks: u64,
+    pub late_favourite_skew_fail: u64,
+    pub late_favourite_alignment_fail: u64,
+    pub late_favourite_price_fail: u64,
+    pub late_favourite_model_missing: u64,
+    pub late_favourite_model_side_fail: u64,
+    pub late_favourite_model_confidence_fail: u64,
+    pub late_favourite_model_risk_fail: u64,
+    pub late_favourite_model_side_p_fail: u64,
+    pub late_favourite_model_edge_fail: u64,
+    pub late_favourite_shares_fail: u64,
+    pub late_favourite_emits: u64,
+}
+
+impl BonereaperV2GateStats {
+    pub fn add_assign(&mut self, other: Self) {
+        self.late_confirm_checks += other.late_confirm_checks;
+        self.late_confirm_price_fail += other.late_confirm_price_fail;
+        self.late_confirm_book_favourite_fail += other.late_confirm_book_favourite_fail;
+        self.late_confirm_model_missing += other.late_confirm_model_missing;
+        self.late_confirm_model_side_fail += other.late_confirm_model_side_fail;
+        self.late_confirm_model_confidence_fail += other.late_confirm_model_confidence_fail;
+        self.late_confirm_model_risk_fail += other.late_confirm_model_risk_fail;
+        self.late_confirm_model_side_p_fail += other.late_confirm_model_side_p_fail;
+        self.late_confirm_model_edge_fail += other.late_confirm_model_edge_fail;
+        self.late_confirm_shares_fail += other.late_confirm_shares_fail;
+        self.late_confirm_emits += other.late_confirm_emits;
+
+        self.high_skew_checks += other.high_skew_checks;
+        self.high_skew_regime_fail += other.high_skew_regime_fail;
+        self.high_skew_threshold_fail += other.high_skew_threshold_fail;
+        self.high_skew_sustain_fail += other.high_skew_sustain_fail;
+        self.high_skew_spot_alignment_fail += other.high_skew_spot_alignment_fail;
+        self.high_skew_price_fail += other.high_skew_price_fail;
+        self.high_skew_model_missing += other.high_skew_model_missing;
+        self.high_skew_model_side_fail += other.high_skew_model_side_fail;
+        self.high_skew_model_confidence_fail += other.high_skew_model_confidence_fail;
+        self.high_skew_model_risk_fail += other.high_skew_model_risk_fail;
+        self.high_skew_model_side_p_fail += other.high_skew_model_side_p_fail;
+        self.high_skew_model_edge_fail += other.high_skew_model_edge_fail;
+        self.high_skew_shares_fail += other.high_skew_shares_fail;
+        self.high_skew_emits += other.high_skew_emits;
+
+        self.late_favourite_window_checks += other.late_favourite_window_checks;
+        self.late_favourite_capacity_fail += other.late_favourite_capacity_fail;
+        self.late_favourite_refresh_fail += other.late_favourite_refresh_fail;
+        self.late_favourite_checks += other.late_favourite_checks;
+        self.late_favourite_skew_fail += other.late_favourite_skew_fail;
+        self.late_favourite_alignment_fail += other.late_favourite_alignment_fail;
+        self.late_favourite_price_fail += other.late_favourite_price_fail;
+        self.late_favourite_model_missing += other.late_favourite_model_missing;
+        self.late_favourite_model_side_fail += other.late_favourite_model_side_fail;
+        self.late_favourite_model_confidence_fail += other.late_favourite_model_confidence_fail;
+        self.late_favourite_model_risk_fail += other.late_favourite_model_risk_fail;
+        self.late_favourite_model_side_p_fail += other.late_favourite_model_side_p_fail;
+        self.late_favourite_model_edge_fail += other.late_favourite_model_edge_fail;
+        self.late_favourite_shares_fail += other.late_favourite_shares_fail;
+        self.late_favourite_emits += other.late_favourite_emits;
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct BonereaperV2Config {
@@ -53,6 +147,10 @@ pub struct BonereaperV2Config {
     pub late_clip_frac: f32,
     pub late_max_fires: usize,
     pub late_refresh_secs: f32,
+    pub late_sweep_depth: usize,
+    pub late_confirm_min_model_confidence: f32,
+    pub late_confirm_max_model_risk: f32,
+    pub late_confirm_min_model_side_p: f32,
 
     // High-skew load lane with whipsaw guards
     pub high_skew_threshold: f32,
@@ -60,9 +158,27 @@ pub struct BonereaperV2Config {
     pub high_skew_clip_frac: f32,
     pub high_skew_max_clips: usize,
     pub high_skew_refresh_secs: f32,
+    pub high_skew_sweep_depth: usize,
     pub high_skew_min_sustain_secs: f32,
     pub high_skew_min_spot_alignment: f32,
     pub high_skew_skip_whipsaw: bool,
+
+    // Late favourite loading: heavier than generic high-skew, but only after
+    // the market has a clear favourite and book/spot direction agree.
+    pub late_favourite_start_secs: f32,
+    pub late_favourite_threshold: f32,
+    pub late_favourite_min_ask: f32,
+    pub late_favourite_high_cert_ask: f32,
+    pub late_favourite_max_ask: f32,
+    pub late_favourite_clip_frac: f32,
+    pub late_favourite_max_clips: usize,
+    pub late_favourite_refresh_secs: f32,
+    pub late_favourite_sweep_depth: usize,
+    pub late_favourite_min_composite_alignment: f32,
+    pub late_favourite_min_model_confidence: f32,
+    pub late_favourite_max_model_risk: f32,
+    pub late_favourite_min_model_side_p: f32,
+    pub late_favourite_min_model_edge: f32,
 
     // Convex tail ladder. Real Bonereaper buys the losing side in multiple
     // rungs as the book moves further away from the tail side; each rung is
@@ -70,6 +186,7 @@ pub struct BonereaperV2Config {
     // matcher assumes 100% taker fill at yes_ask, which is optimistic in the
     // 0.02–0.05 zone where venue depth is thin. `tail_min_ask` enforces a
     // floor below which we don't pretend we can fill.
+    pub paired_tail_clip_frac: f32,
     pub tail_clip_frac: f32,
     pub tail_extreme_threshold: f32,
     pub tail_min_skew_step: f32,
@@ -90,26 +207,62 @@ impl Default for BonereaperV2Config {
             min_composite_direction: 0.10,
             mid_ladder_min_step: 0.02,
             mid_ladder_max_rungs: 4,
-            early_clip_frac: 0.30,
-            mid_clip_frac: 0.60,
+            // early_dir and mid_ladder are both net-negative on PM 5m (pay
+            // spread + slippage at coin-flip prices). Disabled via zero clip;
+            // re-enable if a future signal stack adds enough edge to overcome
+            // the spread.
+            early_clip_frac: 0.00,
+            mid_clip_frac: 0.00,
             late_clip_frac: 1.00,
-            late_max_fires: 6,
-            late_refresh_secs: 8.0,
-            high_skew_threshold: 0.30,
+            late_max_fires: 3,
+            late_refresh_secs: 10.0,
+            late_sweep_depth: 3,
+            late_confirm_min_model_confidence: 0.58,
+            late_confirm_max_model_risk: 0.80,
+            late_confirm_min_model_side_p: 0.58,
+            // Favourite-loading lane. Keep this stricter than the old probe
+            // defaults: the looser settings overtraded early skew and paid
+            // taker spread before the market had a durable favourite.
+            high_skew_threshold: 0.16, // yes_mid >= 0.66 or <= 0.34
             high_skew_max_ask: 0.95,
-            high_skew_clip_frac: 0.80,
-            high_skew_max_clips: 4,
-            high_skew_refresh_secs: 6.0,
-            high_skew_min_sustain_secs: 5.0,
-            high_skew_min_spot_alignment: 0.03,
+            high_skew_clip_frac: 0.60,
+            high_skew_max_clips: 5,
+            high_skew_refresh_secs: 4.0,
+            high_skew_sweep_depth: 5,
+            high_skew_min_sustain_secs: 12.0,
+            high_skew_min_spot_alignment: 0.02,
             high_skew_skip_whipsaw: true,
-            tail_clip_frac: 0.15,
-            tail_extreme_threshold: 0.20,
-            tail_min_skew_step: 0.03,
+            late_favourite_start_secs: 180.0,
+            late_favourite_threshold: 0.22, // yes_mid >= 0.72 or <= 0.28
+            late_favourite_min_ask: 0.70,
+            late_favourite_high_cert_ask: 0.90,
+            late_favourite_max_ask: 0.97,
+            late_favourite_clip_frac: 1.00,
+            late_favourite_max_clips: 12,
+            late_favourite_refresh_secs: 4.0,
+            late_favourite_sweep_depth: 7,
+            late_favourite_min_composite_alignment: 0.05,
+            late_favourite_min_model_confidence: 0.68,
+            late_favourite_max_model_risk: 0.72,
+            late_favourite_min_model_side_p: 0.62,
+            // Strict 5c edge makes 90c+ favourite loading impossible while
+            // the model probability is capped at 94c. Keep the lane gated by
+            // side probability/confidence/risk, and require a smaller positive
+            // edge for the high-cert ladder.
+            late_favourite_min_model_edge: 0.00,
+            // Tail ladder: cheap convex bets. Threshold raised to match the
+            // skew level where a "cheap" side actually exists.
+            // Paired late tails were negative in walk-forward attribution:
+            // keep the standalone convex-tail ladder, disable the automatic
+            // hedge emitted alongside every late confirmation.
+            paired_tail_clip_frac: 0.00,
+            tail_clip_frac: 0.30,
+            tail_extreme_threshold: 0.22, // same skew band as late favourite
+            tail_min_skew_step: 0.02,
             tail_max_clips: 4,
-            tail_refresh_secs: 8.0,
+            tail_refresh_secs: 5.0,
             tail_min_ask: 0.01,
-            tail_max_ask: 0.25,
+            tail_max_ask: 0.15,
         }
     }
 }
@@ -125,11 +278,17 @@ pub struct BonereaperV2 {
     last_late_ns: i64,
     high_skew_clips: usize,
     last_high_skew_ns: i64,
+    late_favourite_clips: usize,
+    last_late_favourite_ns: i64,
+    late_favourite_side: Option<Side>,
+    late_favourite_shares_emitted: f64,
+    late_favourite_notional_emitted: f64,
     skew_high_first_ns: Option<i64>,
     skew_low_first_ns: Option<i64>,
     tail_clips: usize,
     last_tail_skew_mag: f32,
     last_tail_ns: i64,
+    gate_stats: BonereaperV2GateStats,
 }
 
 impl BonereaperV2 {
@@ -145,12 +304,22 @@ impl BonereaperV2 {
             last_late_ns: i64::MIN / 2,
             high_skew_clips: 0,
             last_high_skew_ns: i64::MIN / 2,
+            late_favourite_clips: 0,
+            last_late_favourite_ns: i64::MIN / 2,
+            late_favourite_side: None,
+            late_favourite_shares_emitted: 0.0,
+            late_favourite_notional_emitted: 0.0,
             skew_high_first_ns: None,
             skew_low_first_ns: None,
             tail_clips: 0,
             last_tail_skew_mag: 0.0,
             last_tail_ns: i64::MIN / 2,
+            gate_stats: BonereaperV2GateStats::default(),
         }
+    }
+
+    pub fn gate_stats(&self) -> BonereaperV2GateStats {
+        self.gate_stats
     }
 }
 
@@ -164,6 +333,182 @@ fn buy_px(event: &ReplayEvent, side: Side) -> f64 {
         Side::BuyYes => event.yes_ask as f64,
         Side::BuyNo => (1.0 - event.yes_bid as f64).max(0.01),
         _ => 0.0,
+    }
+}
+
+fn side_shares(ctx: &Ctx, side: Side) -> f64 {
+    match side {
+        Side::BuyYes => ctx.yes_shares,
+        Side::BuyNo => ctx.no_shares,
+        _ => 0.0,
+    }
+}
+
+fn opposite_buy_side(side: Side) -> Option<Side> {
+    match side {
+        Side::BuyYes => Some(Side::BuyNo),
+        Side::BuyNo => Some(Side::BuyYes),
+        _ => None,
+    }
+}
+
+fn late_favourite_ladder_levels(favourite_ask: f64, secs_in: f32) -> usize {
+    let base = if favourite_ask < 0.75 {
+        1
+    } else if favourite_ask < 0.80 {
+        2
+    } else if favourite_ask < 0.90 {
+        3
+    } else {
+        4
+    };
+    if favourite_ask >= 0.90 && secs_in >= BETTING_WINDOW_SECS as f32 - 120.0 {
+        5
+    } else {
+        base
+    }
+}
+
+fn late_favourite_high_cert_price_taper(favourite_ask: f64) -> f64 {
+    if favourite_ask < 0.95 {
+        return 1.0;
+    }
+    if favourite_ask >= 0.99 {
+        return 0.18;
+    }
+    let progress = ((favourite_ask - 0.95) / 0.04).clamp(0.0, 1.0);
+    1.0 - progress * 0.82
+}
+
+fn late_favourite_high_cert_max_levels(favourite_ask: f64, base_levels: usize) -> usize {
+    if favourite_ask >= 0.99 {
+        base_levels.min(1)
+    } else if favourite_ask >= 0.97 {
+        base_levels.min(2)
+    } else if favourite_ask >= 0.95 {
+        base_levels.min(3)
+    } else {
+        base_levels
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelSupport {
+    Supported,
+    Missing,
+    SideMismatch,
+    LowConfidence,
+    HighRisk,
+    LowSideProbability,
+    LowEdge,
+}
+
+impl ModelSupport {
+    fn is_supported(self) -> bool {
+        matches!(self, Self::Supported)
+    }
+}
+
+fn model_support_for_side(
+    ctx: &Ctx,
+    side: Side,
+    min_confidence: f32,
+    max_risk: f32,
+    min_side_p: f32,
+    entry_px: f32,
+    min_edge: f32,
+) -> ModelSupport {
+    let Some(model) = ctx.model_output else {
+        return ModelSupport::Missing;
+    };
+    let model_side_is_yes = model.direction_score >= 0.0;
+    let target_side_is_yes = matches!(side, Side::BuyYes);
+    let side_p = if target_side_is_yes == model_side_is_yes {
+        model.calibrated_p
+    } else {
+        1.0 - model.calibrated_p
+    };
+    if model_side_is_yes != target_side_is_yes {
+        ModelSupport::SideMismatch
+    } else if model.confidence_score < min_confidence {
+        ModelSupport::LowConfidence
+    } else if model.risk_score > max_risk {
+        ModelSupport::HighRisk
+    } else if side_p < min_side_p {
+        ModelSupport::LowSideProbability
+    } else if side_p - entry_px < min_edge {
+        ModelSupport::LowEdge
+    } else {
+        ModelSupport::Supported
+    }
+}
+
+fn bump_model_fail(stats: &mut BonereaperV2GateStats, prefix: GatePrefix, support: ModelSupport) {
+    match (prefix, support) {
+        (_, ModelSupport::Supported) => {}
+        (GatePrefix::LateConfirm, ModelSupport::Missing) => stats.late_confirm_model_missing += 1,
+        (GatePrefix::LateConfirm, ModelSupport::SideMismatch) => {
+            stats.late_confirm_model_side_fail += 1;
+        }
+        (GatePrefix::LateConfirm, ModelSupport::LowConfidence) => {
+            stats.late_confirm_model_confidence_fail += 1;
+        }
+        (GatePrefix::LateConfirm, ModelSupport::HighRisk) => {
+            stats.late_confirm_model_risk_fail += 1;
+        }
+        (GatePrefix::LateConfirm, ModelSupport::LowSideProbability) => {
+            stats.late_confirm_model_side_p_fail += 1;
+        }
+        (GatePrefix::LateConfirm, ModelSupport::LowEdge) => {
+            stats.late_confirm_model_edge_fail += 1;
+        }
+        (GatePrefix::HighSkew, ModelSupport::Missing) => stats.high_skew_model_missing += 1,
+        (GatePrefix::HighSkew, ModelSupport::SideMismatch) => {
+            stats.high_skew_model_side_fail += 1;
+        }
+        (GatePrefix::HighSkew, ModelSupport::LowConfidence) => {
+            stats.high_skew_model_confidence_fail += 1;
+        }
+        (GatePrefix::HighSkew, ModelSupport::HighRisk) => stats.high_skew_model_risk_fail += 1,
+        (GatePrefix::HighSkew, ModelSupport::LowSideProbability) => {
+            stats.high_skew_model_side_p_fail += 1;
+        }
+        (GatePrefix::HighSkew, ModelSupport::LowEdge) => {
+            stats.high_skew_model_edge_fail += 1;
+        }
+        (GatePrefix::LateFavourite, ModelSupport::Missing) => {
+            stats.late_favourite_model_missing += 1;
+        }
+        (GatePrefix::LateFavourite, ModelSupport::SideMismatch) => {
+            stats.late_favourite_model_side_fail += 1;
+        }
+        (GatePrefix::LateFavourite, ModelSupport::LowConfidence) => {
+            stats.late_favourite_model_confidence_fail += 1;
+        }
+        (GatePrefix::LateFavourite, ModelSupport::HighRisk) => {
+            stats.late_favourite_model_risk_fail += 1;
+        }
+        (GatePrefix::LateFavourite, ModelSupport::LowSideProbability) => {
+            stats.late_favourite_model_side_p_fail += 1;
+        }
+        (GatePrefix::LateFavourite, ModelSupport::LowEdge) => {
+            stats.late_favourite_model_edge_fail += 1;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum GatePrefix {
+    LateConfirm,
+    HighSkew,
+    LateFavourite,
+}
+
+fn side_is_book_favourite(event: &ReplayEvent, side: Side) -> bool {
+    match side {
+        Side::BuyYes => event.yes_mid >= 0.5,
+        Side::BuyNo => event.yes_mid <= 0.5,
+        _ => false,
     }
 }
 
@@ -189,8 +534,8 @@ impl Strategy for BonereaperV2 {
         } else {
             0.0
         };
-        let composite_dir = (0.30 * book_dir.composite + 0.55 * spot_mom + 0.15 * (-trade_flow))
-            .clamp(-1.0, 1.0);
+        let composite_dir =
+            (0.30 * book_dir.composite + 0.55 * spot_mom + 0.15 * (-trade_flow)).clamp(-1.0, 1.0);
 
         if event.yes_bid <= 0.0 || event.yes_ask <= 0.0 {
             return StrategyOutput::hold();
@@ -222,7 +567,11 @@ impl Strategy for BonereaperV2 {
             && secs_in <= self.cfg.early_phase_end_secs
             && composite_dir.abs() >= self.cfg.min_composite_direction
         {
-            let side = if composite_dir > 0.0 { Side::BuyYes } else { Side::BuyNo };
+            let side = if composite_dir > 0.0 {
+                Side::BuyYes
+            } else {
+                Side::BuyNo
+            };
             let px = buy_px(event, side);
             if px > 0.0 {
                 let clip = self.cfg.max_clip_usdc * self.cfg.early_clip_frac as f64;
@@ -232,6 +581,7 @@ impl Strategy for BonereaperV2 {
                     orders.push(OrderRequest {
                         side,
                         shares,
+                        max_depth: 1,
                         limit_price: None,
                         tag: "br2_early_dir",
                     });
@@ -247,10 +597,16 @@ impl Strategy for BonereaperV2 {
             && self.mid_rungs < self.cfg.mid_ladder_max_rungs
             && composite_dir.abs() >= self.cfg.min_composite_direction
         {
-            let target = if composite_dir > 0.0 { Side::BuyYes } else { Side::BuyNo };
+            let target = if composite_dir > 0.0 {
+                Side::BuyYes
+            } else {
+                Side::BuyNo
+            };
             let same_side = self.ladder_side == Some(target);
             let book_moved = match target {
-                Side::BuyYes => event.yes_mid - self.last_ladder_mid >= self.cfg.mid_ladder_min_step,
+                Side::BuyYes => {
+                    event.yes_mid - self.last_ladder_mid >= self.cfg.mid_ladder_min_step
+                }
                 Side::BuyNo => self.last_ladder_mid - event.yes_mid >= self.cfg.mid_ladder_min_step,
                 _ => false,
             };
@@ -263,6 +619,7 @@ impl Strategy for BonereaperV2 {
                         orders.push(OrderRequest {
                             side: target,
                             shares,
+                            max_depth: 1,
                             limit_price: None,
                             tag: "br2_mid_ladder",
                         });
@@ -274,35 +631,94 @@ impl Strategy for BonereaperV2 {
             }
         }
 
-        // ---- LANE 3: Late directional (workhorse) ----
+        // ---- LANE 3: Late directional (workhorse) + paired tail hedge ----
+        // Each late_confirm fire automatically emits a paired cheap-side tail
+        // bet — convex hedge against the directional bet getting whipsawed.
         if secs_in > self.cfg.mid_phase_end_secs
             && self.late_fires < self.cfg.late_max_fires
             && composite_dir.abs() >= self.cfg.min_composite_direction
             && (event.ts_ns - self.last_late_ns) as f64 / 1e9 > self.cfg.late_refresh_secs as f64
         {
-            let target = if composite_dir > 0.0 { Side::BuyYes } else { Side::BuyNo };
+            self.gate_stats.late_confirm_checks += 1;
+            let target = if composite_dir > 0.0 {
+                Side::BuyYes
+            } else {
+                Side::BuyNo
+            };
             let px = buy_px(event, target);
-            if px > 0.0 {
-                let clip = self.cfg.max_clip_usdc * self.cfg.late_clip_frac as f64;
-                let shares = shares_capped(clip, px);
-                if shares > 0.0 {
-                    orders.push(OrderRequest {
-                        side: target,
-                        shares,
-                        limit_price: None,
-                        tag: "br2_late_confirm",
-                    });
-                    self.late_fires += 1;
-                    self.last_late_ns = event.ts_ns;
+            if px <= 0.0 {
+                self.gate_stats.late_confirm_price_fail += 1;
+            } else if !side_is_book_favourite(event, target) {
+                self.gate_stats.late_confirm_book_favourite_fail += 1;
+            } else {
+                let model_support = model_support_for_side(
+                    ctx,
+                    target,
+                    self.cfg.late_confirm_min_model_confidence,
+                    self.cfg.late_confirm_max_model_risk,
+                    self.cfg.late_confirm_min_model_side_p,
+                    px as f32,
+                    0.0,
+                );
+                if !model_support.is_supported() {
+                    bump_model_fail(&mut self.gate_stats, GatePrefix::LateConfirm, model_support);
+                } else {
+                    let clip = self.cfg.max_clip_usdc * self.cfg.late_clip_frac as f64;
+                    let shares = shares_capped(clip, px);
+                    if shares > 0.0 {
+                        orders.push(OrderRequest {
+                            side: target,
+                            shares,
+                            max_depth: self.cfg.late_sweep_depth,
+                            limit_price: None,
+                            tag: "br2_late_confirm",
+                        });
+                        self.late_fires += 1;
+                        self.last_late_ns = event.ts_ns;
+                        self.gate_stats.late_confirm_emits += 1;
+
+                        // Paired tail hedge: cheap-side bet, sized as a fraction of
+                        // the directional clip. Skips its own ladder gates because
+                        // it's an explicit hedge, but respects min/max ask floor.
+                        if self.cfg.paired_tail_clip_frac > 0.0 {
+                            let tail_side = match target {
+                                Side::BuyYes => Side::BuyNo,
+                                Side::BuyNo => Side::BuyYes,
+                                _ => unreachable!(),
+                            };
+                            let tail_px = buy_px(event, tail_side);
+                            let tail_px32 = tail_px as f32;
+                            if tail_px32 >= self.cfg.tail_min_ask
+                                && tail_px32 <= self.cfg.tail_max_ask
+                            {
+                                let tail_clip =
+                                    self.cfg.max_clip_usdc * self.cfg.paired_tail_clip_frac as f64;
+                                let tail_shares = shares_capped(tail_clip, tail_px);
+                                if tail_shares > 0.0 {
+                                    orders.push(OrderRequest {
+                                        side: tail_side,
+                                        shares: tail_shares,
+                                        max_depth: 1,
+                                        limit_price: None,
+                                        tag: "br2_paired_tail",
+                                    });
+                                }
+                            }
+                        }
+                    } else {
+                        self.gate_stats.late_confirm_shares_fail += 1;
+                    }
                 }
             }
         }
 
         // ---- LANE 4: High-skew load with whipsaw guards ----
-        if self.high_skew_clips < self.cfg.high_skew_max_clips
+        if secs_in >= self.cfg.late_favourite_start_secs
+            && self.high_skew_clips < self.cfg.high_skew_max_clips
             && (event.ts_ns - self.last_high_skew_ns) as f64 / 1e9
                 > self.cfg.high_skew_refresh_secs as f64
         {
+            self.gate_stats.high_skew_checks += 1;
             let regime_ok = if self.cfg.high_skew_skip_whipsaw {
                 let snap = BtcRegimeSnapshot::from_history(event.ts_ns, spot);
                 !matches!(snap.regime(), Some(BtcRegime::Whipsaw))
@@ -311,7 +727,11 @@ impl Strategy for BonereaperV2 {
             };
             let skew_signed = event.yes_mid - 0.5;
             let skew_mag = skew_signed.abs();
-            if regime_ok && skew_mag >= self.cfg.high_skew_threshold {
+            if !regime_ok {
+                self.gate_stats.high_skew_regime_fail += 1;
+            } else if skew_mag < self.cfg.high_skew_threshold {
+                self.gate_stats.high_skew_threshold_fail += 1;
+            } else {
                 let first_ns = if skew_signed > 0.0 {
                     self.skew_high_first_ns
                 } else {
@@ -325,52 +745,195 @@ impl Strategy for BonereaperV2 {
                     .unwrap_or(false);
                 let spot_aligned = spot_mom.signum() == skew_signed.signum()
                     && spot_mom.abs() >= self.cfg.high_skew_min_spot_alignment;
-                if sustained && spot_aligned {
-                    let side = if skew_signed > 0.0 { Side::BuyYes } else { Side::BuyNo };
+                if !sustained {
+                    self.gate_stats.high_skew_sustain_fail += 1;
+                } else if !spot_aligned {
+                    self.gate_stats.high_skew_spot_alignment_fail += 1;
+                } else {
+                    let side = if skew_signed > 0.0 {
+                        Side::BuyYes
+                    } else {
+                        Side::BuyNo
+                    };
                     let px = buy_px(event, side);
-                    if px > 0.0 && px as f32 <= self.cfg.high_skew_max_ask {
-                        let clip = self.cfg.max_clip_usdc * self.cfg.high_skew_clip_frac as f64;
-                        let shares = shares_capped(clip, px);
-                        if shares > 0.0 {
-                            orders.push(OrderRequest {
-                                side,
-                                shares,
-                                limit_price: None,
-                                tag: "br2_high_skew_load",
-                            });
-                            self.high_skew_clips += 1;
-                            self.last_high_skew_ns = event.ts_ns;
+                    if px <= 0.0 || px as f32 > self.cfg.high_skew_max_ask {
+                        self.gate_stats.high_skew_price_fail += 1;
+                    } else {
+                        let model_support = model_support_for_side(
+                            ctx,
+                            side,
+                            self.cfg.late_favourite_min_model_confidence,
+                            self.cfg.late_favourite_max_model_risk,
+                            self.cfg.late_favourite_min_model_side_p,
+                            px as f32,
+                            self.cfg.late_favourite_min_model_edge,
+                        );
+                        if !model_support.is_supported() {
+                            bump_model_fail(
+                                &mut self.gate_stats,
+                                GatePrefix::HighSkew,
+                                model_support,
+                            );
+                        } else {
+                            let clip = self.cfg.max_clip_usdc * self.cfg.high_skew_clip_frac as f64;
+                            let shares = shares_capped(clip, px);
+                            if shares > 0.0 {
+                                orders.push(OrderRequest {
+                                    side,
+                                    shares,
+                                    max_depth: self.cfg.high_skew_sweep_depth,
+                                    limit_price: None,
+                                    tag: "br2_high_skew_load",
+                                });
+                                self.high_skew_clips += 1;
+                                self.last_high_skew_ns = event.ts_ns;
+                                self.gate_stats.high_skew_emits += 1;
+                            } else {
+                                self.gate_stats.high_skew_shares_fail += 1;
+                            }
                         }
                     }
                 }
             }
         }
 
-        // ---- LANE 5: Convex tail ladder ----
-        // Buy the losing (cheap) side; each new rung requires both the book to
-        // have moved further away (skew advance ≥ tail_min_skew_step) and a
-        // minimum refresh time to elapse.
+        // ---- LANE 5: Late favourite load ----
+        if secs_in >= self.cfg.late_favourite_start_secs {
+            self.gate_stats.late_favourite_window_checks += 1;
+            let refreshed = (event.ts_ns - self.last_late_favourite_ns) as f64 / 1e9
+                > self.cfg.late_favourite_refresh_secs as f64;
+
+            if self.late_favourite_clips >= self.cfg.late_favourite_max_clips {
+                self.gate_stats.late_favourite_capacity_fail += 1;
+            } else if !refreshed {
+                self.gate_stats.late_favourite_refresh_fail += 1;
+            } else {
+                self.gate_stats.late_favourite_checks += 1;
+                let skew_signed = event.yes_mid - 0.5;
+                let skew_mag = skew_signed.abs();
+                let composite_aligned = composite_dir.signum() == skew_signed.signum()
+                    && composite_dir.abs() >= self.cfg.late_favourite_min_composite_alignment;
+                let spot_aligned = spot_mom.signum() == skew_signed.signum()
+                    && spot_mom.abs() >= self.cfg.high_skew_min_spot_alignment;
+
+                if skew_mag < self.cfg.late_favourite_threshold {
+                    self.gate_stats.late_favourite_skew_fail += 1;
+                } else {
+                    let side = if skew_signed > 0.0 {
+                        Side::BuyYes
+                    } else {
+                        Side::BuyNo
+                    };
+                    let px = buy_px(event, side);
+                    let high_cert_favourite = px as f32 >= self.cfg.late_favourite_high_cert_ask;
+                    if px <= 0.0
+                        || px as f32 > self.cfg.late_favourite_max_ask
+                        || (px as f32) < self.cfg.late_favourite_min_ask
+                    {
+                        self.gate_stats.late_favourite_price_fail += 1;
+                    } else if !high_cert_favourite && !(composite_aligned || spot_aligned) {
+                        self.gate_stats.late_favourite_alignment_fail += 1;
+                    } else {
+                        let model_support = model_support_for_side(
+                            ctx,
+                            side,
+                            self.cfg.late_favourite_min_model_confidence,
+                            self.cfg.late_favourite_max_model_risk,
+                            self.cfg.late_favourite_min_model_side_p,
+                            px as f32,
+                            self.cfg.late_favourite_min_model_edge,
+                        );
+                        if !model_support.is_supported() {
+                            bump_model_fail(
+                                &mut self.gate_stats,
+                                GatePrefix::LateFavourite,
+                                model_support,
+                            );
+                        } else {
+                            let remaining_clips = self
+                                .cfg
+                                .late_favourite_max_clips
+                                .saturating_sub(self.late_favourite_clips);
+                            let base_levels = late_favourite_ladder_levels(px, secs_in);
+                            let levels = late_favourite_high_cert_max_levels(px, base_levels)
+                                .min(self.cfg.late_favourite_sweep_depth.max(1))
+                                .min(remaining_clips.max(1));
+                            let price_taper = late_favourite_high_cert_price_taper(px);
+                            let clip =
+                                self.cfg.max_clip_usdc * self.cfg.late_favourite_clip_frac as f64;
+                            let desired_notional = clip * levels as f64 * price_taper;
+                            let shares = shares_capped(desired_notional, px);
+                            if shares > 0.0 {
+                                orders.push(OrderRequest {
+                                    side,
+                                    shares,
+                                    max_depth: levels,
+                                    limit_price: None,
+                                    tag: "br2_late_favourite_load",
+                                });
+                                self.late_favourite_clips += levels;
+                                self.last_late_favourite_ns = event.ts_ns;
+                                self.late_favourite_side = Some(side);
+                                self.late_favourite_shares_emitted += shares;
+                                self.late_favourite_notional_emitted += shares * px;
+                                self.gate_stats.late_favourite_emits += 1;
+                            } else {
+                                self.gate_stats.late_favourite_shares_fail += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- LANE 6: Cheap-tail ladder anchored to late favourite exposure ----
+        // This is not a standalone long-shot strategy. It only spends a small
+        // fraction of an existing favourite sleeve's spend/upside.
         if self.tail_clips < self.cfg.tail_max_clips
             && (event.ts_ns - self.last_tail_ns) as f64 / 1e9 > self.cfg.tail_refresh_secs as f64
         {
             let skew_mag = (event.yes_mid - 0.5).abs();
             let starting_fresh = self.tail_clips == 0;
             let advanced = skew_mag - self.last_tail_skew_mag >= self.cfg.tail_min_skew_step;
-            if skew_mag >= self.cfg.tail_extreme_threshold && (starting_fresh || advanced) {
-                let (tail_side, tail_px) = if event.yes_mid > 0.5 {
-                    let no_ask = (1.0 - event.yes_bid as f64).max(0.01);
-                    (Side::BuyNo, no_ask)
-                } else {
-                    (Side::BuyYes, event.yes_ask as f64)
+            if skew_mag >= self.cfg.tail_extreme_threshold
+                && (starting_fresh || advanced)
+                && self.late_favourite_notional_emitted > 0.0
+            {
+                let Some(favourite_side) = self.late_favourite_side else {
+                    return StrategyOutput { orders };
                 };
+                let Some(tail_side) = opposite_buy_side(favourite_side) else {
+                    return StrategyOutput { orders };
+                };
+                let favourite_shares = side_shares(ctx, favourite_side).max(
+                    self.late_favourite_shares_emitted
+                        .min(side_shares(ctx, favourite_side)),
+                );
+                if favourite_shares <= 0.0 {
+                    return StrategyOutput { orders };
+                }
+                let tail_px = buy_px(event, tail_side);
                 let px32 = tail_px as f32;
                 if px32 >= self.cfg.tail_min_ask && px32 <= self.cfg.tail_max_ask {
-                    let clip = self.cfg.max_clip_usdc * self.cfg.tail_clip_frac as f64;
-                    let shares = shares_capped(clip, tail_px);
+                    let avg_favourite_px =
+                        self.late_favourite_notional_emitted / self.late_favourite_shares_emitted;
+                    let favourite_win_upside =
+                        self.late_favourite_shares_emitted * (1.0 - avg_favourite_px);
+                    let cap_by_fav_spend = self.late_favourite_notional_emitted * 0.10;
+                    let cap_by_win_upside = favourite_win_upside * 0.30;
+                    let clip = (self.cfg.max_clip_usdc * self.cfg.tail_clip_frac as f64)
+                        .min(cap_by_fav_spend)
+                        .min(cap_by_win_upside);
+                    let shares = if clip > 0.0 {
+                        shares_capped(clip, tail_px)
+                    } else {
+                        0.0
+                    };
                     if shares > 0.0 {
                         orders.push(OrderRequest {
                             side: tail_side,
                             shares,
+                            max_depth: 2,
                             limit_price: None,
                             tag: "br2_convex_tail",
                         });
@@ -383,5 +946,32 @@ impl Strategy for BonereaperV2 {
         }
 
         StrategyOutput { orders }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn late_favourite_ladder_scales_by_price_and_final_window() {
+        assert_eq!(late_favourite_ladder_levels(0.72, 200.0), 1);
+        assert_eq!(late_favourite_ladder_levels(0.77, 200.0), 2);
+        assert_eq!(late_favourite_ladder_levels(0.84, 200.0), 3);
+        assert_eq!(late_favourite_ladder_levels(0.91, 120.0), 4);
+        assert_eq!(late_favourite_ladder_levels(0.91, 190.0), 5);
+    }
+
+    #[test]
+    fn high_cert_late_favourite_tapers_size_as_upside_collapses() {
+        assert_eq!(late_favourite_high_cert_price_taper(0.94), 1.0);
+        assert_eq!(late_favourite_high_cert_price_taper(0.95), 1.0);
+        assert!((late_favourite_high_cert_price_taper(0.97) - 0.59).abs() < 1e-9);
+        assert_eq!(late_favourite_high_cert_price_taper(0.99), 0.18);
+
+        assert_eq!(late_favourite_high_cert_max_levels(0.94, 5), 5);
+        assert_eq!(late_favourite_high_cert_max_levels(0.95, 5), 3);
+        assert_eq!(late_favourite_high_cert_max_levels(0.97, 5), 2);
+        assert_eq!(late_favourite_high_cert_max_levels(0.99, 5), 1);
     }
 }

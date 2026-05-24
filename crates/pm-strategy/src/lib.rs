@@ -20,6 +20,7 @@ pub mod spot_follower;
 pub mod spot_momentum;
 pub mod trivial;
 
+use pm_model::ModelOutput;
 use pm_types::{ReplayEvent, SpotHistory, TradeHistory};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +35,8 @@ pub enum Side {
 pub struct OrderRequest {
     pub side: Side,
     pub shares: f64,
+    /// Maximum book levels a taker order may sweep. Maker orders ignore this.
+    pub max_depth: usize,
     /// Optional limit price (in YES terms; for NO orders, the runner inverts).
     /// `None` means market order against the opposite top of book.
     pub limit_price: Option<f32>,
@@ -47,6 +50,10 @@ pub struct Ctx {
     pub yes_shares: f64,
     pub no_shares: f64,
     pub cash_usdc: f64,
+    /// Canonical 4-score model output for this event, produced by the shared
+    /// model state before the strategy hook. Strategies can use this for
+    /// ML-gated lanes while the runner still owns attribution and parity.
+    pub model_output: Option<ModelOutput>,
     /// Market resolution time in ns since epoch (UTC). Strategies use this
     /// to compute time-to-close and gate early/mid/late behaviour.
     pub market_close_ns: i64,
@@ -78,6 +85,20 @@ pub trait Strategy {
         spot: &SpotHistory,
         trades: &TradeHistory,
     ) -> StrategyOutput;
+
+    /// Optional per-event model diagnostics. Return model scores when available
+    /// for attribution and offline analysis.
+    fn on_event_scored(
+        &mut self,
+        event: &ReplayEvent,
+        ctx: &Ctx,
+        spot: &SpotHistory,
+        trades: &TradeHistory,
+    ) -> (StrategyOutput, Option<ModelOutput>) {
+        (self.on_event(event, ctx, spot, trades), None)
+    }
+
+    fn on_market_resolved(&mut self, _market_mid: f32, _resolved_yes: bool) {}
 }
 
 pub use bonereaper::{BonereaperLite, BonereaperLiteConfig};

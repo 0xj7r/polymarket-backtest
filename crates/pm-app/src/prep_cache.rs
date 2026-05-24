@@ -7,9 +7,7 @@
 
 use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
-use object_store::{
-    GetOptions, GetResult, ObjectStore, ObjectStoreExt, path::Path as ObjectPath,
-};
+use object_store::{GetOptions, GetResult, ObjectStore, path::Path as ObjectPath};
 use pm_telonex_loader::TelonexStore;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -94,7 +92,6 @@ pub async fn run_prep_cache(
         let store_inner = store_inner.clone();
         let done = done.clone();
         let skipped = skipped.clone();
-        let errored = errored.clone();
         let bytes_downloaded = bytes_downloaded.clone();
         async move {
             if skip_existing && local.exists() {
@@ -104,13 +101,21 @@ pub async fn run_prep_cache(
             if let Some(parent) = local.parent() {
                 tokio::fs::create_dir_all(parent).await.ok();
             }
-            let resp: GetResult = store_inner.get_opts(&key, GetOptions::default()).await
+            let resp: GetResult = store_inner
+                .get_opts(&key, GetOptions::default())
+                .await
                 .with_context(|| format!("get {key}"))?;
-            let bytes = resp.bytes().await.with_context(|| format!("read bytes {key}"))?;
+            let bytes = resp
+                .bytes()
+                .await
+                .with_context(|| format!("read bytes {key}"))?;
             bytes_downloaded.fetch_add(bytes.len() as u64, Ordering::Relaxed);
-            let mut f = tokio::fs::File::create(&local).await
+            let mut f = tokio::fs::File::create(&local)
+                .await
                 .with_context(|| format!("create {}", local.display()))?;
-            f.write_all(&bytes).await.with_context(|| format!("write {}", local.display()))?;
+            f.write_all(&bytes)
+                .await
+                .with_context(|| format!("write {}", local.display()))?;
             f.flush().await.ok();
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             if n % 100 == 0 {

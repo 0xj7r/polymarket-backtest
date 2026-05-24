@@ -47,7 +47,7 @@ impl SpotHistory {
         }
         let idx = match self.samples.binary_search_by_key(&ts_ns, |t| t.ts_ns) {
             Ok(i) => i,
-            Err(i) if i == 0 => return None,
+            Err(0) => return None,
             Err(i) => i - 1,
         };
         Some(self.samples[idx].price)
@@ -91,7 +91,12 @@ mod tests {
     use super::*;
 
     fn tk(ts_ns: i64, price: f64) -> SpotTick {
-        SpotTick { ts_ns, price, quantity: 0.0, is_buyer_maker: false }
+        SpotTick {
+            ts_ns,
+            price,
+            quantity: 0.0,
+            is_buyer_maker: false,
+        }
     }
 
     #[test]

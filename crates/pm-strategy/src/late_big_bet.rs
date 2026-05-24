@@ -75,7 +75,8 @@ impl Strategy for LateBigBet {
         &mut self,
         event: &ReplayEvent,
         ctx: &Ctx,
-        spot: &SpotHistory, trades: &TradeHistory,
+        spot: &SpotHistory,
+        trades: &TradeHistory,
     ) -> StrategyOutput {
         self.recent_mids.push(event.yes_mid);
         let book_dir = direction_score(event, &self.recent_mids, MICRO_DEV_SCALE);
@@ -94,8 +95,8 @@ impl Strategy for LateBigBet {
         };
         // Empirical: aggressor flow is CONTRA on 5m BTC binaries (see comment
         // in reactive.rs). Negated contribution.
-        let composite_dir = (0.30 * book_dir.composite + 0.55 * spot_mom + 0.15 * (-trade_flow))
-            .clamp(-1.0, 1.0);
+        let composite_dir =
+            (0.30 * book_dir.composite + 0.55 * spot_mom + 0.15 * (-trade_flow)).clamp(-1.0, 1.0);
         self.recent_dirs.push(composite_dir);
 
         if self.fired {
@@ -138,7 +139,11 @@ impl Strategy for LateBigBet {
         }
 
         let (side, fill_px, max_px_ok) = if p >= 0.5 {
-            (Side::BuyYes, event.yes_ask, event.yes_ask <= self.cfg.max_ask_yes)
+            (
+                Side::BuyYes,
+                event.yes_ask,
+                event.yes_ask <= self.cfg.max_ask_yes,
+            )
         } else {
             let no_ask = 1.0 - event.yes_bid;
             (Side::BuyNo, no_ask, event.yes_bid >= self.cfg.min_bid_yes)
@@ -173,6 +178,7 @@ impl Strategy for LateBigBet {
         StrategyOutput::one(OrderRequest {
             side,
             shares,
+            max_depth: 1,
             limit_price: None,
             tag: "lbb_late_load",
         })
@@ -187,8 +193,14 @@ mod tests {
     fn evt(ts_ns: i64, bid: f32, ask: f32) -> ReplayEvent {
         let mut bids = [BookLevel::default(); TAPE_DEPTH];
         let mut asks = [BookLevel::default(); TAPE_DEPTH];
-        bids[0] = BookLevel { price: bid, size: 200.0 };
-        asks[0] = BookLevel { price: ask, size: 200.0 };
+        bids[0] = BookLevel {
+            price: bid,
+            size: 200.0,
+        };
+        asks[0] = BookLevel {
+            price: ask,
+            size: 200.0,
+        };
         ReplayEvent {
             ts_ns,
             market_id: MarketId(1),
@@ -223,12 +235,21 @@ mod tests {
     fn holds_outside_late_phase() {
         let close_ns: i64 = 100_000_000_000_000;
         let ctx = Ctx {
-            events_seen: 1, yes_shares: 0.0, no_shares: 0.0, cash_usdc: 100.0,
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            model_output: None,
             market_close_ns: close_ns,
         };
         let mut s = LateBigBet::new(LateBigBetConfig::default());
         // 200s before close — not yet "late"
-        let out = s.on_event(&evt(close_ns - 200 * 1_000_000_000, 0.49, 0.51), &ctx, &SpotHistory::default(), &pm_types::TradeHistory::default());
+        let out = s.on_event(
+            &evt(close_ns - 200 * 1_000_000_000, 0.49, 0.51),
+            &ctx,
+            &SpotHistory::default(),
+            &pm_types::TradeHistory::default(),
+        );
         assert!(out.orders.is_empty());
     }
 
@@ -237,21 +258,35 @@ mod tests {
     fn fires_one_bet_when_late_and_strong_signal() {
         let close_ns: i64 = 100_000_000_000_000;
         let ctx = Ctx {
-            events_seen: 1, yes_shares: 0.0, no_shares: 0.0, cash_usdc: 100.0,
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            model_output: None,
             market_close_ns: close_ns,
         };
         let mut s = LateBigBet::new(LateBigBetConfig {
-            min_conviction: 0.0,  // no gate
+            min_conviction: 0.0, // no gate
             ..LateBigBetConfig::default()
         });
         // Build up dir history first
         let now = close_ns - 20 * 1_000_000_000;
         let spot = spot_uptrend(now);
         for i in 0..12 {
-            s.on_event(&evt(now - (12 - i) * 100_000_000, 0.49, 0.51), &ctx, &spot, &pm_types::TradeHistory::default());
+            s.on_event(
+                &evt(now - (12 - i) * 100_000_000, 0.49, 0.51),
+                &ctx,
+                &spot,
+                &pm_types::TradeHistory::default(),
+            );
         }
         // 20s before close — IS late
-        let out = s.on_event(&evt(now, 0.49, 0.51), &ctx, &spot, &pm_types::TradeHistory::default());
+        let out = s.on_event(
+            &evt(now, 0.49, 0.51),
+            &ctx,
+            &spot,
+            &pm_types::TradeHistory::default(),
+        );
         assert_eq!(out.orders.len(), 1, "should fire one late bet");
     }
 }

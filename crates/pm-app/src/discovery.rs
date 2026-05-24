@@ -23,6 +23,7 @@ pub struct MarketHandle {
 
 #[derive(Debug, Deserialize)]
 struct AvailabilityResponse {
+    #[allow(dead_code)]
     asset_id: String,
     slug: String,
     outcome: String,
@@ -35,7 +36,9 @@ pub async fn list_asset_ids_for_day(store: &TelonexStore, date: &str) -> Result<
         "raw/telonex/exchange=polymarket/channel=book_snapshot_25/date={date}/"
     ));
     let inner = store.store();
-    let mut listing = inner.list_with_delimiter(Some(&prefix)).await
+    let mut listing = inner
+        .list_with_delimiter(Some(&prefix))
+        .await
         .with_context(|| format!("list_with_delimiter {prefix}"))?;
     listing.common_prefixes.sort();
     let asset_ids = listing
@@ -56,30 +59,30 @@ pub async fn fetch_availability(
     client: &reqwest::Client,
     asset_id: &str,
 ) -> Result<(String, String)> {
-    let url = format!(
-        "https://api.telonex.io/v1/availability/polymarket?asset_id={asset_id}"
-    );
-    let mut backoff_ms = 200u64;
-    for attempt in 0..6 {
+    let url = format!("https://api.telonex.io/v1/availability/polymarket?asset_id={asset_id}");
+    let mut backoff = std::time::Duration::from_secs(1);
+    for attempt in 0..10 {
         let resp = client
             .get(&url)
             .send()
             .await
             .with_context(|| format!("availability GET {asset_id}"))?;
         if resp.status().as_u16() == 429 {
-            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
-            backoff_ms = (backoff_ms * 2).min(5_000);
-            if attempt == 5 {
+            if attempt == 9 {
                 return Err(anyhow!("availability 429 (max retries) for {asset_id}"));
             }
+            let retry_after = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(std::time::Duration::from_secs);
+            tokio::time::sleep(retry_after.unwrap_or(backoff)).await;
+            backoff = (backoff * 2).min(std::time::Duration::from_secs(60));
             continue;
         }
         if !resp.status().is_success() {
-            return Err(anyhow!(
-                "availability {} for {}",
-                resp.status(),
-                asset_id
-            ));
+            return Err(anyhow!("availability {} for {}", resp.status(), asset_id));
         }
         let body: AvailabilityResponse = resp
             .json()
@@ -128,7 +131,7 @@ pub async fn discover_markets(
             }
         }
     }))
-    .buffer_unordered(max_concurrent)
+    .buffer_unordered(max_concurrent.max(1))
     .collect::<Vec<_>>()
     .await;
 
@@ -138,7 +141,9 @@ pub async fn discover_markets(
         if !slug.starts_with(slug_prefix) {
             continue;
         }
-        let Some(close_ts) = parse_close_ts(&slug) else { continue };
+        let Some(close_ts) = parse_close_ts(&slug) else {
+            continue;
+        };
         out.push(MarketHandle {
             asset_id,
             slug,

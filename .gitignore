@@ -1,6 +1,7 @@
 target/
 data/raw/
 data/prepared/
+data/cache/
 *.log
 .env
 .env.*

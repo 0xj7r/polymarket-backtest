@@ -122,7 +122,10 @@ impl PortfolioState {
     }
 
     pub fn market_exposure(&self, market_id: u32) -> f64 {
-        self.per_market_outlay.get(&market_id).copied().unwrap_or(0.0)
+        self.per_market_outlay
+            .get(&market_id)
+            .copied()
+            .unwrap_or(0.0)
     }
 
     /// True when a fresh order should be allowed through. The runner is the

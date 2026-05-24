@@ -125,26 +125,22 @@ impl Strategy for DeltaNeutralMm {
             || (self.last_no_price as f64 - no_rung).abs() < self.cfg.tick * 0.5;
 
         let mut orders = Vec::new();
-        if !skip_yes
-            && yes_rung >= self.cfg.price_min
-            && yes_rung <= self.cfg.price_max
-        {
+        if !skip_yes && yes_rung >= self.cfg.price_min && yes_rung <= self.cfg.price_max {
             orders.push(OrderRequest {
                 side: Side::BuyYes,
                 shares: self.cfg.clip_shares,
+                max_depth: 1,
                 limit_price: Some(yes_rung as f32),
                 tag: "dnmm_yes",
             });
             self.last_yes_emit_ns = event.ts_ns;
             self.last_yes_price = yes_rung as f32;
         }
-        if !skip_no
-            && no_rung >= self.cfg.price_min
-            && no_rung <= self.cfg.price_max
-        {
+        if !skip_no && no_rung >= self.cfg.price_min && no_rung <= self.cfg.price_max {
             orders.push(OrderRequest {
                 side: Side::BuyNo,
                 shares: self.cfg.clip_shares,
+                max_depth: 1,
                 limit_price: Some(no_rung as f32),
                 tag: "dnmm_no",
             });
@@ -163,8 +159,14 @@ mod tests {
     fn evt(ts_ns: i64, bid: f32, ask: f32) -> ReplayEvent {
         let mut bids = [BookLevel::default(); TAPE_DEPTH];
         let mut asks = [BookLevel::default(); TAPE_DEPTH];
-        bids[0] = BookLevel { price: bid, size: 200.0 };
-        asks[0] = BookLevel { price: ask, size: 200.0 };
+        bids[0] = BookLevel {
+            price: bid,
+            size: 200.0,
+        };
+        asks[0] = BookLevel {
+            price: ask,
+            size: 200.0,
+        };
         ReplayEvent {
             ts_ns,
             market_id: MarketId(1),
@@ -183,7 +185,11 @@ mod tests {
     fn quotes_both_legs_when_book_open_and_pair_cost_ok() {
         let close_ns: i64 = 100_000_000_000_000;
         let ctx = Ctx {
-            events_seen: 1, yes_shares: 0.0, no_shares: 0.0, cash_usdc: 100.0,
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            model_output: None,
             market_close_ns: close_ns,
         };
         let mut s = DeltaNeutralMm::new(DeltaNeutralMmConfig {
@@ -191,7 +197,12 @@ mod tests {
             ..DeltaNeutralMmConfig::default()
         });
         // 200s before close, mid 0.41/0.43 — pair_cost = 0.42 + 0.56 = 0.98, ok with 1.05 cap
-        let out = s.on_event(&evt(close_ns - 200 * 1_000_000_000, 0.41, 0.43), &ctx, &SpotHistory::default(), &TradeHistory::default());
+        let out = s.on_event(
+            &evt(close_ns - 200 * 1_000_000_000, 0.41, 0.43),
+            &ctx,
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+        );
         assert_eq!(out.orders.len(), 2);
         assert!(out.orders.iter().any(|o| matches!(o.side, Side::BuyYes)));
         assert!(out.orders.iter().any(|o| matches!(o.side, Side::BuyNo)));
@@ -213,7 +224,11 @@ mod tests {
     fn skips_overfilled_leg() {
         let close_ns: i64 = 100_000_000_000_000;
         let ctx = Ctx {
-            events_seen: 1, yes_shares: 5.0, no_shares: 0.0, cash_usdc: 100.0,
+            events_seen: 1,
+            yes_shares: 5.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            model_output: None,
             market_close_ns: close_ns,
         };
         let mut s = DeltaNeutralMm::new(DeltaNeutralMmConfig {
@@ -221,10 +236,23 @@ mod tests {
             max_inventory_delta_shares: 1.0,
             ..DeltaNeutralMmConfig::default()
         });
-        let out = s.on_event(&evt(close_ns - 200 * 1_000_000_000, 0.41, 0.43), &ctx, &SpotHistory::default(), &TradeHistory::default());
+        let out = s.on_event(
+            &evt(close_ns - 200 * 1_000_000_000, 0.41, 0.43),
+            &ctx,
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+        );
         // delta = 5 > 1 → skip yes; should emit only no
-        let yes_count = out.orders.iter().filter(|o| matches!(o.side, Side::BuyYes)).count();
-        let no_count = out.orders.iter().filter(|o| matches!(o.side, Side::BuyNo)).count();
+        let yes_count = out
+            .orders
+            .iter()
+            .filter(|o| matches!(o.side, Side::BuyYes))
+            .count();
+        let no_count = out
+            .orders
+            .iter()
+            .filter(|o| matches!(o.side, Side::BuyNo))
+            .count();
         assert_eq!(yes_count, 0);
         assert_eq!(no_count, 1);
     }
@@ -233,12 +261,21 @@ mod tests {
     fn stops_emitting_near_resolution() {
         let close_ns: i64 = 100_000_000_000_000;
         let ctx = Ctx {
-            events_seen: 1, yes_shares: 0.0, no_shares: 0.0, cash_usdc: 100.0,
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            model_output: None,
             market_close_ns: close_ns,
         };
         let mut s = DeltaNeutralMm::new(DeltaNeutralMmConfig::default());
         // 15s to close — should hold
-        let out = s.on_event(&evt(close_ns - 15 * 1_000_000_000, 0.41, 0.43), &ctx, &SpotHistory::default(), &TradeHistory::default());
+        let out = s.on_event(
+            &evt(close_ns - 15 * 1_000_000_000, 0.41, 0.43),
+            &ctx,
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+        );
         assert!(out.orders.is_empty());
     }
 }

@@ -128,6 +128,7 @@ impl Strategy for LateConfirmation {
         StrategyOutput::one(OrderRequest {
             side,
             shares,
+            max_depth: 1,
             limit_price: None,
             tag: "lconf",
         })
