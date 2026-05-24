@@ -217,6 +217,11 @@ if [ "${USE_LOCAL_CACHE}" = "1" ]; then
   LOCAL_CACHE_ARGS=(--local-cache-dir "${LOCAL_CACHE_DIR}")
 fi
 
+MODEL_GATE_ARGS=()
+if [ "${ENFORCE_MODEL_GATE}" != "true" ]; then
+  MODEL_GATE_ARGS=(--disable-model-gate)
+fi
+
 IFS=',' read -r -a CLIPS <<< "${CLIP_FRACTIONS}"
 IFS=',' read -r -a GROSS_CAPS <<< "${GROSS_CAPS}"
 FIRST=1
@@ -288,7 +293,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-favourite-max-model-risk "${BR2_LATE_FAVOURITE_MAX_MODEL_RISK}" \\
       --br2-late-favourite-min-model-side-p "${BR2_LATE_FAVOURITE_MIN_MODEL_SIDE_P}" \\
       --br2-late-favourite-min-model-edge "${BR2_LATE_FAVOURITE_MIN_MODEL_EDGE}" \\
-      --enforce-model-gate "${ENFORCE_MODEL_GATE}" \\
+      "\${MODEL_GATE_ARGS[@]}" \\
       --model-gate-min-confidence "${MODEL_GATE_MIN_CONFIDENCE}" \\
       --model-gate-max-risk "${MODEL_GATE_MAX_RISK}" \\
       --model-gate-min-edge "${MODEL_GATE_MIN_EDGE}" \\

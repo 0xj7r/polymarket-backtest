@@ -334,6 +334,9 @@ enum Cmd {
         /// Enable the runner-level model gate after strategy emission.
         #[arg(long, default_value_t = true)]
         enforce_model_gate: bool,
+        /// Disable the runner-level model gate after strategy emission.
+        #[arg(long, default_value_t = false)]
+        disable_model_gate: bool,
         /// Runner-level model gate minimum confidence.
         #[arg(long, default_value = "0.68")]
         model_gate_min_confidence: f32,
@@ -721,6 +724,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_min_model_side_p,
             br2_late_favourite_min_model_edge,
             enforce_model_gate,
+            disable_model_gate,
             model_gate_min_confidence,
             model_gate_max_risk,
             model_gate_min_edge,
@@ -772,7 +776,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_max_model_risk,
                 br2_late_favourite_min_model_side_p,
                 br2_late_favourite_min_model_edge,
-                enforce_model_gate,
+                enforce_model_gate && !disable_model_gate,
                 model_gate_min_confidence,
                 model_gate_max_risk,
                 model_gate_min_edge,
