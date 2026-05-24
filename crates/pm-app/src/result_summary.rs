@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use pm_strategy::bonereaper_v2::BonereaperV2GateStats;
 use serde::{Deserialize, Serialize};
 
 const MARKETS_PER_DAY: f64 = 288.0;
@@ -30,6 +31,7 @@ pub struct ResultSummary {
     pub best_market_slug: Option<String>,
     pub best_market_pnl_usdc: f64,
     pub by_fill_tag: HashMap<String, FillTagSummary>,
+    pub bonereaper_v2_gate_stats: Option<BonereaperV2GateStats>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -59,6 +61,8 @@ struct StrategyResultRow {
     end_equity_usdc: f64,
     #[serde(default)]
     fills_detail: Vec<FillRow>,
+    #[serde(default)]
+    bonereaper_v2_gate_stats: Option<BonereaperV2GateStats>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,6 +95,7 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
     let mut best_market_slug = None::<String>;
     let mut best_market_pnl = 0.0f64;
     let mut tag_acc: HashMap<String, (usize, f64, f64)> = HashMap::new();
+    let mut bonereaper_v2_gate_stats = None::<BonereaperV2GateStats>;
 
     for (line_no, line) in reader.lines().enumerate() {
         let line = line.with_context(|| format!("read line {}", line_no + 1))?;
@@ -140,6 +145,11 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
             entry.0 += 1;
             entry.1 += fill.notional;
             entry.2 += fill.price;
+        }
+        if let Some(stats) = strategy_row.bonereaper_v2_gate_stats {
+            bonereaper_v2_gate_stats
+                .get_or_insert_with(BonereaperV2GateStats::default)
+                .add_assign(stats);
         }
     }
 
@@ -200,6 +210,7 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
         best_market_slug,
         best_market_pnl_usdc: best_market_pnl,
         by_fill_tag,
+        bonereaper_v2_gate_stats,
     })
 }
 
@@ -263,6 +274,25 @@ pub fn print_result_summary(summary: &ResultSummary) {
             );
         }
     }
+    if let Some(stats) = summary.bonereaper_v2_gate_stats {
+        println!("late favourite gates:");
+        println!(
+            "  checks={} emits={} skew_fail={} price_fail={} whipsaw_fail={}",
+            stats.late_favourite_checks,
+            stats.late_favourite_emits,
+            stats.late_favourite_skew_fail,
+            stats.late_favourite_price_fail,
+            stats.late_favourite_whipsaw_fail
+        );
+        println!(
+            "  model_conf_fail={} model_risk_fail={} model_side_p_fail={} reversal_fail={} path_eff_fail={}",
+            stats.late_favourite_model_confidence_fail,
+            stats.late_favourite_model_risk_fail,
+            stats.late_favourite_model_side_p_fail,
+            stats.late_favourite_reversal_pressure_fail,
+            stats.late_favourite_path_efficiency_fail
+        );
+    }
 }
 
 #[cfg(test)]
@@ -283,12 +313,12 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         writeln!(
             file,
-            r#"{{"slug":"m1","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"pnl_usdc":10.0,"start_equity_usdc":1000.0,"end_equity_usdc":1010.0,"fills_detail":[{{"price":0.8,"notional":8.0,"tag":"fav"}}]}}}}}}"#
+            r#"{{"slug":"m1","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"pnl_usdc":10.0,"start_equity_usdc":1000.0,"end_equity_usdc":1010.0,"fills_detail":[{{"price":0.8,"notional":8.0,"tag":"fav"}}],"bonereaper_v2_gate_stats":{{"late_favourite_checks":10,"late_favourite_emits":1,"late_favourite_whipsaw_fail":2}}}}}}}}"#
         )
         .unwrap();
         writeln!(
             file,
-            r#"{{"slug":"m2","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"pnl_usdc":-20.0,"start_equity_usdc":1010.0,"end_equity_usdc":990.0,"fills_detail":[{{"price":0.9,"notional":9.0,"tag":"fav"}}]}}}}}}"#
+            r#"{{"slug":"m2","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"pnl_usdc":-20.0,"start_equity_usdc":1010.0,"end_equity_usdc":990.0,"fills_detail":[{{"price":0.9,"notional":9.0,"tag":"fav"}}],"bonereaper_v2_gate_stats":{{"late_favourite_checks":5,"late_favourite_emits":2,"late_favourite_reversal_pressure_fail":3}}}}}}}}"#
         )
         .unwrap();
         drop(file);
@@ -306,5 +336,10 @@ mod tests {
         assert_eq!(fav.fills, 2);
         assert!((fav.total_notional_usdc - 17.0).abs() < 1e-9);
         assert!((fav.avg_fill_price - 0.85).abs() < 1e-9);
+        let gates = summary.bonereaper_v2_gate_stats.unwrap();
+        assert_eq!(gates.late_favourite_checks, 15);
+        assert_eq!(gates.late_favourite_emits, 3);
+        assert_eq!(gates.late_favourite_whipsaw_fail, 2);
+        assert_eq!(gates.late_favourite_reversal_pressure_fail, 3);
     }
 }

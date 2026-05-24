@@ -29,14 +29,15 @@ use crate::signals::{Ring, direction_score};
 use crate::spot_momentum::spot_momentum_stack;
 use crate::{Ctx, OrderRequest, Side, Strategy, StrategyOutput};
 use pm_types::{ReplayEvent, SpotHistory, TradeHistory, compute_trade_flow};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const BETTING_WINDOW_SECS: i64 = 300;
 const MOM_WINDOW: usize = 32;
 const MICRO_DEV_SCALE: f32 = 0.6;
 const TRADE_FLOW_LOOKBACK_NS: i64 = 60 * 1_000_000_000;
 
-#[derive(Debug, Default, Clone, Copy, Serialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BonereaperV2GateStats {
     pub late_confirm_checks: u64,
     pub late_confirm_price_fail: u64,
