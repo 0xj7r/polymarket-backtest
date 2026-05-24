@@ -13,7 +13,7 @@ const MOMENTUM_WINDOWS_SECONDS: [i64; 5] = [10, 30, 60, 120, 300];
 const MOMENTUM_WEIGHTS: [f32; 5] = [0.45, 0.25, 0.15, 0.10, 0.05];
 const SKEW_BINS: usize = 10;
 const HOUR_BINS: usize = 24;
-const META_FEATURES: usize = 40;
+const META_FEATURES: usize = 44;
 const META_CALIBRATOR_LR: f32 = 0.08;
 const META_CALIBRATOR_MIN_UPDATES: u32 = 12;
 const META_CALIBRATOR_WEIGHT_DECAY: f32 = 1.0e-3;
@@ -76,6 +76,10 @@ pub const META_FEATURE_NAMES: [&str; META_FEATURES] = [
     "abs_direction_score",
     "mid_distance_from_half",
     "confidence_liquidity_interaction",
+    "spot_fast_momentum_side",
+    "spot_broad_momentum_side",
+    "spot_fast_broad_alignment",
+    "spot_acceleration_side",
 ];
 
 /// Output contract expected by the 4-score engine.
@@ -342,6 +346,10 @@ pub struct DirectionScore {
     pub momentum_10_60_accel: f32,
     pub momentum_30_300_accel: f32,
     pub spot_momentum: f32,
+    pub spot_fast_momentum: f32,
+    pub spot_broad_momentum: f32,
+    pub spot_fast_broad_alignment: f32,
+    pub spot_acceleration: f32,
     pub ofi: f32,
     pub microprice_dev: f32,
     pub microprice_spot_alignment: f32,
@@ -646,6 +654,14 @@ impl MetaFeatures {
         values[idx] = (2.0 * (market_mid - 0.5).abs()).clamp(0.0, 1.0);
         idx += 1;
         values[idx] = (confidence.composite * risk.liquidity).clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = direction.spot_fast_momentum * side;
+        idx += 1;
+        values[idx] = direction.spot_broad_momentum * side;
+        idx += 1;
+        values[idx] = direction.spot_fast_broad_alignment;
+        idx += 1;
+        values[idx] = direction.spot_acceleration * side;
         Self { values }
     }
 }
@@ -738,9 +754,17 @@ where
     D: Deserializer<'de>,
 {
     let values = Vec::<f32>::deserialize(deserializer)?;
-    values.try_into().map_err(|values: Vec<f32>| {
-        serde::de::Error::custom(format!("expected {N} f32 values, got {}", values.len()))
-    })
+    if values.len() > N {
+        return Err(serde::de::Error::custom(format!(
+            "expected at most {N} f32 values, got {}",
+            values.len()
+        )));
+    }
+    let mut out = [0.0; N];
+    for (idx, value) in values.into_iter().enumerate() {
+        out[idx] = value;
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1901,7 +1925,8 @@ pub fn direction_score(
     let momentum_features = mid_momentum_features(event, recent_mids);
     let momentum = momentum_features.weighted;
     let ofi_v = top_n_ofi(event, 3);
-    let spot_momentum = spot_score(event.ts_ns, spot);
+    let spot_stack = spot_score_stack(event.ts_ns, spot);
+    let spot_momentum = spot_stack.blended;
 
     let mp = microprice(
         event.yes_bid,
@@ -1932,6 +1957,10 @@ pub fn direction_score(
         momentum_30_300_accel: (momentum_features.by_window[1] - momentum_features.by_window[4])
             .clamp(-1.0, 1.0),
         spot_momentum,
+        spot_fast_momentum: spot_stack.fast,
+        spot_broad_momentum: spot_stack.broad,
+        spot_fast_broad_alignment: spot_stack.alignment,
+        spot_acceleration: spot_stack.acceleration,
         ofi: ofi_v,
         microprice_dev,
         microprice_spot_alignment,
@@ -2136,18 +2165,45 @@ pub fn calibrated_p(direction: f32, confidence: f32, book_implied: f32, model_we
     blended
 }
 
-pub fn spot_score(ts_ns: i64, spot: &SpotHistory) -> f32 {
+#[derive(Debug, Clone, Copy, Default)]
+struct SpotScoreStack {
+    fast: f32,
+    broad: f32,
+    blended: f32,
+    alignment: f32,
+    acceleration: f32,
+}
+
+fn spot_score_stack(ts_ns: i64, spot: &SpotHistory) -> SpotScoreStack {
     let fast = weighted_multi_tf_return(ts_ns, spot);
     let broad = weighted_broad_multi_tf_return(ts_ns, spot);
     let fast_score = score_spot_return(fast, 250.0);
     let broad_score = score_spot_return(broad, 80.0);
-    if fast_score.abs() < 0.02 || broad_score.abs() < 0.02 {
-        fast_score
+    let alignment = if fast_score.abs() < 0.02 || broad_score.abs() < 0.02 {
+        0.0
     } else if fast_score.signum() == broad_score.signum() {
+        1.0
+    } else {
+        -1.0
+    };
+    let blended = if alignment == 0.0 {
+        fast_score
+    } else if alignment > 0.0 {
         (0.80 * fast_score + 0.20 * broad_score).clamp(-1.0, 1.0)
     } else {
         (0.65 * fast_score + 0.35 * broad_score).clamp(-1.0, 1.0)
+    };
+    SpotScoreStack {
+        fast: fast_score,
+        broad: broad_score,
+        blended,
+        alignment,
+        acceleration: (fast_score - broad_score).clamp(-1.0, 1.0),
     }
+}
+
+pub fn spot_score(ts_ns: i64, spot: &SpotHistory) -> f32 {
+    spot_score_stack(ts_ns, spot).blended
 }
 
 pub fn weighted_multi_tf_return(now_ns: i64, spot: &SpotHistory) -> Option<f64> {
@@ -2805,6 +2861,19 @@ mod tests {
 
         assert!(state.meta_calibrator.updates() >= 2);
         assert!(yes_out.calibrated_p > 0.5 || no_out.calibrated_p > 0.5);
+    }
+
+    #[test]
+    fn meta_features_deserialize_older_short_vectors_with_zero_padding() {
+        let json = format!(
+            "{{\"values\":[{}]}}",
+            (0..40).map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+        );
+        let features: MetaFeatures = serde_json::from_str(&json).unwrap();
+        assert_eq!(features.values[0], 0.0);
+        assert_eq!(features.values[39], 39.0);
+        assert_eq!(features.values[40], 0.0);
+        assert_eq!(features.values[META_FEATURES - 1], 0.0);
     }
 
     #[test]
