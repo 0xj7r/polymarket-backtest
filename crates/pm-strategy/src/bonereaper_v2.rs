@@ -82,6 +82,8 @@ pub struct BonereaperV2GateStats {
     pub late_favourite_model_side_p_fail: u64,
     pub late_favourite_model_edge_fail: u64,
     pub late_favourite_whipsaw_fail: u64,
+    pub late_favourite_reversal_pressure_fail: u64,
+    pub late_favourite_path_efficiency_fail: u64,
     pub late_favourite_shares_fail: u64,
     pub late_favourite_emits: u64,
 }
@@ -132,6 +134,8 @@ impl BonereaperV2GateStats {
         self.late_favourite_model_side_p_fail += other.late_favourite_model_side_p_fail;
         self.late_favourite_model_edge_fail += other.late_favourite_model_edge_fail;
         self.late_favourite_whipsaw_fail += other.late_favourite_whipsaw_fail;
+        self.late_favourite_reversal_pressure_fail += other.late_favourite_reversal_pressure_fail;
+        self.late_favourite_path_efficiency_fail += other.late_favourite_path_efficiency_fail;
         self.late_favourite_shares_fail += other.late_favourite_shares_fail;
         self.late_favourite_emits += other.late_favourite_emits;
     }
@@ -192,6 +196,8 @@ pub struct BonereaperV2Config {
     pub late_favourite_min_model_side_p: f32,
     pub late_favourite_min_model_edge: f32,
     pub late_favourite_max_whipsaw_score: f32,
+    pub late_favourite_max_reversal_pressure: f32,
+    pub late_favourite_min_path_efficiency: f32,
 
     // Convex tail ladder. Real Bonereaper buys the losing side in multiple
     // rungs as the book moves further away from the tail side; each rung is
@@ -271,6 +277,8 @@ impl Default for BonereaperV2Config {
             // edge for the high-cert ladder.
             late_favourite_min_model_edge: 0.00,
             late_favourite_max_whipsaw_score: 0.75,
+            late_favourite_max_reversal_pressure: 1.0,
+            late_favourite_min_path_efficiency: 0.0,
             // Tail ladder: cheap convex bets. Threshold raised to match the
             // skew level where a "cheap" side actually exists.
             // Paired late tails were negative in walk-forward attribution:
@@ -889,6 +897,11 @@ impl Strategy for BonereaperV2 {
                     self.gate_stats.late_favourite_skew_fail += 1;
                 } else if whipsaw.score > self.cfg.late_favourite_max_whipsaw_score {
                     self.gate_stats.late_favourite_whipsaw_fail += 1;
+                } else if whipsaw.reversal_pressure > self.cfg.late_favourite_max_reversal_pressure
+                {
+                    self.gate_stats.late_favourite_reversal_pressure_fail += 1;
+                } else if whipsaw.path_efficiency < self.cfg.late_favourite_min_path_efficiency {
+                    self.gate_stats.late_favourite_path_efficiency_fail += 1;
                 } else {
                     let side = if skew_signed > 0.0 {
                         Side::BuyYes
@@ -1048,5 +1061,21 @@ mod tests {
         assert_eq!(late_favourite_high_cert_max_levels(0.95, 5), 3);
         assert_eq!(late_favourite_high_cert_max_levels(0.97, 5), 2);
         assert_eq!(late_favourite_high_cert_max_levels(0.99, 5), 1);
+    }
+
+    #[test]
+    fn late_favourite_whipsaw_component_stats_accumulate() {
+        let mut a = BonereaperV2GateStats {
+            late_favourite_reversal_pressure_fail: 2,
+            late_favourite_path_efficiency_fail: 3,
+            ..BonereaperV2GateStats::default()
+        };
+        a.add_assign(BonereaperV2GateStats {
+            late_favourite_reversal_pressure_fail: 5,
+            late_favourite_path_efficiency_fail: 7,
+            ..BonereaperV2GateStats::default()
+        });
+        assert_eq!(a.late_favourite_reversal_pressure_fail, 7);
+        assert_eq!(a.late_favourite_path_efficiency_fail, 10);
     }
 }
