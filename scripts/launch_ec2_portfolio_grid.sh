@@ -59,6 +59,7 @@ BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE="0.75"
 BR2_LATE_FAVOURITE_START_SECS="180.0"
 BR2_LATE_FAVOURITE_THRESHOLD="0.22"
 BR2_LATE_FAVOURITE_MIN_ASK="0.70"
+BR2_LATE_FAVOURITE_MAX_ASK="0.97"
 BR2_LATE_FAVOURITE_CLIP_FRAC="1.00"
 BR2_LATE_FAVOURITE_MAX_CLIPS="12"
 BR2_LATE_FAVOURITE_MIN_SUSTAIN_SECS="0.0"
@@ -75,8 +76,12 @@ BR2_LATE_FAVOURITE_MAX_ENTRY_PULLBACK="1.0"
 BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN="1.0"
 BR2_TAIL_CLIP_FRAC="0.10"
 BR2_TAIL_MAX_CLIPS="3"
+BR2_TAIL_MIN_ASK="0.01"
 BR2_TAIL_MAX_ASK="0.10"
 BR2_TAIL_EXTREME_THRESHOLD="0.30"
+BR2_TAIL_MIN_SKEW_STEP="0.02"
+BR2_TAIL_BUDGET_FAVOURITE_SPEND_FRAC="0.05"
+BR2_TAIL_BUDGET_FAVOURITE_UPSIDE_FRAC="0.25"
 ENFORCE_MODEL_GATE="true"
 MODEL_GATE_MIN_CONFIDENCE="0.68"
 MODEL_GATE_MAX_RISK="0.72"
@@ -138,6 +143,7 @@ while [ $# -gt 0 ]; do
         --br2-late-favourite-start-secs) BR2_LATE_FAVOURITE_START_SECS="$2"; shift 2 ;;
         --br2-late-favourite-threshold) BR2_LATE_FAVOURITE_THRESHOLD="$2"; shift 2 ;;
         --br2-late-favourite-min-ask) BR2_LATE_FAVOURITE_MIN_ASK="$2"; shift 2 ;;
+        --br2-late-favourite-max-ask) BR2_LATE_FAVOURITE_MAX_ASK="$2"; shift 2 ;;
         --br2-late-favourite-clip-frac) BR2_LATE_FAVOURITE_CLIP_FRAC="$2"; shift 2 ;;
         --br2-late-favourite-max-clips) BR2_LATE_FAVOURITE_MAX_CLIPS="$2"; shift 2 ;;
         --br2-late-favourite-min-sustain-secs) BR2_LATE_FAVOURITE_MIN_SUSTAIN_SECS="$2"; shift 2 ;;
@@ -154,8 +160,12 @@ while [ $# -gt 0 ]; do
         --br2-late-favourite-max-avg-entry-drawdown) BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN="$2"; shift 2 ;;
         --br2-tail-clip-frac) BR2_TAIL_CLIP_FRAC="$2"; shift 2 ;;
         --br2-tail-max-clips) BR2_TAIL_MAX_CLIPS="$2"; shift 2 ;;
+        --br2-tail-min-ask) BR2_TAIL_MIN_ASK="$2"; shift 2 ;;
         --br2-tail-max-ask) BR2_TAIL_MAX_ASK="$2"; shift 2 ;;
         --br2-tail-extreme-threshold) BR2_TAIL_EXTREME_THRESHOLD="$2"; shift 2 ;;
+        --br2-tail-min-skew-step) BR2_TAIL_MIN_SKEW_STEP="$2"; shift 2 ;;
+        --br2-tail-budget-favourite-spend-frac) BR2_TAIL_BUDGET_FAVOURITE_SPEND_FRAC="$2"; shift 2 ;;
+        --br2-tail-budget-favourite-upside-frac) BR2_TAIL_BUDGET_FAVOURITE_UPSIDE_FRAC="$2"; shift 2 ;;
         --enforce-model-gate) ENFORCE_MODEL_GATE="$2"; shift 2 ;;
         --model-gate-min-confidence) MODEL_GATE_MIN_CONFIDENCE="$2"; shift 2 ;;
         --model-gate-max-risk) MODEL_GATE_MAX_RISK="$2"; shift 2 ;;
@@ -358,6 +368,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-favourite-start-secs "${BR2_LATE_FAVOURITE_START_SECS}" \\
       --br2-late-favourite-threshold "${BR2_LATE_FAVOURITE_THRESHOLD}" \\
       --br2-late-favourite-min-ask "${BR2_LATE_FAVOURITE_MIN_ASK}" \\
+      --br2-late-favourite-max-ask "${BR2_LATE_FAVOURITE_MAX_ASK}" \\
       --br2-late-favourite-clip-frac "${BR2_LATE_FAVOURITE_CLIP_FRAC}" \\
       --br2-late-favourite-max-clips "${BR2_LATE_FAVOURITE_MAX_CLIPS}" \\
       --br2-late-favourite-min-sustain-secs "${BR2_LATE_FAVOURITE_MIN_SUSTAIN_SECS}" \\
@@ -374,8 +385,12 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-favourite-max-avg-entry-drawdown "${BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN}" \\
       --br2-tail-clip-frac "${BR2_TAIL_CLIP_FRAC}" \\
       --br2-tail-max-clips "${BR2_TAIL_MAX_CLIPS}" \\
+      --br2-tail-min-ask "${BR2_TAIL_MIN_ASK}" \\
       --br2-tail-max-ask "${BR2_TAIL_MAX_ASK}" \\
       --br2-tail-extreme-threshold "${BR2_TAIL_EXTREME_THRESHOLD}" \\
+      --br2-tail-min-skew-step "${BR2_TAIL_MIN_SKEW_STEP}" \\
+      --br2-tail-budget-favourite-spend-frac "${BR2_TAIL_BUDGET_FAVOURITE_SPEND_FRAC}" \\
+      --br2-tail-budget-favourite-upside-frac "${BR2_TAIL_BUDGET_FAVOURITE_UPSIDE_FRAC}" \\
       "\${MODEL_GATE_ARGS[@]}" \\
       --model-gate-min-confidence "${MODEL_GATE_MIN_CONFIDENCE}" \\
       --model-gate-max-risk "${MODEL_GATE_MAX_RISK}" \\

@@ -41,6 +41,12 @@ ROOT_VOLUME_GB=250 \
   --clip-fractions 0.015,0.02,0.03 \
   --kelly 0.25 \
   --max-concurrent-fetches 32 \
+  --br2-late-favourite-max-ask 0.93 \
+  --br2-tail-min-ask 0.01 \
+  --br2-tail-max-ask 0.10 \
+  --br2-tail-min-skew-step 0.02 \
+  --br2-tail-budget-favourite-spend-frac 0.05 \
+  --br2-tail-budget-favourite-upside-frac 0.25 \
   --portfolio-checkpoint-every-markets 250
 ```
 
@@ -64,6 +70,8 @@ These flags control Bonereaper v2's late/favourite lanes without code edits:
 --br2-high-skew-clip-frac 0.60
 --br2-high-skew-max-clips 5
 --br2-late-favourite-threshold 0.22
+--br2-late-favourite-min-ask 0.70
+--br2-late-favourite-max-ask 0.93
 --br2-late-favourite-clip-frac 1.00
 --br2-late-favourite-max-clips 12
 --br2-late-favourite-sweep-depth 7
@@ -71,11 +79,20 @@ These flags control Bonereaper v2's late/favourite lanes without code edits:
 --br2-late-favourite-min-model-side-p 0.62
 --br2-late-favourite-min-model-edge 0.00
 --model-gate-min-edge 0.00
+--br2-tail-min-ask 0.01
+--br2-tail-max-ask 0.10
+--br2-tail-min-skew-step 0.02
+--br2-tail-budget-favourite-spend-frac 0.05
+--br2-tail-budget-favourite-upside-frac 0.25
 ```
 
 Late-favourite loading is now a high-price favourite ladder, not a near-mid
 single clip. The strategy requires a native favourite ask of at least 70c and
-scales depth by price band: 70-75c = 1 level, 75-80c = 2, 80-90c = 3, 90c+ =
+can enforce a native maximum ask cap so backtests do not silently fill above
+the intended ladder price. Cheap-tail buys use the same limit-aware execution
+path and should be capped explicitly.
+
+Depth scales by price band: 70-75c = 1 level, 75-80c = 2, 80-90c = 3, 90c+ =
 4, and 90c+ in the final 120s = 5. For 90c+ high-cert favourites, ML
 side-support can carry the entry even when short-term spot/composite alignment
 is stale. Cheap-tail buys are only allowed after a late-favourite anchor
