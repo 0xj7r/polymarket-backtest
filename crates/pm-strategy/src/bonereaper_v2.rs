@@ -1037,7 +1037,7 @@ impl Strategy for BonereaperV2 {
                                     side,
                                     shares,
                                     max_depth: levels,
-                                    limit_price: None,
+                                    limit_price: Some(self.cfg.late_favourite_max_ask),
                                     tag: "br2_late_favourite_load",
                                 });
                                 self.late_favourite_clips += levels;

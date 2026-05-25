@@ -1342,7 +1342,7 @@ fn submit_maker_order(
             side: req.side,
             shares: req.shares,
             max_depth: req.max_depth,
-            limit_price: None,
+            limit_price: Some(limit),
             tag: req.tag,
         };
         apply_taker_order(
@@ -1434,6 +1434,10 @@ fn apply_taker_order(
     };
     if fill_price <= 0.0 || fill_price >= 1.0 {
         counters.orders_rejected_bad_price += 1;
+        return;
+    }
+    if !fill_respects_limit(req.side, fill_price, req.limit_price) {
+        counters.orders_rejected_no_liquidity += 1;
         return;
     }
     if fillable_shares <= 0.0 {
@@ -1536,6 +1540,9 @@ fn depth_weighted_fill(event: &ReplayEvent, req: &OrderRequest) -> Option<(f32, 
         if price <= 0.0 || price >= 1.0 || size <= 0.0 {
             continue;
         }
+        if !fill_respects_limit(req.side, price, req.limit_price) {
+            continue;
+        }
         let take = remaining.min(size as f64);
         if take <= 0.0 {
             break;
@@ -1552,6 +1559,16 @@ fn depth_weighted_fill(event: &ReplayEvent, req: &OrderRequest) -> Option<(f32, 
         return None;
     }
     Some(((notional / filled) as f32, filled))
+}
+
+fn fill_respects_limit(side: Side, price: f32, limit_price: Option<f32>) -> bool {
+    let Some(limit) = limit_price else {
+        return true;
+    };
+    match side {
+        Side::BuyYes | Side::BuyNo => price <= limit,
+        Side::SellYes | Side::SellNo => price >= limit,
+    }
 }
 
 pub fn pretty_print(rep: &BacktestReport) {
@@ -1719,6 +1736,46 @@ mod tests {
         assert_eq!(deep_fills[0].shares, 12.0);
         assert!((shallow_fills[0].price - 0.50).abs() < 1e-6);
         assert!((deep_fills[0].price - 0.5375).abs() < 1e-5);
+    }
+
+    #[test]
+    fn taker_buy_respects_side_native_limit_price() {
+        let mut event = evt(0, 0.49, 0.90, 5.0);
+        event.asks[1] = BookLevel {
+            price: 0.95,
+            size: 10.0,
+        };
+        let capped = OrderRequest {
+            side: Side::BuyYes,
+            shares: 12.0,
+            max_depth: 2,
+            limit_price: Some(0.93),
+            tag: "capped",
+        };
+
+        let mut cash = 100.0;
+        let mut yes = 0.0;
+        let mut no = 0.0;
+        let mut portfolio = PortfolioState::new(100.0, PortfolioLimits::default());
+        let mut counters = StrategyCounters::default();
+        let mut fills = Vec::new();
+        apply_taker_order(
+            &event,
+            &capped,
+            &mut cash,
+            &mut yes,
+            &mut no,
+            &mut portfolio,
+            &mut counters,
+            &mut fills,
+            0.0,
+            0.0,
+            None,
+        );
+
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].shares, 5.0);
+        assert!((fills[0].price - 0.91).abs() < 1e-6);
     }
 
     #[test]
