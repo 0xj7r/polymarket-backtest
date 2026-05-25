@@ -183,6 +183,9 @@ pub struct RunnerConfig {
     /// Optional shared canonical model state for walk-forward or portfolio
     /// calibration continuity across markets.
     pub shared_model_state: Option<Arc<Mutex<ModelState>>>,
+    /// Allow `record_market_result` to update shared/local model state after
+    /// resolution. Disable for frozen snapshot evaluation.
+    pub update_model_state_on_resolution: bool,
     /// Frozen meta-calibrator snapshot loaded into a local canonical model
     /// state. Intended for walk-forward test folds.
     pub meta_calibrator_snapshot: Option<OnlineMetaCalibratorSnapshot>,
@@ -217,6 +220,7 @@ impl Default for RunnerConfig {
             decision_log_jsonl: None,
             decision_log_parquet: None,
             shared_model_state: None,
+            update_model_state_on_resolution: true,
             meta_calibrator_snapshot: None,
             enable_meta_calibration: true,
             decision_log_every_n: 1,
@@ -688,12 +692,14 @@ pub fn run_backtest<S: Strategy>(
             },
         )
         .collect();
-    if let Some(predicted_yes) = last_canonical_prediction_is_yes {
-        if let Some(shared) = &cfg.shared_model_state {
-            let mut state = shared.lock().expect("shared model mutex poisoned");
-            state.record_market_result(last_mid, predicted_yes, yes_resolved);
-        } else {
-            model_state.record_market_result(last_mid, predicted_yes, yes_resolved);
+    if cfg.update_model_state_on_resolution {
+        if let Some(predicted_yes) = last_canonical_prediction_is_yes {
+            if let Some(shared) = &cfg.shared_model_state {
+                let mut state = shared.lock().expect("shared model mutex poisoned");
+                state.record_market_result(last_mid, predicted_yes, yes_resolved);
+            } else {
+                model_state.record_market_result(last_mid, predicted_yes, yes_resolved);
+            }
         }
     }
 

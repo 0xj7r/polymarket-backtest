@@ -1907,6 +1907,7 @@ async fn collect_training_samples_for_market(
         decision_log_jsonl: None,
         decision_log_parquet: None,
         shared_model_state: None,
+        update_model_state_on_resolution: true,
         meta_calibrator_snapshot: None,
         enable_meta_calibration: true,
         decision_log_every_n: 1_000_000,
@@ -2035,6 +2036,7 @@ async fn run_markets(
                 decision_log_jsonl: None,
                 decision_log_parquet: None,
                 shared_model_state: None,
+                update_model_state_on_resolution: meta_calibrator_snapshot.is_none(),
                 meta_calibrator_snapshot,
                 enable_meta_calibration: cfg_arc.enable_meta_calibration,
                 decision_log_every_n: 1_000_000,
@@ -2446,6 +2448,7 @@ async fn run_portfolio(
                 } else {
                     shared_model_states.get(strat.name()).cloned()
                 },
+                update_model_state_on_resolution: meta_calibrator_snapshot.is_none(),
                 meta_calibrator_snapshot: meta_calibrator_snapshot.clone(),
                 enable_meta_calibration: cfg.enable_meta_calibration,
                 decision_log_every_n: 1_000_000,

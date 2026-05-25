@@ -1892,6 +1892,7 @@ async fn run_market_backtest(
         decision_log_jsonl: decision_log,
         decision_log_parquet: None,
         shared_model_state: None,
+        update_model_state_on_resolution: true,
         meta_calibrator_snapshot: None,
         enable_meta_calibration: true,
         decision_log_every_n,
