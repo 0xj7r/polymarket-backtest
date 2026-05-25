@@ -441,6 +441,9 @@ enum Cmd {
         /// Bonereaper v2 maximum convex-tail ask price.
         #[arg(long, default_value = "0.10")]
         br2_tail_max_ask: f32,
+        /// Bonereaper v2 minimum live-observed YES-mid range before convex-tail entries.
+        #[arg(long, default_value = "0.0")]
+        br2_tail_min_observed_range: f32,
         /// Bonereaper v2 tail target coverage of favourite loss, disabled at 0.
         #[arg(long, default_value = "0.00")]
         br2_tail_target_favourite_loss_coverage_frac: f32,
@@ -917,6 +920,7 @@ async fn main() -> Result<()> {
             br2_tail_max_clips,
             br2_tail_min_ask,
             br2_tail_max_ask,
+            br2_tail_min_observed_range,
             br2_tail_target_favourite_loss_coverage_frac,
             br2_tail_extreme_threshold,
             br2_tail_min_skew_step,
@@ -1018,6 +1022,7 @@ async fn main() -> Result<()> {
                 br2_tail_max_clips,
                 br2_tail_min_ask,
                 br2_tail_max_ask,
+                br2_tail_min_observed_range,
                 br2_tail_target_favourite_loss_coverage_frac,
                 br2_tail_extreme_threshold,
                 br2_tail_min_skew_step,
@@ -1565,6 +1570,7 @@ async fn walk_forward(
     br2_tail_max_clips: usize,
     br2_tail_min_ask: f32,
     br2_tail_max_ask: f32,
+    br2_tail_min_observed_range: f32,
     br2_tail_target_favourite_loss_coverage_frac: f32,
     br2_tail_extreme_threshold: f32,
     br2_tail_min_skew_step: f32,
@@ -1704,6 +1710,7 @@ async fn walk_forward(
         br2_tail_max_clips,
         br2_tail_min_ask,
         br2_tail_max_ask,
+        br2_tail_min_observed_range,
         br2_tail_target_favourite_loss_coverage_frac,
         br2_tail_extreme_threshold,
         br2_tail_min_skew_step,

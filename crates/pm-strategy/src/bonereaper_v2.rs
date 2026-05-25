@@ -251,6 +251,10 @@ pub struct BonereaperV2Config {
     pub tail_refresh_secs: f32,
     pub tail_min_ask: f32,
     pub tail_max_ask: f32,
+    /// Minimum live-observed YES-mid range required before buying convex tail.
+    /// Useful for avoiding steady favourite markets where tail bleed is most
+    /// likely and reserving spend for reversal-prone expanded-range regimes.
+    pub tail_min_observed_range: f32,
     pub tail_target_favourite_loss_coverage_frac: f32,
     pub tail_budget_favourite_spend_frac: f32,
     pub tail_budget_favourite_upside_frac: f32,
@@ -356,6 +360,7 @@ impl Default for BonereaperV2Config {
             tail_refresh_secs: 5.0,
             tail_min_ask: 0.01,
             tail_max_ask: 0.10,
+            tail_min_observed_range: 0.0,
             tail_target_favourite_loss_coverage_frac: 0.0,
             tail_budget_favourite_spend_frac: 0.05,
             tail_budget_favourite_upside_frac: 0.25,
@@ -528,6 +533,10 @@ fn late_favourite_high_cert_max_levels(favourite_ask: f64, base_levels: usize) -
     } else {
         base_levels
     }
+}
+
+fn tail_observed_range_allowed(range: f32, min_range: f32) -> bool {
+    range >= min_range.clamp(0.0, 1.0)
 }
 
 fn range_throttle(range: f32, soft: f32, hard: f32) -> f32 {
@@ -1234,6 +1243,10 @@ impl Strategy for BonereaperV2 {
             if skew_mag >= self.cfg.tail_extreme_threshold
                 && (starting_fresh || advanced)
                 && self.late_favourite_notional_emitted > 0.0
+                && tail_observed_range_allowed(
+                    ctx.market_yes_range_so_far,
+                    self.cfg.tail_min_observed_range,
+                )
             {
                 let Some(favourite_side) = self.late_favourite_side else {
                     return StrategyOutput { orders };
@@ -1434,5 +1447,13 @@ mod tests {
     fn tail_clip_respects_budget_under_coverage_target() {
         let clip = tail_clip_notional(40.0, 0.15, 240.0, 0.0, 0.08, 0.80, 5.0);
         assert!((clip - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tail_observed_range_gate_requires_configured_expansion() {
+        assert!(tail_observed_range_allowed(0.74, 0.0));
+        assert!(!tail_observed_range_allowed(0.74, 0.75));
+        assert!(tail_observed_range_allowed(0.75, 0.75));
+        assert!(!tail_observed_range_allowed(0.95, 2.0));
     }
 }
