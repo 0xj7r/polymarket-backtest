@@ -102,6 +102,7 @@ pub struct WalkForwardConfig {
     pub max_clip_usdc: f64,
     pub max_order_clip_multiplier: f64,
     pub max_per_market_exposure_usdc: f64,
+    pub max_per_market_exposure_frac: Option<f64>,
     pub spot_symbol: String,
     pub strategies: Vec<StratId>,
     pub max_concurrent_fetches: usize,
@@ -244,6 +245,7 @@ impl Default for WalkForwardConfig {
             max_clip_usdc: 20.0,
             max_order_clip_multiplier: 2.0,
             max_per_market_exposure_usdc: 50.0,
+            max_per_market_exposure_frac: None,
             spot_symbol: "BTCUSDT".to_string(),
             strategies: vec![StratId::ReactiveDirectional, StratId::PairedMm],
             max_concurrent_fetches: 16,
@@ -397,6 +399,7 @@ pub struct SummaryRunConfig {
     pub max_clip_usdc: f64,
     pub max_order_clip_multiplier: f64,
     pub max_per_market_exposure_usdc: f64,
+    pub max_per_market_exposure_frac: Option<f64>,
     pub replay_sample_ms: u64,
     pub clip_fraction_of_equity: Option<f64>,
     pub clip_drawdown_soft_pct: f64,
@@ -653,6 +656,15 @@ fn compounded_clip(bankroll: f64, frac: f64) -> f64 {
         raw.min(cap).max(0.0)
     } else {
         raw.clamp(0.50, cap)
+    }
+}
+
+fn per_market_exposure_cap(cfg: &WalkForwardConfig, bankroll: f64) -> f64 {
+    match cfg.max_per_market_exposure_frac {
+        Some(frac) if frac.is_finite() && frac >= 0.0 => {
+            cfg.max_per_market_exposure_usdc.min(bankroll * frac)
+        }
+        _ => cfg.max_per_market_exposure_usdc,
     }
 }
 
@@ -2179,7 +2191,10 @@ async fn run_markets(
                 resolved_yes,
                 portfolio_limits: PortfolioLimits {
                     max_clip_usdc: cfg_arc.max_clip_usdc * cfg_arc.max_order_clip_multiplier,
-                    max_per_market_exposure_usdc: cfg_arc.max_per_market_exposure_usdc,
+                    max_per_market_exposure_usdc: per_market_exposure_cap(
+                        &cfg_arc,
+                        cfg_arc.starting_cash_usdc,
+                    ),
                     ..PortfolioLimits::default()
                 },
                 equity_curve_jsonl: None,
@@ -2602,7 +2617,7 @@ async fn run_portfolio(
                 resolved_yes,
                 portfolio_limits: PortfolioLimits {
                     max_clip_usdc: clip * cfg.max_order_clip_multiplier,
-                    max_per_market_exposure_usdc: cfg.max_per_market_exposure_usdc,
+                    max_per_market_exposure_usdc: per_market_exposure_cap(cfg, bankroll),
                     max_daily_exposure_usdc: bankroll * 5.0,
                     ..PortfolioLimits::default()
                 },
@@ -3033,6 +3048,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         max_clip_usdc: cfg.max_clip_usdc,
         max_order_clip_multiplier: cfg.max_order_clip_multiplier,
         max_per_market_exposure_usdc: cfg.max_per_market_exposure_usdc,
+        max_per_market_exposure_frac: cfg.max_per_market_exposure_frac,
         replay_sample_ms: cfg.replay_sample_ms,
         clip_fraction_of_equity: cfg.clip_fraction_of_equity,
         clip_drawdown_soft_pct: cfg.clip_drawdown_soft_pct,

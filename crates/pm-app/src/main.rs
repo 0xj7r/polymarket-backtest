@@ -258,6 +258,9 @@ enum Cmd {
         /// Maximum cumulative gross buy outlay allowed per market.
         #[arg(long, default_value = "50.0")]
         max_per_market_exposure_usdc: f64,
+        /// Optional portfolio-mode cap for per-market gross buy outlay as a fraction of equity.
+        #[arg(long)]
+        max_per_market_exposure_frac: Option<f64>,
         #[arg(long, default_value = "BTCUSDT")]
         spot_symbol: String,
         /// Comma-separated strategy IDs: buy_yes_at_open, reactive_directional, paired_mm
@@ -837,6 +840,7 @@ async fn main() -> Result<()> {
             max_clip_usdc,
             max_order_clip_multiplier,
             max_per_market_exposure_usdc,
+            max_per_market_exposure_frac,
             spot_symbol,
             strategies,
             max_concurrent_fetches,
@@ -931,6 +935,7 @@ async fn main() -> Result<()> {
                 max_clip_usdc,
                 max_order_clip_multiplier,
                 max_per_market_exposure_usdc,
+                max_per_market_exposure_frac,
                 spot_symbol,
                 strategies,
                 max_concurrent_fetches,
@@ -1471,6 +1476,7 @@ async fn walk_forward(
     max_clip_usdc: f64,
     max_order_clip_multiplier: f64,
     max_per_market_exposure_usdc: f64,
+    max_per_market_exposure_frac: Option<f64>,
     spot_symbol: String,
     strategies_csv: String,
     max_concurrent_fetches: usize,
@@ -1602,6 +1608,7 @@ async fn walk_forward(
         max_clip_usdc,
         max_order_clip_multiplier,
         max_per_market_exposure_usdc,
+        max_per_market_exposure_frac,
         spot_symbol,
         strategies,
         max_concurrent_fetches,
