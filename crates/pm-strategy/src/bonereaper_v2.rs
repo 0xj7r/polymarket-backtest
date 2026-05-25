@@ -813,7 +813,7 @@ impl Strategy for BonereaperV2 {
                                         side: tail_side,
                                         shares: tail_shares,
                                         max_depth: 1,
-                                        limit_price: None,
+                                        limit_price: Some(self.cfg.tail_max_ask),
                                         tag: "br2_paired_tail",
                                     });
                                 }
@@ -1116,7 +1116,7 @@ impl Strategy for BonereaperV2 {
                             side: tail_side,
                             shares,
                             max_depth: 2,
-                            limit_price: None,
+                            limit_price: Some(self.cfg.tail_max_ask),
                             tag: "br2_convex_tail",
                         });
                         self.tail_clips += 1;
