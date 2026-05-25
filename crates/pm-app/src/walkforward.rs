@@ -2333,9 +2333,19 @@ async fn run_portfolio(
     for strat in &cfg.strategies {
         if *strat == StratId::ReactiveDirectional {
             shared_skew_tables.insert(strat.name(), Arc::new(Mutex::new(SkewWinRateTable::new())));
-            shared_model_states.insert(strat.name(), Arc::new(Mutex::new(ModelState::new())));
+            shared_model_states.insert(
+                strat.name(),
+                Arc::new(Mutex::new(model_state_with_snapshot(
+                    meta_calibrator_snapshot.as_ref(),
+                ))),
+            );
         } else {
-            shared_model_states.insert(strat.name(), Arc::new(Mutex::new(ModelState::new())));
+            shared_model_states.insert(
+                strat.name(),
+                Arc::new(Mutex::new(model_state_with_snapshot(
+                    meta_calibrator_snapshot.as_ref(),
+                ))),
+            );
         }
     }
     let mut results: Vec<MarketResult> = Vec::with_capacity(markets.len());
@@ -2548,6 +2558,14 @@ async fn run_portfolio(
         summary.meta_calibration = meta_report;
     }
     Ok((results, summary))
+}
+
+fn model_state_with_snapshot(snapshot: Option<&OnlineMetaCalibratorSnapshot>) -> ModelState {
+    let mut state = ModelState::new();
+    if let Some(snapshot) = snapshot {
+        state.load_meta_calibrator_snapshot(snapshot.clone());
+    }
+    state
 }
 
 fn write_portfolio_checkpoint(
