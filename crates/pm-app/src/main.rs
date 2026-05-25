@@ -366,6 +366,9 @@ enum Cmd {
         /// Bonereaper v2 minimum ML confidence for late-favourite loads.
         #[arg(long, default_value = "0.68")]
         br2_late_favourite_min_model_confidence: f32,
+        /// Bonereaper v2 minimum absolute model direction score for late-favourite loads.
+        #[arg(long, default_value = "0.0")]
+        br2_late_favourite_min_model_direction_abs: f32,
         /// Bonereaper v2 maximum ML risk for late-favourite loads.
         #[arg(long, default_value = "0.72")]
         br2_late_favourite_max_model_risk: f32,
@@ -853,6 +856,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_min_sustain_secs,
             br2_late_favourite_sweep_depth,
             br2_late_favourite_min_model_confidence,
+            br2_late_favourite_min_model_direction_abs,
             br2_late_favourite_max_model_risk,
             br2_late_favourite_min_model_side_p,
             br2_late_favourite_min_model_edge,
@@ -941,6 +945,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_min_sustain_secs,
                 br2_late_favourite_sweep_depth,
                 br2_late_favourite_min_model_confidence,
+                br2_late_favourite_min_model_direction_abs,
                 br2_late_favourite_max_model_risk,
                 br2_late_favourite_min_model_side_p,
                 br2_late_favourite_min_model_edge,
@@ -1475,6 +1480,7 @@ async fn walk_forward(
     br2_late_favourite_min_sustain_secs: f32,
     br2_late_favourite_sweep_depth: usize,
     br2_late_favourite_min_model_confidence: f32,
+    br2_late_favourite_min_model_direction_abs: f32,
     br2_late_favourite_max_model_risk: f32,
     br2_late_favourite_min_model_side_p: f32,
     br2_late_favourite_min_model_edge: f32,
@@ -1601,6 +1607,7 @@ async fn walk_forward(
         br2_late_favourite_min_sustain_secs,
         br2_late_favourite_sweep_depth,
         br2_late_favourite_min_model_confidence,
+        br2_late_favourite_min_model_direction_abs,
         br2_late_favourite_max_model_risk,
         br2_late_favourite_min_model_side_p,
         br2_late_favourite_min_model_edge,

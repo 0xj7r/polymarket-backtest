@@ -83,6 +83,7 @@ pub struct BonereaperV2GateStats {
     pub late_favourite_model_risk_fail: u64,
     pub late_favourite_model_side_p_fail: u64,
     pub late_favourite_model_edge_fail: u64,
+    pub late_favourite_model_direction_fail: u64,
     pub late_favourite_whipsaw_fail: u64,
     pub late_favourite_reversal_pressure_fail: u64,
     pub late_favourite_path_efficiency_fail: u64,
@@ -139,6 +140,7 @@ impl BonereaperV2GateStats {
         self.late_favourite_model_risk_fail += other.late_favourite_model_risk_fail;
         self.late_favourite_model_side_p_fail += other.late_favourite_model_side_p_fail;
         self.late_favourite_model_edge_fail += other.late_favourite_model_edge_fail;
+        self.late_favourite_model_direction_fail += other.late_favourite_model_direction_fail;
         self.late_favourite_whipsaw_fail += other.late_favourite_whipsaw_fail;
         self.late_favourite_reversal_pressure_fail += other.late_favourite_reversal_pressure_fail;
         self.late_favourite_path_efficiency_fail += other.late_favourite_path_efficiency_fail;
@@ -202,6 +204,7 @@ pub struct BonereaperV2Config {
     pub late_favourite_sweep_depth: usize,
     pub late_favourite_min_composite_alignment: f32,
     pub late_favourite_min_model_confidence: f32,
+    pub late_favourite_min_model_direction_abs: f32,
     pub late_favourite_max_model_risk: f32,
     pub late_favourite_min_model_side_p: f32,
     pub late_favourite_min_model_edge: f32,
@@ -283,6 +286,7 @@ impl Default for BonereaperV2Config {
             late_favourite_sweep_depth: 7,
             late_favourite_min_composite_alignment: 0.05,
             late_favourite_min_model_confidence: 0.68,
+            late_favourite_min_model_direction_abs: 0.0,
             late_favourite_max_model_risk: 0.72,
             late_favourite_min_model_side_p: 0.62,
             // Strict 5c edge makes 90c+ favourite loading impossible while
@@ -1019,6 +1023,13 @@ impl Strategy for BonereaperV2 {
                         self.gate_stats.late_favourite_avg_entry_drawdown_fail += 1;
                     } else if !high_cert_favourite && !(composite_aligned || spot_aligned) {
                         self.gate_stats.late_favourite_alignment_fail += 1;
+                    } else if self.cfg.late_favourite_min_model_direction_abs > 0.0
+                        && ctx.model_output.is_some_and(|model| {
+                            model.direction_score.abs()
+                                < self.cfg.late_favourite_min_model_direction_abs
+                        })
+                    {
+                        self.gate_stats.late_favourite_model_direction_fail += 1;
                     } else {
                         let model_support = self.model_support_for_side(
                             ctx,
@@ -1187,17 +1198,20 @@ mod tests {
             late_favourite_sustain_fail: 11,
             late_favourite_reversal_pressure_fail: 2,
             late_favourite_path_efficiency_fail: 3,
+            late_favourite_model_direction_fail: 5,
             ..BonereaperV2GateStats::default()
         };
         a.add_assign(BonereaperV2GateStats {
             late_favourite_sustain_fail: 13,
             late_favourite_reversal_pressure_fail: 5,
             late_favourite_path_efficiency_fail: 7,
+            late_favourite_model_direction_fail: 8,
             ..BonereaperV2GateStats::default()
         });
         assert_eq!(a.late_favourite_sustain_fail, 24);
         assert_eq!(a.late_favourite_reversal_pressure_fail, 7);
         assert_eq!(a.late_favourite_path_efficiency_fail, 10);
+        assert_eq!(a.late_favourite_model_direction_fail, 13);
     }
 
     #[test]
