@@ -396,12 +396,24 @@ enum Cmd {
         /// Bonereaper v2 maximum convex-tail clips.
         #[arg(long, default_value = "3")]
         br2_tail_max_clips: usize,
+        /// Bonereaper v2 minimum convex-tail ask price.
+        #[arg(long, default_value = "0.01")]
+        br2_tail_min_ask: f32,
         /// Bonereaper v2 maximum convex-tail ask price.
         #[arg(long, default_value = "0.10")]
         br2_tail_max_ask: f32,
         /// Bonereaper v2 minimum absolute skew from 0.5 before tail laddering.
         #[arg(long, default_value = "0.30")]
         br2_tail_extreme_threshold: f32,
+        /// Bonereaper v2 minimum additional skew before another tail rung.
+        #[arg(long, default_value = "0.02")]
+        br2_tail_min_skew_step: f32,
+        /// Bonereaper v2 tail budget cap as fraction of favourite spend.
+        #[arg(long, default_value = "0.05")]
+        br2_tail_budget_favourite_spend_frac: f32,
+        /// Bonereaper v2 tail budget cap as fraction of favourite upside.
+        #[arg(long, default_value = "0.25")]
+        br2_tail_budget_favourite_upside_frac: f32,
         /// Enable the runner-level model gate after strategy emission.
         #[arg(long, default_value_t = true)]
         enforce_model_gate: bool,
@@ -848,8 +860,12 @@ async fn main() -> Result<()> {
             br2_late_favourite_max_avg_entry_drawdown,
             br2_tail_clip_frac,
             br2_tail_max_clips,
+            br2_tail_min_ask,
             br2_tail_max_ask,
             br2_tail_extreme_threshold,
+            br2_tail_min_skew_step,
+            br2_tail_budget_favourite_spend_frac,
+            br2_tail_budget_favourite_upside_frac,
             enforce_model_gate,
             disable_model_gate,
             model_gate_min_confidence,
@@ -931,8 +947,12 @@ async fn main() -> Result<()> {
                 br2_late_favourite_max_avg_entry_drawdown,
                 br2_tail_clip_frac,
                 br2_tail_max_clips,
+                br2_tail_min_ask,
                 br2_tail_max_ask,
                 br2_tail_extreme_threshold,
+                br2_tail_min_skew_step,
+                br2_tail_budget_favourite_spend_frac,
+                br2_tail_budget_favourite_upside_frac,
                 enforce_model_gate && !disable_model_gate,
                 model_gate_min_confidence,
                 model_gate_max_risk,
@@ -1460,8 +1480,12 @@ async fn walk_forward(
     br2_late_favourite_max_avg_entry_drawdown: f32,
     br2_tail_clip_frac: f32,
     br2_tail_max_clips: usize,
+    br2_tail_min_ask: f32,
     br2_tail_max_ask: f32,
     br2_tail_extreme_threshold: f32,
+    br2_tail_min_skew_step: f32,
+    br2_tail_budget_favourite_spend_frac: f32,
+    br2_tail_budget_favourite_upside_frac: f32,
     enforce_model_gate: bool,
     model_gate_min_confidence: f32,
     model_gate_max_risk: f32,
@@ -1577,8 +1601,12 @@ async fn walk_forward(
         br2_late_favourite_max_avg_entry_drawdown,
         br2_tail_clip_frac,
         br2_tail_max_clips,
+        br2_tail_min_ask,
         br2_tail_max_ask,
         br2_tail_extreme_threshold,
+        br2_tail_min_skew_step,
+        br2_tail_budget_favourite_spend_frac,
+        br2_tail_budget_favourite_upside_frac,
         enforce_model_gate,
         model_gate_min_confidence,
         model_gate_max_risk,
