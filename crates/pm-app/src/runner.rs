@@ -360,6 +360,7 @@ pub fn run_backtest<S: Strategy>(
     let mut last_mid = 0.0f32;
     let mut total_rebates = 0.0f64;
     let mut resting: Vec<RestingOrder> = Vec::new();
+    let mut trade_cursor = 0usize;
     let mut events_processed = 0usize;
     let mut market_yes_min = f32::INFINITY;
     let mut market_yes_max = f32::NEG_INFINITY;
@@ -420,6 +421,21 @@ pub fn run_backtest<S: Strategy>(
         };
         last_window_idx = idx as isize;
         events_processed += 1;
+
+        check_trade_driven_resting_fills(
+            event,
+            trades,
+            &mut trade_cursor,
+            &mut resting,
+            &mut cash,
+            &mut yes_shares,
+            &mut no_shares,
+            &mut portfolio,
+            &mut counters,
+            &mut fills,
+            &mut total_rebates,
+            cfg.maker_rebate_bps,
+        );
 
         check_resting_fills(
             event,
@@ -1233,6 +1249,181 @@ fn limit_to_yes_terms(side: Side, limit_price: f32) -> f32 {
 
 fn order_adds_yes_exposure(side: Side) -> bool {
     matches!(side, Side::BuyYes | Side::SellNo)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_maker_fill(
+    market_id: u32,
+    ts_ns: i64,
+    side: Side,
+    fill_price_native: f32,
+    shares: f64,
+    tag: &'static str,
+    model_context: Option<FillModelContext>,
+    cash: &mut f64,
+    yes_shares: &mut f64,
+    no_shares: &mut f64,
+    portfolio: &mut PortfolioState,
+    counters: &mut StrategyCounters,
+    fills: &mut Vec<Fill>,
+    total_rebates: &mut f64,
+    maker_rebate_bps: f64,
+) -> bool {
+    let notional = shares * fill_price_native as f64;
+    match side {
+        Side::BuyYes | Side::BuyNo => {
+            if !portfolio.can_open_position(market_id, notional) {
+                counters.orders_rejected_risk_gate += 1;
+                return false;
+            }
+            if notional > *cash {
+                counters.orders_rejected_no_cash += 1;
+                return false;
+            }
+        }
+        Side::SellYes => {
+            if shares > *yes_shares {
+                counters.orders_rejected_no_inventory += 1;
+                return false;
+            }
+        }
+        Side::SellNo => {
+            if shares > *no_shares {
+                counters.orders_rejected_no_inventory += 1;
+                return false;
+            }
+        }
+    }
+
+    match side {
+        Side::BuyYes => {
+            *cash -= notional;
+            *yes_shares += shares;
+            portfolio.record_outlay(market_id, ts_ns, notional);
+        }
+        Side::SellYes => {
+            *cash += notional;
+            *yes_shares -= shares;
+        }
+        Side::BuyNo => {
+            *cash -= notional;
+            *no_shares += shares;
+            portfolio.record_outlay(market_id, ts_ns, notional);
+        }
+        Side::SellNo => {
+            *cash += notional;
+            *no_shares -= shares;
+        }
+    }
+
+    let rebate = notional * maker_rebate_bps / 10_000.0;
+    *cash += rebate;
+    *total_rebates += rebate;
+
+    counters.orders_filled_maker += 1;
+    fills.push(Fill {
+        ts_ns,
+        side: format!("{:?}", side),
+        shares,
+        price: fill_price_native,
+        notional,
+        tag: tag.to_string(),
+        maker: true,
+        rebate_usdc: rebate,
+        slippage_bps: 0.0,
+        yes_mid: model_context.map(|m| m.yes_mid),
+        yes_bid: model_context.map(|m| m.yes_bid),
+        yes_ask: model_context.map(|m| m.yes_ask),
+        side_model_p: model_context.map(|m| m.side_model_p),
+        side_edge_vs_mid: model_context.map(|m| m.side_edge_vs_mid),
+        side_edge_vs_fill: model_context.map(|m| m.side_model_p - fill_price_native),
+        direction_score: model_context.map(|m| m.direction_score),
+        confidence_score: model_context.map(|m| m.confidence_score),
+        calibrated_p: model_context.map(|m| m.calibrated_p),
+        risk_score: model_context.map(|m| m.risk_score),
+        seconds_since_open: model_context.map(|m| m.seconds_since_open),
+        seconds_to_close: model_context.map(|m| m.seconds_to_close),
+        regime_whipsaw_score: model_context.map(|m| m.regime_whipsaw_score),
+        regime_path_efficiency: model_context.map(|m| m.regime_path_efficiency),
+        regime_reversal_pressure: model_context.map(|m| m.regime_reversal_pressure),
+        regime_sign_flip_rate: model_context.map(|m| m.regime_sign_flip_rate),
+        regime_realized_vol_180s_bps: model_context.map(|m| m.regime_realized_vol_180s_bps),
+    });
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_trade_driven_resting_fills(
+    event: &ReplayEvent,
+    trades: &TradeHistory,
+    trade_cursor: &mut usize,
+    resting: &mut Vec<RestingOrder>,
+    cash: &mut f64,
+    yes_shares: &mut f64,
+    no_shares: &mut f64,
+    portfolio: &mut PortfolioState,
+    counters: &mut StrategyCounters,
+    fills: &mut Vec<Fill>,
+    total_rebates: &mut f64,
+    maker_rebate_bps: f64,
+) {
+    let samples = trades.samples();
+    while *trade_cursor < samples.len() && samples[*trade_cursor].ts_ns <= event.ts_ns {
+        let trade = samples[*trade_cursor];
+        *trade_cursor += 1;
+        let mut remaining = trade.size as f64;
+        let mut i = 0;
+        while remaining > 0.0 && i < resting.len() {
+            let r = resting[i];
+            if trade.ts_ns <= r.submit_ts_ns {
+                i += 1;
+                continue;
+            }
+            let fills_order = match r.side {
+                Side::BuyYes | Side::SellNo => {
+                    !trade.aggressor_buy && trade.price <= r.limit_yes
+                }
+                Side::SellYes | Side::BuyNo => trade.aggressor_buy && trade.price >= r.limit_yes,
+            };
+            if !fills_order {
+                i += 1;
+                continue;
+            }
+
+            let fill_shares = remaining.min(r.shares);
+            let fill_price_native = match r.side {
+                Side::BuyYes | Side::SellYes => r.limit_yes,
+                Side::BuyNo | Side::SellNo => 1.0 - r.limit_yes,
+            };
+            if !apply_maker_fill(
+                event.market_id.0,
+                trade.ts_ns,
+                r.side,
+                fill_price_native,
+                fill_shares,
+                r.tag,
+                r.model_context,
+                cash,
+                yes_shares,
+                no_shares,
+                portfolio,
+                counters,
+                fills,
+                total_rebates,
+                maker_rebate_bps,
+            ) {
+                resting.swap_remove(i);
+                continue;
+            }
+            remaining -= fill_shares;
+            if fill_shares >= resting[i].shares {
+                resting.swap_remove(i);
+            } else {
+                resting[i].shares -= fill_shares;
+                i += 1;
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2078,6 +2269,57 @@ mod tests {
         // Net: -4.50 + 10.00 + 0.0045 = +5.5045
         assert!((rep.pnl_usdc - 5.5045).abs() < 1e-6, "pnl {}", rep.pnl_usdc);
         assert!((rep.maker_rebates_usdc - 0.0045).abs() < 1e-9);
+    }
+
+    #[test]
+    fn maker_buy_yes_fills_from_trade_print_without_book_cross() {
+        struct OneShot;
+        impl Strategy for OneShot {
+            fn on_event(
+                &mut self,
+                _e: &ReplayEvent,
+                ctx: &Ctx,
+                _spot: &SpotHistory,
+                _trades: &TradeHistory,
+            ) -> StrategyOutput {
+                if ctx.events_seen > 1 {
+                    return StrategyOutput::hold();
+                }
+                StrategyOutput::one(OrderRequest {
+                    side: Side::BuyYes,
+                    shares: 5.0,
+                    max_depth: 1,
+                    limit_price: Some(0.45),
+                    tag: "test_trade_maker_buy",
+                })
+            }
+        }
+        let events = vec![
+            evt(0, 0.44, 0.51, 200.0),
+            evt(2_000_000_000, 0.44, 0.51, 200.0),
+        ];
+        let trades = pm_types::TradeHistory::new(vec![pm_types::TradeTick {
+            ts_ns: 1_000_000_000,
+            price: 0.45,
+            size: 5.0,
+            aggressor_buy: false,
+        }]);
+        let cfg = RunnerConfig {
+            starting_cash_usdc: 100.0,
+            resolved_yes: Some(true),
+            maker_rebate_bps: 10.0,
+            portfolio_limits: PortfolioLimits {
+                max_clip_usdc: 10.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut s = OneShot;
+        let rep = run_backtest(&events, &SpotHistory::default(), &trades, &mut s, &cfg).unwrap();
+        assert_eq!(rep.counters.orders_filled_maker, 1);
+        assert_eq!(rep.fills[0].ts_ns, 1_000_000_000);
+        assert_eq!(rep.fills[0].tag, "test_trade_maker_buy");
+        assert!((rep.fills[0].price - 0.45).abs() < 1e-6);
     }
 
     #[test]
