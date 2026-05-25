@@ -160,6 +160,7 @@ pub struct WalkForwardConfig {
     pub br2_late_favourite_min_path_efficiency: f32,
     pub br2_late_favourite_max_adverse_fast_momentum: f32,
     pub br2_late_favourite_max_entry_pullback: f32,
+    pub br2_late_favourite_max_avg_entry_drawdown: f32,
     pub br2_tail_clip_frac: f32,
     pub br2_tail_max_clips: usize,
     pub br2_tail_max_ask: f32,
@@ -274,6 +275,7 @@ impl Default for WalkForwardConfig {
             br2_late_favourite_min_path_efficiency: 0.0,
             br2_late_favourite_max_adverse_fast_momentum: 1.0,
             br2_late_favourite_max_entry_pullback: 1.0,
+            br2_late_favourite_max_avg_entry_drawdown: 1.0,
             br2_tail_clip_frac: 0.10,
             br2_tail_max_clips: 3,
             br2_tail_max_ask: 0.10,
@@ -402,6 +404,7 @@ pub struct SummaryRunConfig {
     pub br2_late_favourite_min_path_efficiency: f32,
     pub br2_late_favourite_max_adverse_fast_momentum: f32,
     pub br2_late_favourite_max_entry_pullback: f32,
+    pub br2_late_favourite_max_avg_entry_drawdown: f32,
     pub br2_tail_clip_frac: f32,
     pub br2_tail_max_clips: usize,
     pub br2_tail_max_ask: f32,
@@ -2248,6 +2251,8 @@ fn run_one_strategy(
                 late_favourite_max_adverse_fast_momentum: cfg
                     .br2_late_favourite_max_adverse_fast_momentum,
                 late_favourite_max_entry_pullback: cfg.br2_late_favourite_max_entry_pullback,
+                late_favourite_max_avg_entry_drawdown: cfg
+                    .br2_late_favourite_max_avg_entry_drawdown,
                 tail_clip_frac: cfg.br2_tail_clip_frac,
                 tail_max_clips: cfg.br2_tail_max_clips,
                 tail_max_ask: cfg.br2_tail_max_ask,
@@ -2904,6 +2909,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_late_favourite_max_adverse_fast_momentum: cfg
             .br2_late_favourite_max_adverse_fast_momentum,
         br2_late_favourite_max_entry_pullback: cfg.br2_late_favourite_max_entry_pullback,
+        br2_late_favourite_max_avg_entry_drawdown: cfg.br2_late_favourite_max_avg_entry_drawdown,
         br2_tail_clip_frac: cfg.br2_tail_clip_frac,
         br2_tail_max_clips: cfg.br2_tail_max_clips,
         br2_tail_max_ask: cfg.br2_tail_max_ask,

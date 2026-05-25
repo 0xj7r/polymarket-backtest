@@ -72,6 +72,7 @@ BR2_LATE_FAVOURITE_MAX_REVERSAL_PRESSURE="1.0"
 BR2_LATE_FAVOURITE_MIN_PATH_EFFICIENCY="0.0"
 BR2_LATE_FAVOURITE_MAX_ADVERSE_FAST_MOMENTUM="1.0"
 BR2_LATE_FAVOURITE_MAX_ENTRY_PULLBACK="1.0"
+BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN="1.0"
 BR2_TAIL_CLIP_FRAC="0.10"
 BR2_TAIL_MAX_CLIPS="3"
 BR2_TAIL_MAX_ASK="0.10"
@@ -150,6 +151,7 @@ while [ $# -gt 0 ]; do
         --br2-late-favourite-min-path-efficiency) BR2_LATE_FAVOURITE_MIN_PATH_EFFICIENCY="$2"; shift 2 ;;
         --br2-late-favourite-max-adverse-fast-momentum) BR2_LATE_FAVOURITE_MAX_ADVERSE_FAST_MOMENTUM="$2"; shift 2 ;;
         --br2-late-favourite-max-entry-pullback) BR2_LATE_FAVOURITE_MAX_ENTRY_PULLBACK="$2"; shift 2 ;;
+        --br2-late-favourite-max-avg-entry-drawdown) BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN="$2"; shift 2 ;;
         --br2-tail-clip-frac) BR2_TAIL_CLIP_FRAC="$2"; shift 2 ;;
         --br2-tail-max-clips) BR2_TAIL_MAX_CLIPS="$2"; shift 2 ;;
         --br2-tail-max-ask) BR2_TAIL_MAX_ASK="$2"; shift 2 ;;
@@ -369,6 +371,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-favourite-min-path-efficiency "${BR2_LATE_FAVOURITE_MIN_PATH_EFFICIENCY}" \\
       --br2-late-favourite-max-adverse-fast-momentum "${BR2_LATE_FAVOURITE_MAX_ADVERSE_FAST_MOMENTUM}" \\
       --br2-late-favourite-max-entry-pullback "${BR2_LATE_FAVOURITE_MAX_ENTRY_PULLBACK}" \\
+      --br2-late-favourite-max-avg-entry-drawdown "${BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN}" \\
       --br2-tail-clip-frac "${BR2_TAIL_CLIP_FRAC}" \\
       --br2-tail-max-clips "${BR2_TAIL_MAX_CLIPS}" \\
       --br2-tail-max-ask "${BR2_TAIL_MAX_ASK}" \\
