@@ -533,6 +533,23 @@ fn model_support_for_side(
     }
 }
 
+fn model_side_probability(ctx: &Ctx, side: Side) -> Option<f32> {
+    let model = ctx.model_output?;
+    let model_side_is_yes = model.direction_score >= 0.0;
+    let target_side_is_yes = matches!(side, Side::BuyYes);
+    Some(if target_side_is_yes == model_side_is_yes {
+        model.calibrated_p
+    } else {
+        1.0 - model.calibrated_p
+    })
+}
+
+fn model_limited_buy_price(ctx: &Ctx, side: Side, max_ask: f32, min_edge: f32) -> f32 {
+    model_side_probability(ctx, side)
+        .map(|side_p| (side_p - min_edge).min(max_ask).clamp(0.0, 1.0))
+        .unwrap_or(max_ask)
+}
+
 fn bump_model_fail(stats: &mut BonereaperV2GateStats, prefix: GatePrefix, support: ModelSupport) {
     match (prefix, support) {
         (_, ModelSupport::Supported) => {}
@@ -1037,7 +1054,12 @@ impl Strategy for BonereaperV2 {
                                     side,
                                     shares,
                                     max_depth: levels,
-                                    limit_price: Some(self.cfg.late_favourite_max_ask),
+                                    limit_price: Some(model_limited_buy_price(
+                                        ctx,
+                                        side,
+                                        self.cfg.late_favourite_max_ask,
+                                        self.cfg.late_favourite_min_model_edge,
+                                    )),
                                     tag: "br2_late_favourite_load",
                                 });
                                 self.late_favourite_clips += levels;
@@ -1135,6 +1157,7 @@ impl Strategy for BonereaperV2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pm_model::ModelOutput;
 
     #[test]
     fn late_favourite_ladder_scales_by_price_and_final_window() {
@@ -1181,6 +1204,26 @@ mod tests {
     fn buy_side_sign_matches_resolution_direction() {
         assert_eq!(buy_side_sign(Side::BuyYes), 1.0);
         assert_eq!(buy_side_sign(Side::BuyNo), -1.0);
+    }
+
+    #[test]
+    fn model_limited_buy_price_caps_sweeps_to_model_edge() {
+        let ctx = Ctx {
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            model_output: Some(ModelOutput {
+                direction_score: 0.8,
+                confidence_score: 0.9,
+                calibrated_p: 0.88,
+                risk_score: 0.1,
+            }),
+            market_close_ns: 0,
+        };
+
+        assert!((model_limited_buy_price(&ctx, Side::BuyYes, 0.93, 0.02) - 0.86).abs() < 1e-6);
+        assert!((model_limited_buy_price(&ctx, Side::BuyNo, 0.93, 0.02) - 0.10).abs() < 1e-6);
     }
 
     #[test]
