@@ -242,6 +242,9 @@ enum Cmd {
         /// JSONL of `MarketHandle` rows from `discover-day`.
         #[arg(long)]
         markets: PathBuf,
+        /// Chronological cap for smoke/diagnostic runs. 0 means use all markets.
+        #[arg(long, default_value_t = 0)]
+        max_markets: usize,
         #[arg(long, default_value = "100.0")]
         starting_cash: f64,
         #[arg(long, default_value = "0.25")]
@@ -810,6 +813,7 @@ async fn main() -> Result<()> {
         }
         Cmd::WalkForward {
             markets,
+            max_markets,
             starting_cash,
             kelly_fraction,
             max_clip_usdc,
@@ -897,6 +901,7 @@ async fn main() -> Result<()> {
         } => {
             walk_forward(
                 markets,
+                max_markets,
                 starting_cash,
                 kelly_fraction,
                 max_clip_usdc,
@@ -1430,6 +1435,7 @@ fn string_value(array: &StringArray, row: usize) -> Option<&str> {
 #[allow(clippy::too_many_arguments)]
 async fn walk_forward(
     markets_path: PathBuf,
+    max_markets: usize,
     starting_cash: f64,
     kelly_fraction: f64,
     max_clip_usdc: f64,
@@ -1526,6 +1532,11 @@ async fn walk_forward(
     }
     if markets.is_empty() {
         return Err(anyhow!("no markets in {}", markets_path.display()));
+    }
+    if max_markets > 0 {
+        markets.sort_by_key(|m| m.close_ts);
+        markets.truncate(max_markets);
+        tracing::info!(max_markets, markets = markets.len(), "trimmed market list");
     }
     if walk_forward_folds.is_some() && fold_size.is_some() {
         return Err(anyhow!(
