@@ -1915,6 +1915,7 @@ async fn run_market_backtest(
     let max_clip_usdc = limits.max_clip_usdc;
     let cfg = RunnerConfig {
         starting_cash_usdc: starting_cash,
+        market_open_ns: market_close_ns.saturating_sub(300_000_000_000),
         market_close_ns,
         resolved_yes,
         portfolio_limits: limits,

@@ -231,6 +231,9 @@ pub struct DecisionLogRow {
 #[derive(Debug, Clone)]
 pub struct RunnerConfig {
     pub starting_cash_usdc: f64,
+    /// Market open timestamp in nanoseconds. When set, replay ignores stale
+    /// book snapshots before this point and timing gates are measured from it.
+    pub market_open_ns: i64,
     pub market_close_ns: i64,
     pub resolved_yes: Option<bool>,
     pub portfolio_limits: PortfolioLimits,
@@ -283,6 +286,7 @@ impl Default for RunnerConfig {
     fn default() -> Self {
         Self {
             starting_cash_usdc: 100.0,
+            market_open_ns: 0,
             market_close_ns: 0,
             resolved_yes: None,
             portfolio_limits: PortfolioLimits::default(),
@@ -343,7 +347,13 @@ pub fn run_backtest<S: Strategy>(
         enable_meta_calibration: cfg.enable_meta_calibration,
         ..ModelConfig::default()
     };
-    let market_open_ts_ns = events.first().map_or(0, |e| e.ts_ns).max(0);
+    let market_open_ts_ns = if cfg.market_open_ns > 0 {
+        cfg.market_open_ns
+    } else if cfg.market_close_ns > 300_000_000_000 {
+        cfg.market_close_ns - 300_000_000_000
+    } else {
+        events.first().map_or(0, |e| e.ts_ns).max(0)
+    };
 
     let mut portfolio = PortfolioState::new(cfg.starting_cash_usdc, cfg.portfolio_limits.clone());
     portfolio.mark(cfg.starting_cash_usdc);
@@ -370,12 +380,15 @@ pub fn run_backtest<S: Strategy>(
     let mut last_meta_sample_bucket: Option<i64> = None;
     let mut canonical_meta_sample_points: Vec<(MetaFeatures, f32, bool)> = Vec::new();
     for (idx, event) in events.iter().enumerate() {
+        if market_open_ts_ns > 0 && event.ts_ns < market_open_ts_ns {
+            continue;
+        }
         if cfg.market_close_ns > 0 && event.ts_ns > cfg.market_close_ns {
             break;
         }
         last_mid = event.yes_mid;
         last_window_idx = idx as isize;
-        events_processed = idx + 1;
+        events_processed += 1;
 
         check_resting_fills(
             event,
@@ -431,7 +444,7 @@ pub fn run_backtest<S: Strategy>(
         }
         last_canonical_sample_point = Some(canonical_sample_point);
         let ctx = Ctx {
-            events_seen: (idx + 1) as u64,
+            events_seen: events_processed as u64,
             yes_shares,
             no_shares,
             cash_usdc: cash,
@@ -1905,6 +1918,43 @@ mod tests {
             "pnl was {}",
             rep.pnl_usdc
         );
+    }
+
+    #[test]
+    fn runner_skips_stale_pre_open_snapshots() {
+        let events = vec![
+            evt(0, 0.10, 0.11, 200.0),
+            evt(300_000_000_000, 0.50, 0.51, 200.0),
+            evt(301_000_000_000, 0.52, 0.53, 200.0),
+        ];
+        let cfg = RunnerConfig {
+            starting_cash_usdc: 100.0,
+            market_open_ns: 300_000_000_000,
+            market_close_ns: 600_000_000_000,
+            resolved_yes: Some(true),
+            portfolio_limits: PortfolioLimits {
+                max_clip_usdc: 20.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut strat = BuyYesAtOpen::new(10.0);
+        let spot = SpotHistory::default();
+        let rep = run_backtest(
+            &events,
+            &spot,
+            &pm_types::TradeHistory::default(),
+            &mut strat,
+            &cfg,
+        )
+        .unwrap();
+
+        assert_eq!(rep.counters.orders_filled_taker, 1);
+        let fill = rep.fills.first().expect("expected fill");
+        assert_eq!(fill.ts_ns, 300_000_000_000);
+        assert!((fill.price - 0.51).abs() < 1e-6);
+        assert_eq!(fill.seconds_since_open, Some(0.0));
+        assert_eq!(fill.seconds_to_close, Some(300.0));
     }
 
     #[test]

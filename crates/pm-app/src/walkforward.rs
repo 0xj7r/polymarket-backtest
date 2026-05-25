@@ -41,7 +41,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::discovery::MarketHandle;
+use crate::discovery::{MarketHandle, parse_close_ts};
 use crate::runner::{RunnerConfig, run_backtest};
 
 const DEFAULT_META_MAX_FIT_SAMPLES: usize = 120_000;
@@ -353,6 +353,12 @@ pub struct StrategyMarketResult {
     pub bonereaper_v2_gate_stats: Option<BonereaperV2GateStats>,
     #[serde(skip_serializing)]
     pub model_training_samples: Vec<MetaTrainingSample>,
+}
+
+fn market_open_ns(m: &MarketHandle) -> i64 {
+    parse_close_ts(&m.slug)
+        .unwrap_or_else(|| m.close_ts.saturating_sub(300))
+        .saturating_mul(1_000_000_000)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1912,6 +1918,7 @@ async fn collect_training_samples_for_market(
     };
     let runner_cfg = RunnerConfig {
         starting_cash_usdc,
+        market_open_ns: market_open_ns(m),
         market_close_ns: m.close_ts.saturating_mul(1_000_000_000),
         resolved_yes,
         portfolio_limits: PortfolioLimits::default(),
@@ -2037,6 +2044,7 @@ async fn run_markets(
             };
             let runner_cfg = RunnerConfig {
                 starting_cash_usdc: cfg_arc.starting_cash_usdc,
+                market_open_ns: market_open_ns(&m),
                 market_close_ns: m.close_ts.saturating_mul(1_000_000_000),
                 resolved_yes,
                 portfolio_limits: PortfolioLimits {
@@ -2449,6 +2457,7 @@ async fn run_portfolio(
             } * clip_multiplier;
             let runner_cfg = RunnerConfig {
                 starting_cash_usdc: bankroll,
+                market_open_ns: market_open_ns(&m),
                 market_close_ns: m.close_ts.saturating_mul(1_000_000_000),
                 resolved_yes,
                 portfolio_limits: PortfolioLimits {
