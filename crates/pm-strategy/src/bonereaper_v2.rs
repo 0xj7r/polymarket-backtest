@@ -201,6 +201,7 @@ pub struct BonereaperV2Config {
     pub late_favourite_max_ask: f32,
     pub late_favourite_clip_frac: f32,
     pub late_favourite_high_cert_clip_frac: f32,
+    pub late_favourite_high_cert_full_clip_edge: f32,
     pub late_favourite_max_clips: usize,
     pub late_favourite_refresh_secs: f32,
     pub late_favourite_min_sustain_secs: f32,
@@ -287,6 +288,7 @@ impl Default for BonereaperV2Config {
             late_favourite_max_ask: 0.97,
             late_favourite_clip_frac: 1.00,
             late_favourite_high_cert_clip_frac: 1.00,
+            late_favourite_high_cert_full_clip_edge: 0.00,
             late_favourite_max_clips: 12,
             late_favourite_refresh_secs: 4.0,
             late_favourite_min_sustain_secs: 0.0,
@@ -484,6 +486,15 @@ fn late_favourite_high_cert_price_taper(favourite_ask: f64) -> f64 {
     }
     let progress = ((favourite_ask - 0.95) / 0.04).clamp(0.0, 1.0);
     1.0 - progress * 0.82
+}
+
+fn late_favourite_high_cert_edge_taper(edge: f32, min_edge: f32, full_clip_edge: f32) -> f64 {
+    if full_clip_edge <= min_edge {
+        return 1.0;
+    }
+    ((edge - min_edge) / (full_clip_edge - min_edge))
+        .clamp(0.0, 1.0)
+        .into()
 }
 
 fn late_favourite_high_cert_max_levels(favourite_ask: f64, base_levels: usize) -> usize {
@@ -1104,8 +1115,21 @@ impl Strategy for BonereaperV2 {
                             } else {
                                 self.cfg.late_favourite_clip_frac
                             };
+                            let edge_taper = if high_cert_favourite {
+                                model_side_probability(ctx, side)
+                                    .map(|side_p| {
+                                        late_favourite_high_cert_edge_taper(
+                                            side_p - px as f32,
+                                            min_model_edge,
+                                            self.cfg.late_favourite_high_cert_full_clip_edge,
+                                        )
+                                    })
+                                    .unwrap_or(0.0)
+                            } else {
+                                1.0
+                            };
                             let clip = self.cfg.max_clip_usdc * clip_frac as f64;
-                            let desired_notional = clip * levels as f64 * price_taper;
+                            let desired_notional = clip * levels as f64 * price_taper * edge_taper;
                             let shares = shares_capped(desired_notional, px);
                             if shares > 0.0 {
                                 orders.push(OrderRequest {
@@ -1244,6 +1268,28 @@ mod tests {
         assert_eq!(late_favourite_high_cert_max_levels(0.95, 5), 3);
         assert_eq!(late_favourite_high_cert_max_levels(0.97, 5), 2);
         assert_eq!(late_favourite_high_cert_max_levels(0.99, 5), 1);
+    }
+
+    #[test]
+    fn high_cert_late_favourite_tapers_size_by_model_edge() {
+        assert_eq!(
+            late_favourite_high_cert_edge_taper(0.010, 0.010, 0.030),
+            0.0
+        );
+        assert!((late_favourite_high_cert_edge_taper(0.020, 0.010, 0.030) - 0.5).abs() < 1e-6);
+        assert_eq!(
+            late_favourite_high_cert_edge_taper(0.030, 0.010, 0.030),
+            1.0
+        );
+        assert_eq!(
+            late_favourite_high_cert_edge_taper(0.040, 0.010, 0.030),
+            1.0
+        );
+        assert_eq!(
+            late_favourite_high_cert_edge_taper(0.004, 0.005, 0.030),
+            0.0
+        );
+        assert_eq!(late_favourite_high_cert_edge_taper(0.010, 0.010, 0.0), 1.0);
     }
 
     #[test]

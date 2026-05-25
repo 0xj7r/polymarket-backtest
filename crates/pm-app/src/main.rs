@@ -357,6 +357,9 @@ enum Cmd {
         /// Bonereaper v2 late-favourite clip multiplier once ask is >= high-cert threshold.
         #[arg(long, default_value = "1.00")]
         br2_late_favourite_high_cert_clip_frac: f32,
+        /// Bonereaper v2 high-cert edge where late-favourite loads reach full clip size.
+        #[arg(long, default_value = "0.00")]
+        br2_late_favourite_high_cert_full_clip_edge: f32,
         /// Bonereaper v2 maximum late-favourite load clips.
         #[arg(long, default_value = "12")]
         br2_late_favourite_max_clips: usize,
@@ -865,6 +868,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_max_ask,
             br2_late_favourite_clip_frac,
             br2_late_favourite_high_cert_clip_frac,
+            br2_late_favourite_high_cert_full_clip_edge,
             br2_late_favourite_max_clips,
             br2_late_favourite_min_sustain_secs,
             br2_late_favourite_sweep_depth,
@@ -958,6 +962,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_max_ask,
                 br2_late_favourite_clip_frac,
                 br2_late_favourite_high_cert_clip_frac,
+                br2_late_favourite_high_cert_full_clip_edge,
                 br2_late_favourite_max_clips,
                 br2_late_favourite_min_sustain_secs,
                 br2_late_favourite_sweep_depth,
@@ -1497,6 +1502,7 @@ async fn walk_forward(
     br2_late_favourite_max_ask: f32,
     br2_late_favourite_clip_frac: f32,
     br2_late_favourite_high_cert_clip_frac: f32,
+    br2_late_favourite_high_cert_full_clip_edge: f32,
     br2_late_favourite_max_clips: usize,
     br2_late_favourite_min_sustain_secs: f32,
     br2_late_favourite_sweep_depth: usize,
@@ -1628,6 +1634,7 @@ async fn walk_forward(
         br2_late_favourite_max_ask,
         br2_late_favourite_clip_frac,
         br2_late_favourite_high_cert_clip_frac,
+        br2_late_favourite_high_cert_full_clip_edge,
         br2_late_favourite_max_clips,
         br2_late_favourite_min_sustain_secs,
         br2_late_favourite_sweep_depth,
