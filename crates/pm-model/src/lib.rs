@@ -13,7 +13,7 @@ const MOMENTUM_WINDOWS_SECONDS: [i64; 5] = [10, 30, 60, 120, 300];
 const MOMENTUM_WEIGHTS: [f32; 5] = [0.45, 0.25, 0.15, 0.10, 0.05];
 const SKEW_BINS: usize = 10;
 const HOUR_BINS: usize = 24;
-const META_FEATURES: usize = 54;
+const META_FEATURES: usize = 60;
 const META_CALIBRATOR_LR: f32 = 0.08;
 const META_CALIBRATOR_MIN_UPDATES: u32 = 12;
 const META_CALIBRATOR_WEIGHT_DECAY: f32 = 1.0e-3;
@@ -90,6 +90,12 @@ pub const META_FEATURE_NAMES: [&str; META_FEATURES] = [
     "dir_flip_rate_8",
     "dir_std_8",
     "dir_abs_mean_8",
+    "side_market_price",
+    "pre_meta_edge_vs_side_price",
+    "seconds_in_window_norm",
+    "final_120s_norm",
+    "high_cert_side_price",
+    "side_favourite_skew",
 ];
 
 /// Output contract expected by the 4-score engine.
@@ -596,8 +602,16 @@ impl MetaFeatures {
         volatility_regime: f32,
         book_imbalance: f32,
         market_mid: f32,
+        side_probability_pre_meta: f32,
+        seconds_since_window_open: f32,
     ) -> Self {
         let side = if direction_score >= 0.0 { 1.0 } else { -1.0 };
+        let side_market_price = if side > 0.0 {
+            market_mid
+        } else {
+            1.0 - market_mid
+        }
+        .clamp(0.0, 1.0);
         let mut values = [0.0; META_FEATURES];
         let mut idx = 0;
         // Direction raw + composite.
@@ -712,6 +726,18 @@ impl MetaFeatures {
         values[idx] = sequence.dir_std_8;
         idx += 1;
         values[idx] = sequence.dir_abs_mean_8;
+        idx += 1;
+        values[idx] = side_market_price;
+        idx += 1;
+        values[idx] = (side_probability_pre_meta - side_market_price).clamp(-1.0, 1.0);
+        idx += 1;
+        values[idx] = (seconds_since_window_open / 300.0).clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = ((seconds_since_window_open - 180.0) / 120.0).clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = ((side_market_price - 0.85) / 0.15).clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = (2.0 * (side_market_price - 0.5)).clamp(-1.0, 1.0);
         Self { values }
     }
 }
@@ -1907,6 +1933,8 @@ impl ModelState {
             volatility_regime,
             book_imb3,
             event.yes_mid,
+            side_p_pre_meta,
+            seconds_since_window_open,
         );
         self.pending_meta_features = Some(PendingMetaTrainingSample {
             features: meta_features,
@@ -2994,6 +3022,33 @@ mod tests {
 
         assert!(state.meta_calibrator.updates() >= 2);
         assert!(yes_out.calibrated_p > 0.5 || no_out.calibrated_p > 0.5);
+    }
+
+    #[test]
+    fn meta_features_include_side_price_edge_and_late_timing() {
+        let features = MetaFeatures::from_raw(
+            -0.25,
+            DirectionScore::default(),
+            ConfidenceScore {
+                composite: 0.7,
+                ..ConfidenceScore::default()
+            },
+            RiskScore::default(),
+            SequenceFeatures::default(),
+            0.0,
+            0.0,
+            0.20,
+            0.86,
+            240.0,
+        );
+
+        let side_price_idx = META_FEATURES - 6;
+        assert!((features.values[side_price_idx] - 0.80).abs() < 1.0e-6);
+        assert!((features.values[side_price_idx + 1] - 0.06).abs() < 1.0e-6);
+        assert!((features.values[side_price_idx + 2] - 0.80).abs() < 1.0e-6);
+        assert!((features.values[side_price_idx + 3] - 0.50).abs() < 1.0e-6);
+        assert_eq!(features.values[side_price_idx + 4], 0.0);
+        assert!((features.values[side_price_idx + 5] - 0.60).abs() < 1.0e-6);
     }
 
     #[test]
