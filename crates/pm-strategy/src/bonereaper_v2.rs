@@ -222,6 +222,17 @@ pub struct BonereaperV2Config {
     pub late_favourite_max_reversal_pressure: f32,
     pub late_favourite_min_path_efficiency: f32,
     pub late_favourite_max_observed_range: f32,
+    /// Start scaling down late-favourite size once the live market has already
+    /// traversed this much YES-mid range. Disabled when >= hard range.
+    pub late_favourite_range_soft_throttle: f32,
+    /// Scale late-favourite size to zero at this live-observed YES-mid range.
+    pub late_favourite_range_hard_throttle: f32,
+    /// Extra edge required at/above hard range; interpolated from zero at the
+    /// soft range. This is independent from the hard max-observed-range gate.
+    pub late_favourite_range_extra_edge: f32,
+    /// Extra confidence required at/above hard range; interpolated from zero at
+    /// the soft range.
+    pub late_favourite_range_extra_confidence: f32,
     pub late_favourite_max_adverse_fast_momentum: f32,
     pub late_favourite_max_entry_pullback: f32,
     pub late_favourite_max_avg_entry_drawdown: f32,
@@ -316,6 +327,10 @@ impl Default for BonereaperV2Config {
             // Disabled by default. Set below 1.0 to reject late favourite
             // loads in markets that already traversed too much YES-mid range.
             late_favourite_max_observed_range: 1.0,
+            late_favourite_range_soft_throttle: 1.0,
+            late_favourite_range_hard_throttle: 1.0,
+            late_favourite_range_extra_edge: 0.0,
+            late_favourite_range_extra_confidence: 0.0,
             // Disabled by default for backward-compatible sweeps. Set to a
             // small positive value (e.g. 0.04) to reject favourite loads when
             // the fast BTC impulse is actively moving against the favourite.
@@ -513,6 +528,13 @@ fn late_favourite_high_cert_max_levels(favourite_ask: f64, base_levels: usize) -
     } else {
         base_levels
     }
+}
+
+fn range_throttle(range: f32, soft: f32, hard: f32) -> f32 {
+    if hard <= soft || soft >= 1.0 {
+        return 0.0;
+    }
+    ((range - soft) / (hard - soft)).clamp(0.0, 1.0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1091,19 +1113,30 @@ impl Strategy for BonereaperV2 {
                         } else {
                             self.cfg.late_favourite_min_model_edge
                         };
+                        let range_throttle = range_throttle(
+                            ctx.market_yes_range_so_far,
+                            self.cfg.late_favourite_range_soft_throttle,
+                            self.cfg.late_favourite_range_hard_throttle,
+                        );
+                        let throttled_min_confidence = self
+                            .cfg
+                            .late_favourite_min_model_confidence
+                            + self.cfg.late_favourite_range_extra_confidence * range_throttle;
+                        let throttled_min_edge = min_model_edge
+                            + self.cfg.late_favourite_range_extra_edge * range_throttle;
                         let bypass_high_cert_edge = high_cert_favourite
                             && self.cfg.late_favourite_high_cert_bypass_model_edge;
                         let model_support = self.model_support_for_side(
                             ctx,
                             side,
-                            self.cfg.late_favourite_min_model_confidence,
+                            throttled_min_confidence,
                             self.cfg.late_favourite_max_model_risk,
                             self.cfg.late_favourite_min_model_side_p,
                             px as f32,
                             if bypass_high_cert_edge {
                                 -1.0
                             } else {
-                                min_model_edge
+                                throttled_min_edge
                             },
                         );
                         if !model_support.is_supported() {
@@ -1135,7 +1168,7 @@ impl Strategy for BonereaperV2 {
                                         .map(|side_p| {
                                             late_favourite_high_cert_edge_taper(
                                                 side_p - px as f32,
-                                                min_model_edge,
+                                                throttled_min_edge,
                                                 self.cfg
                                                     .late_favourite_high_cert_full_clip_edge,
                                             )
@@ -1146,7 +1179,9 @@ impl Strategy for BonereaperV2 {
                                 1.0
                             };
                             let clip = self.cfg.max_clip_usdc * clip_frac as f64;
-                            let desired_notional = clip * levels as f64 * price_taper * edge_taper;
+                            let range_size_taper = (1.0 - range_throttle as f64).clamp(0.0, 1.0);
+                            let desired_notional =
+                                clip * levels as f64 * price_taper * edge_taper * range_size_taper;
                             let shares = shares_capped(desired_notional, px);
                             if shares > 0.0 {
                                 orders.push(OrderRequest {
@@ -1160,7 +1195,7 @@ impl Strategy for BonereaperV2 {
                                             ctx,
                                             side,
                                             self.cfg.late_favourite_max_ask,
-                                            min_model_edge,
+                                            throttled_min_edge,
                                         )
                                     }),
                                     tag: "br2_late_favourite_load",
@@ -1311,6 +1346,14 @@ mod tests {
             0.0
         );
         assert_eq!(late_favourite_high_cert_edge_taper(0.010, 0.010, 0.0), 1.0);
+    }
+
+    #[test]
+    fn range_throttle_interpolates_between_soft_and_hard() {
+        assert_eq!(range_throttle(0.80, 0.90, 0.98), 0.0);
+        assert!((range_throttle(0.94, 0.90, 0.98) - 0.5).abs() < 1e-6);
+        assert_eq!(range_throttle(0.99, 0.90, 0.98), 1.0);
+        assert_eq!(range_throttle(0.99, 1.0, 1.0), 0.0);
     }
 
     #[test]

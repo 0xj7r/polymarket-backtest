@@ -17,7 +17,7 @@ use pm_risk::PortfolioLimits;
 use pm_strategy::{
     BonereaperLite, BonereaperV2, BuyYesAtOpen, DeltaNeutralMm, LateBigBet, LateConfirmation,
     LateConvexTail, NoopStrategy, PairedMmDense, ReactiveDirectional, SpotMomentumFollower,
-    bonereaper::BonereaperLiteConfig,
+    UnlawfulRecycler, bonereaper::BonereaperLiteConfig,
     bonereaper_v2::{BonereaperV2Config, BonereaperV2GateStats},
     delta_neutral_mm::DeltaNeutralMmConfig,
     late_big_bet::LateBigBetConfig,
@@ -26,6 +26,7 @@ use pm_strategy::{
     paired_mm::PairedMmDenseConfig,
     reactive::ReactiveDirectionalConfig,
     spot_follower::SpotMomentumFollowerConfig,
+    unlawful_recycler::UnlawfulRecyclerConfig,
 };
 use pm_telonex_loader::{
     Channel, TelonexStore, load_binance_agg_trades_async, load_book_snapshot_async,
@@ -61,6 +62,7 @@ pub enum StratId {
     DeltaNeutralMm,
     LateConfirmation,
     LateConvexTail,
+    UnlawfulRecycler,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -91,6 +93,7 @@ impl StratId {
             StratId::DeltaNeutralMm => "delta_neutral_mm",
             StratId::LateConfirmation => "late_confirmation",
             StratId::LateConvexTail => "late_convex_tail",
+            StratId::UnlawfulRecycler => "unlawful_recycler",
         }
     }
 }
@@ -167,6 +170,10 @@ pub struct WalkForwardConfig {
     pub br2_late_favourite_max_reversal_pressure: f32,
     pub br2_late_favourite_min_path_efficiency: f32,
     pub br2_late_favourite_max_observed_range: f32,
+    pub br2_late_favourite_range_soft_throttle: f32,
+    pub br2_late_favourite_range_hard_throttle: f32,
+    pub br2_late_favourite_range_extra_edge: f32,
+    pub br2_late_favourite_range_extra_confidence: f32,
     pub br2_late_favourite_max_adverse_fast_momentum: f32,
     pub br2_late_favourite_max_entry_pullback: f32,
     pub br2_late_favourite_max_avg_entry_drawdown: f32,
@@ -296,6 +303,10 @@ impl Default for WalkForwardConfig {
             br2_late_favourite_max_reversal_pressure: 1.0,
             br2_late_favourite_min_path_efficiency: 0.0,
             br2_late_favourite_max_observed_range: 1.0,
+            br2_late_favourite_range_soft_throttle: 1.0,
+            br2_late_favourite_range_hard_throttle: 1.0,
+            br2_late_favourite_range_extra_edge: 0.0,
+            br2_late_favourite_range_extra_confidence: 0.0,
             br2_late_favourite_max_adverse_fast_momentum: 1.0,
             br2_late_favourite_max_entry_pullback: 1.0,
             br2_late_favourite_max_avg_entry_drawdown: 1.0,
@@ -445,6 +456,10 @@ pub struct SummaryRunConfig {
     pub br2_late_favourite_max_reversal_pressure: f32,
     pub br2_late_favourite_min_path_efficiency: f32,
     pub br2_late_favourite_max_observed_range: f32,
+    pub br2_late_favourite_range_soft_throttle: f32,
+    pub br2_late_favourite_range_hard_throttle: f32,
+    pub br2_late_favourite_range_extra_edge: f32,
+    pub br2_late_favourite_range_extra_confidence: f32,
     pub br2_late_favourite_max_adverse_fast_momentum: f32,
     pub br2_late_favourite_max_entry_pullback: f32,
     pub br2_late_favourite_max_avg_entry_drawdown: f32,
@@ -2395,6 +2410,22 @@ fn run_one_strategy(
                 None,
             )
         }
+        StratId::UnlawfulRecycler => {
+            let mut s = UnlawfulRecycler::new(UnlawfulRecyclerConfig {
+                clip_shares: (clip * 0.30).clamp(1.0, 25.0),
+                max_pair_cost: 0.99,
+                max_inventory_delta_shares: (clip * 0.80).clamp(10.0, 60.0),
+                repair_inventory_delta_shares: (clip * 0.20).clamp(3.0, 15.0),
+                min_refresh_ns: 250_000_000,
+                max_orders_per_leg: 500,
+                stop_secs_before_close: 20.0,
+                ..UnlawfulRecyclerConfig::default()
+            });
+            (
+                run_backtest(events, spot, trades, &mut s, runner_cfg)?,
+                None,
+            )
+        }
         StratId::BonereaperV2 => {
             let mut s = BonereaperV2::new(BonereaperV2Config {
                 bankroll_usdc: bankroll,
@@ -2439,6 +2470,11 @@ fn run_one_strategy(
                 late_favourite_max_reversal_pressure: cfg.br2_late_favourite_max_reversal_pressure,
                 late_favourite_min_path_efficiency: cfg.br2_late_favourite_min_path_efficiency,
                 late_favourite_max_observed_range: cfg.br2_late_favourite_max_observed_range,
+                late_favourite_range_soft_throttle: cfg.br2_late_favourite_range_soft_throttle,
+                late_favourite_range_hard_throttle: cfg.br2_late_favourite_range_hard_throttle,
+                late_favourite_range_extra_edge: cfg.br2_late_favourite_range_extra_edge,
+                late_favourite_range_extra_confidence: cfg
+                    .br2_late_favourite_range_extra_confidence,
                 late_favourite_max_adverse_fast_momentum: cfg
                     .br2_late_favourite_max_adverse_fast_momentum,
                 late_favourite_max_entry_pullback: cfg.br2_late_favourite_max_entry_pullback,
@@ -3109,6 +3145,11 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_late_favourite_max_reversal_pressure: cfg.br2_late_favourite_max_reversal_pressure,
         br2_late_favourite_min_path_efficiency: cfg.br2_late_favourite_min_path_efficiency,
         br2_late_favourite_max_observed_range: cfg.br2_late_favourite_max_observed_range,
+        br2_late_favourite_range_soft_throttle: cfg.br2_late_favourite_range_soft_throttle,
+        br2_late_favourite_range_hard_throttle: cfg.br2_late_favourite_range_hard_throttle,
+        br2_late_favourite_range_extra_edge: cfg.br2_late_favourite_range_extra_edge,
+        br2_late_favourite_range_extra_confidence: cfg
+            .br2_late_favourite_range_extra_confidence,
         br2_late_favourite_max_adverse_fast_momentum: cfg
             .br2_late_favourite_max_adverse_fast_momentum,
         br2_late_favourite_max_entry_pullback: cfg.br2_late_favourite_max_entry_pullback,

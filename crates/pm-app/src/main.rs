@@ -263,7 +263,7 @@ enum Cmd {
         max_per_market_exposure_frac: Option<f64>,
         #[arg(long, default_value = "BTCUSDT")]
         spot_symbol: String,
-        /// Comma-separated strategy IDs: buy_yes_at_open, reactive_directional, paired_mm
+        /// Comma-separated strategy IDs: buy_yes_at_open, reactive_directional, paired_mm, unlawful_recycler
         #[arg(long, default_value = "reactive_directional,paired_mm")]
         strategies: String,
         #[arg(long, default_value = "16")]
@@ -408,6 +408,18 @@ enum Cmd {
         /// Bonereaper v2 maximum live-observed YES-mid range before late-favourite loads.
         #[arg(long, default_value = "1.0")]
         br2_late_favourite_max_observed_range: f32,
+        /// Bonereaper v2 live-observed YES-mid range where late-favourite size starts throttling.
+        #[arg(long, default_value = "1.0")]
+        br2_late_favourite_range_soft_throttle: f32,
+        /// Bonereaper v2 live-observed YES-mid range where late-favourite size reaches zero.
+        #[arg(long, default_value = "1.0")]
+        br2_late_favourite_range_hard_throttle: f32,
+        /// Extra model edge required at the hard observed-range throttle.
+        #[arg(long, default_value = "0.0")]
+        br2_late_favourite_range_extra_edge: f32,
+        /// Extra model confidence required at the hard observed-range throttle.
+        #[arg(long, default_value = "0.0")]
+        br2_late_favourite_range_extra_confidence: f32,
         /// Bonereaper v2 maximum fast BTC momentum allowed against the late favourite direction.
         #[arg(long, default_value = "1.0")]
         br2_late_favourite_max_adverse_fast_momentum: f32,
@@ -894,6 +906,10 @@ async fn main() -> Result<()> {
             br2_late_favourite_max_reversal_pressure,
             br2_late_favourite_min_path_efficiency,
             br2_late_favourite_max_observed_range,
+            br2_late_favourite_range_soft_throttle,
+            br2_late_favourite_range_hard_throttle,
+            br2_late_favourite_range_extra_edge,
+            br2_late_favourite_range_extra_confidence,
             br2_late_favourite_max_adverse_fast_momentum,
             br2_late_favourite_max_entry_pullback,
             br2_late_favourite_max_avg_entry_drawdown,
@@ -991,6 +1007,10 @@ async fn main() -> Result<()> {
                 br2_late_favourite_max_reversal_pressure,
                 br2_late_favourite_min_path_efficiency,
                 br2_late_favourite_max_observed_range,
+                br2_late_favourite_range_soft_throttle,
+                br2_late_favourite_range_hard_throttle,
+                br2_late_favourite_range_extra_edge,
+                br2_late_favourite_range_extra_confidence,
                 br2_late_favourite_max_adverse_fast_momentum,
                 br2_late_favourite_max_entry_pullback,
                 br2_late_favourite_max_avg_entry_drawdown,
@@ -1534,6 +1554,10 @@ async fn walk_forward(
     br2_late_favourite_max_reversal_pressure: f32,
     br2_late_favourite_min_path_efficiency: f32,
     br2_late_favourite_max_observed_range: f32,
+    br2_late_favourite_range_soft_throttle: f32,
+    br2_late_favourite_range_hard_throttle: f32,
+    br2_late_favourite_range_extra_edge: f32,
+    br2_late_favourite_range_extra_confidence: f32,
     br2_late_favourite_max_adverse_fast_momentum: f32,
     br2_late_favourite_max_entry_pullback: f32,
     br2_late_favourite_max_avg_entry_drawdown: f32,
@@ -1669,6 +1693,10 @@ async fn walk_forward(
         br2_late_favourite_max_reversal_pressure,
         br2_late_favourite_min_path_efficiency,
         br2_late_favourite_max_observed_range,
+        br2_late_favourite_range_soft_throttle,
+        br2_late_favourite_range_hard_throttle,
+        br2_late_favourite_range_extra_edge,
+        br2_late_favourite_range_extra_confidence,
         br2_late_favourite_max_adverse_fast_momentum,
         br2_late_favourite_max_entry_pullback,
         br2_late_favourite_max_avg_entry_drawdown,
@@ -1746,6 +1774,7 @@ fn parse_strategies(csv: &str) -> Result<Vec<StratId>> {
             "delta_neutral_mm" => StratId::DeltaNeutralMm,
             "late_confirmation" => StratId::LateConfirmation,
             "late_convex_tail" => StratId::LateConvexTail,
+            "unlawful_recycler" => StratId::UnlawfulRecycler,
             other => return Err(anyhow!("unknown strategy: {other}")),
         };
         out.push(id);

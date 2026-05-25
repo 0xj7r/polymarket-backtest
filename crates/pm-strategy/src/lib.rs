@@ -19,6 +19,7 @@ pub mod signals;
 pub mod spot_follower;
 pub mod spot_momentum;
 pub mod trivial;
+pub mod unlawful_recycler;
 
 use pm_model::ModelOutput;
 use pm_types::{ReplayEvent, SpotHistory, TradeHistory};
@@ -114,3 +115,4 @@ pub use paired_mm::{PairedMmDense, PairedMmDenseConfig};
 pub use reactive::ReactiveDirectional;
 pub use spot_follower::{SpotMomentumFollower, SpotMomentumFollowerConfig};
 pub use trivial::{BuyYesAtOpen, NoopStrategy};
+pub use unlawful_recycler::{UnlawfulRecycler, UnlawfulRecyclerConfig};
