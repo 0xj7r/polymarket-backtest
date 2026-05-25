@@ -1292,7 +1292,7 @@ fn fit_boosted_tree(
     )
     .unwrap_or(SplitCandidate {
         feature: root.feature,
-        threshold: f32::INFINITY,
+        threshold: root.threshold,
         gain: 0.0,
         left_leaf: root.left_leaf,
         right_leaf: root.left_leaf,
@@ -1308,7 +1308,7 @@ fn fit_boosted_tree(
     )
     .unwrap_or(SplitCandidate {
         feature: root.feature,
-        threshold: f32::INFINITY,
+        threshold: root.threshold,
         gain: 0.0,
         left_leaf: root.right_leaf,
         right_leaf: root.right_leaf,
@@ -1316,17 +1316,21 @@ fn fit_boosted_tree(
 
     BoostedTree {
         root_feature: root.feature,
-        root_threshold: root.threshold,
+        root_threshold: finite_or(root.threshold, 0.0),
         left_feature: left.feature,
-        left_threshold: left.threshold,
-        left_left_value: left.left_leaf,
-        left_right_value: left.right_leaf,
+        left_threshold: finite_or(left.threshold, root.threshold),
+        left_left_value: finite_or(left.left_leaf, 0.0),
+        left_right_value: finite_or(left.right_leaf, 0.0),
         right_feature: right.feature,
-        right_threshold: right.threshold,
-        right_left_value: right.left_leaf,
-        right_right_value: right.right_leaf,
-        gain: root.gain + 0.5 * (left.gain + right.gain),
+        right_threshold: finite_or(right.threshold, root.threshold),
+        right_left_value: finite_or(right.left_leaf, 0.0),
+        right_right_value: finite_or(right.right_leaf, 0.0),
+        gain: finite_or(root.gain + 0.5 * (left.gain + right.gain), 0.0),
     }
+}
+
+fn finite_or(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() { value } else { fallback }
 }
 
 fn best_split(
@@ -2912,6 +2916,34 @@ mod tests {
         let restored = OnlineMetaCalibrator::from_snapshot(calibrator.snapshot());
         let after = restored.predict_side_win_probability(0.56, &features);
         assert!((before - after).abs() < 1e-6);
+    }
+
+    #[test]
+    fn trained_meta_calibrator_snapshot_serializes_only_finite_tree_values() {
+        let mut samples = Vec::new();
+        for i in 0..300 {
+            let mut values = [0.0; META_FEATURES];
+            values[0] = i as f32 / 299.0;
+            samples.push(MetaTrainingSample {
+                features: MetaFeatures { values },
+                market_idx: i as u32,
+                base_side_probability: 0.55,
+                side_observed: i >= 150,
+            });
+        }
+
+        let mut calibrator = OnlineMetaCalibrator::default();
+        calibrator.fit_batch(
+            &samples,
+            MetaTrainingConfig {
+                epochs: 1,
+                reset_before_fit: true,
+                ..MetaTrainingConfig::default()
+            },
+        );
+        let json = serde_json::to_string(&calibrator.snapshot()).unwrap();
+        assert!(!json.contains("null"), "{json}");
+        let _: OnlineMetaCalibratorSnapshot = serde_json::from_str(&json).unwrap();
     }
 
     #[test]
