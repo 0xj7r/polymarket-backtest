@@ -59,6 +59,7 @@ pub struct FillTagSummary {
     pub total_notional_usdc: f64,
     pub avg_fill_price: f64,
     pub avg_side_edge_vs_fill: f64,
+    pub avg_market_yes_range_so_far: f64,
     pub avg_regime_whipsaw_score: f64,
     pub avg_regime_path_efficiency: f64,
     pub avg_regime_reversal_pressure: f64,
@@ -73,6 +74,8 @@ struct FillTagAccumulator {
     sum_fill_price: f64,
     sum_side_edge_vs_fill: f64,
     side_edge_samples: usize,
+    sum_market_yes_range_so_far: f64,
+    market_range_samples: usize,
     sum_regime_whipsaw_score: f64,
     sum_regime_path_efficiency: f64,
     sum_regime_reversal_pressure: f64,
@@ -89,6 +92,10 @@ impl FillTagAccumulator {
         if let Some(edge) = fill.side_edge_vs_fill {
             self.sum_side_edge_vs_fill += edge;
             self.side_edge_samples += 1;
+        }
+        if let Some(range) = fill.market_yes_range_so_far {
+            self.sum_market_yes_range_so_far += range;
+            self.market_range_samples += 1;
         }
         if let (
             Some(whipsaw),
@@ -123,6 +130,11 @@ impl FillTagAccumulator {
             },
             avg_side_edge_vs_fill: if self.side_edge_samples > 0 {
                 self.sum_side_edge_vs_fill / self.side_edge_samples as f64
+            } else {
+                0.0
+            },
+            avg_market_yes_range_so_far: if self.market_range_samples > 0 {
+                self.sum_market_yes_range_so_far / self.market_range_samples as f64
             } else {
                 0.0
             },
@@ -191,6 +203,8 @@ struct FillRow {
     tag: String,
     #[serde(default)]
     side_edge_vs_fill: Option<f64>,
+    #[serde(default)]
+    market_yes_range_so_far: Option<f64>,
     #[serde(default)]
     regime_whipsaw_score: Option<f64>,
     #[serde(default)]
@@ -469,12 +483,13 @@ pub fn print_result_summary(summary: &ResultSummary) {
         tags.sort_by(|a, b| a.0.cmp(b.0));
         for (tag, agg) in tags {
             println!(
-                "  {:28} fills={:<6} notional={:.2} avg_px={:.4} edge_fill={:+.4} whip={:.3} path={:.3} rev={:.3}",
+                "  {:28} fills={:<6} notional={:.2} avg_px={:.4} edge_fill={:+.4} range={:.3} whip={:.3} path={:.3} rev={:.3}",
                 tag,
                 agg.fills,
                 agg.total_notional_usdc,
                 agg.avg_fill_price,
                 agg.avg_side_edge_vs_fill,
+                agg.avg_market_yes_range_so_far,
                 agg.avg_regime_whipsaw_score,
                 agg.avg_regime_path_efficiency,
                 agg.avg_regime_reversal_pressure

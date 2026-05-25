@@ -1118,9 +1118,7 @@ impl Strategy for BonereaperV2 {
                             self.cfg.late_favourite_range_soft_throttle,
                             self.cfg.late_favourite_range_hard_throttle,
                         );
-                        let throttled_min_confidence = self
-                            .cfg
-                            .late_favourite_min_model_confidence
+                        let throttled_min_confidence = self.cfg.late_favourite_min_model_confidence
                             + self.cfg.late_favourite_range_extra_confidence * range_throttle;
                         let throttled_min_edge = min_model_edge
                             + self.cfg.late_favourite_range_extra_edge * range_throttle;
@@ -1169,8 +1167,7 @@ impl Strategy for BonereaperV2 {
                                             late_favourite_high_cert_edge_taper(
                                                 side_p - px as f32,
                                                 throttled_min_edge,
-                                                self.cfg
-                                                    .late_favourite_high_cert_full_clip_edge,
+                                                self.cfg.late_favourite_high_cert_full_clip_edge,
                                             )
                                         })
                                         .unwrap_or(0.0)

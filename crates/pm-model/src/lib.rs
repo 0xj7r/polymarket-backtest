@@ -34,6 +34,7 @@ const BETA_CALIBRATOR_L2: f32 = 0.01;
 const BETA_CALIBRATOR_COEFF_CLIP: f32 = 5.0;
 const ISOTONIC_MIN_SAMPLES: usize = 256;
 const ISOTONIC_SHRINKAGE: f32 = 500.0;
+const OBSERVED_RANGE_HIGH_CERT_RISK_WEIGHT: f32 = 0.35;
 
 pub const META_FEATURE_NAMES: [&str; META_FEATURES] = [
     "direction_score_side",
@@ -140,6 +141,8 @@ pub struct ModelAttribution {
     pub side_probability_post_meta: f32,
     pub volatility_regime: f32,
     pub time_of_day_edge: f32,
+    pub observed_yes_range_so_far: f32,
+    pub observed_range_high_cert_interaction: f32,
     pub meta_calibrator_updates: u32,
 }
 
@@ -159,6 +162,8 @@ impl Default for ModelAttribution {
             side_probability_post_meta: 0.5,
             volatility_regime: 0.0,
             time_of_day_edge: 0.5,
+            observed_yes_range_so_far: 0.0,
+            observed_range_high_cert_interaction: 0.0,
             meta_calibrator_updates: 0,
         }
     }
@@ -411,6 +416,7 @@ pub struct RiskScore {
     pub imbalance_turn: f32,
     pub markov_reversal_risk: f32,
     pub skew_penalty: f32,
+    pub observed_range_high_cert_risk: f32,
     pub volatility_penalty: f32,
     pub time_of_day_penalty: f32,
     pub composite: f32,
@@ -1930,6 +1936,8 @@ impl ModelState {
             &self.recent_dir,
             &self.top3_imbalance,
             cfg.depth_full_at_shares,
+            direction_side,
+            observed_yes_range_so_far,
             self.skew_table
                 .mismatch_penalty(event.yes_mid, direction_side),
             volatility_regime,
@@ -2001,6 +2009,8 @@ impl ModelState {
                 side_probability_post_meta: side_p_post_meta,
                 volatility_regime,
                 time_of_day_edge: predicted_side_edge,
+                observed_yes_range_so_far: observed_yes_range_so_far.clamp(0.0, 1.0),
+                observed_range_high_cert_interaction: risk.observed_range_high_cert_risk,
                 meta_calibrator_updates: self.meta_calibrator.updates(),
             },
         }
@@ -2221,6 +2231,8 @@ pub fn risk_score(
     recent_dir_scores: &Ring,
     top3_imbalance: &TimedRing,
     depth_full_at_shares: f32,
+    direction_side_is_yes: bool,
+    observed_yes_range_so_far: f32,
     skew_penalty: f32,
     volatility_penalty: f32,
     time_of_day_penalty: f32,
@@ -2240,6 +2252,13 @@ pub fn risk_score(
     let liquidity = (depth / depth_full_at_shares).clamp(0.0, 1.0);
     let path_risk = 1.0 - (2.0 * (event.yes_mid - 0.5).abs()).clamp(0.0, 1.0);
     let markov_reversal_risk = markov_reversal_risk.clamp(0.0, 1.0);
+    let side_market_price = if direction_side_is_yes {
+        event.yes_mid
+    } else {
+        1.0 - event.yes_mid
+    };
+    let range_high_cert_risk =
+        observed_range_high_cert_risk(observed_yes_range_so_far, side_market_price);
     let base = 0.42 * whipsaw
         + 0.16 * path_risk
         + 0.16 * (1.0 - liquidity)
@@ -2250,6 +2269,7 @@ pub fn risk_score(
     let time_of_day_penalty = time_of_day_penalty.clamp(0.0, 1.0);
     let composite = (base
         + 0.10 * skew_penalty
+        + OBSERVED_RANGE_HIGH_CERT_RISK_WEIGHT * range_high_cert_risk
         + volatility_weight * volatility_penalty
         + time_of_day_weight * 0.5 * time_of_day_penalty)
         .clamp(0.0, 1.0);
@@ -2261,10 +2281,28 @@ pub fn risk_score(
         imbalance_turn: imbalance_turn.clamp(0.0, 1.0),
         markov_reversal_risk,
         skew_penalty,
+        observed_range_high_cert_risk: range_high_cert_risk,
         volatility_penalty,
         time_of_day_penalty,
         composite,
     }
+}
+
+pub fn observed_range_high_cert_risk(
+    observed_yes_range_so_far: f32,
+    side_market_price: f32,
+) -> f32 {
+    let range_component = smoothstep(0.70, 0.95, observed_yes_range_so_far.clamp(0.0, 1.0));
+    let high_cert_component = smoothstep(0.82, 0.94, side_market_price.clamp(0.0, 1.0));
+    (range_component * high_cert_component).clamp(0.0, 1.0)
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    if edge1 <= edge0 {
+        return if x >= edge1 { 1.0 } else { 0.0 };
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 fn bucket_idx(market_mid: f32) -> usize {
@@ -2776,14 +2814,34 @@ mod tests {
         imbalance.push(1_000_000_000, 0.2);
         imbalance.push(2_000_000_000, 0.4);
         let r0 = risk_score(
-            &event, &dir, &imbalance, 2000.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.4,
+            &event, &dir, &imbalance, 2000.0, true, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.4,
         )
         .composite;
         let r1 = risk_score(
-            &event, &dir, &imbalance, 2000.0, 1.0, 0.0, 0.0, 0.0, 0.2, 0.4,
+            &event, &dir, &imbalance, 2000.0, true, 0.0, 1.0, 0.0, 0.0, 0.0, 0.2, 0.4,
         )
         .composite;
         assert!(r1 >= r0);
+    }
+
+    #[test]
+    fn risk_score_penalizes_extreme_range_high_cert_side() {
+        let event = evt(0.90, 0.91, 1000.0, 1000.0, 2_000_000_000);
+        let mut dir = Ring::new(4);
+        dir.push(1.0);
+        dir.push(1.0);
+        let mut imbalance = TimedRing::new(4);
+        imbalance.push(2_000_000_000, 0.0);
+
+        let calm = risk_score(
+            &event, &dir, &imbalance, 2000.0, true, 0.40, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        );
+        let extreme = risk_score(
+            &event, &dir, &imbalance, 2000.0, true, 0.98, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        );
+
+        assert!(extreme.observed_range_high_cert_risk > 0.5);
+        assert!(extreme.composite > calm.composite);
     }
 
     #[test]
@@ -2796,7 +2854,7 @@ mod tests {
         imbalance.push(2_000_000_000, 0.2);
 
         let risk = risk_score(
-            &event, &dir, &imbalance, 2000.0, 0.11, 0.22, 0.33, 0.44, 0.55, 0.66,
+            &event, &dir, &imbalance, 2000.0, true, 0.0, 0.11, 0.22, 0.33, 0.44, 0.55, 0.66,
         );
 
         assert!((risk.skew_penalty - 0.11).abs() < f32::EPSILON);

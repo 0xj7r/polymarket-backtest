@@ -17,7 +17,8 @@ use pm_risk::PortfolioLimits;
 use pm_strategy::{
     BonereaperLite, BonereaperV2, BuyYesAtOpen, DeltaNeutralMm, LateBigBet, LateConfirmation,
     LateConvexTail, NoopStrategy, PairedMmDense, ReactiveDirectional, SpotMomentumFollower,
-    UnlawfulRecycler, bonereaper::BonereaperLiteConfig,
+    UnlawfulRecycler,
+    bonereaper::BonereaperLiteConfig,
     bonereaper_v2::{BonereaperV2Config, BonereaperV2GateStats},
     delta_neutral_mm::DeltaNeutralMmConfig,
     late_big_bet::LateBigBetConfig,
@@ -743,6 +744,7 @@ pub struct FillTagAggregate {
     pub avg_fill_price: f64,
     pub hit_rate: f64,
     pub avg_side_edge_vs_fill: f64,
+    pub avg_market_yes_range_so_far: f64,
     pub avg_regime_whipsaw_score: f64,
     pub avg_regime_path_efficiency: f64,
     pub avg_regime_reversal_pressure: f64,
@@ -759,6 +761,8 @@ struct FillTagAccumulator {
     sum_fill_price: f64,
     sum_side_edge_vs_fill: f64,
     side_edge_samples: usize,
+    sum_market_yes_range_so_far: f64,
+    market_range_samples: usize,
     sum_regime_whipsaw_score: f64,
     sum_regime_path_efficiency: f64,
     sum_regime_reversal_pressure: f64,
@@ -779,6 +783,10 @@ impl FillTagAccumulator {
         if let Some(edge) = fill.side_edge_vs_fill {
             self.sum_side_edge_vs_fill += edge as f64;
             self.side_edge_samples += 1;
+        }
+        if let Some(range) = fill.market_yes_range_so_far {
+            self.sum_market_yes_range_so_far += range as f64;
+            self.market_range_samples += 1;
         }
         if let (
             Some(whipsaw),
@@ -824,6 +832,11 @@ impl FillTagAccumulator {
             },
             avg_side_edge_vs_fill: if self.side_edge_samples > 0 {
                 self.sum_side_edge_vs_fill / self.side_edge_samples as f64
+            } else {
+                0.0
+            },
+            avg_market_yes_range_so_far: if self.market_range_samples > 0 {
+                self.sum_market_yes_range_so_far / self.market_range_samples as f64
             } else {
                 0.0
             },
@@ -3148,8 +3161,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_late_favourite_range_soft_throttle: cfg.br2_late_favourite_range_soft_throttle,
         br2_late_favourite_range_hard_throttle: cfg.br2_late_favourite_range_hard_throttle,
         br2_late_favourite_range_extra_edge: cfg.br2_late_favourite_range_extra_edge,
-        br2_late_favourite_range_extra_confidence: cfg
-            .br2_late_favourite_range_extra_confidence,
+        br2_late_favourite_range_extra_confidence: cfg.br2_late_favourite_range_extra_confidence,
         br2_late_favourite_max_adverse_fast_momentum: cfg
             .br2_late_favourite_max_adverse_fast_momentum,
         br2_late_favourite_max_entry_pullback: cfg.br2_late_favourite_max_entry_pullback,

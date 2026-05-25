@@ -65,6 +65,8 @@ pub struct Fill {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub risk_score: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub market_yes_range_so_far: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub seconds_since_open: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seconds_to_close: Option<f32>,
@@ -91,6 +93,7 @@ struct FillModelContext {
     confidence_score: f32,
     calibrated_p: f32,
     risk_score: f32,
+    market_yes_range_so_far: f32,
     seconds_since_open: f32,
     seconds_to_close: f32,
     regime_whipsaw_score: f32,
@@ -105,6 +108,7 @@ impl FillModelContext {
         event: &ReplayEvent,
         model_output: &ModelOutput,
         side: Side,
+        market_yes_range_so_far: f32,
         seconds_since_open: f32,
         market_close_ns: i64,
         whipsaw: WhipsawRiskSnapshot,
@@ -131,6 +135,7 @@ impl FillModelContext {
             confidence_score: model_output.confidence_score,
             calibrated_p: model_output.calibrated_p,
             risk_score: model_output.risk_score,
+            market_yes_range_so_far: market_yes_range_so_far.clamp(0.0, 1.0),
             seconds_since_open,
             seconds_to_close: ((market_close_ns - event.ts_ns).max(0) as f32) / 1e9,
             regime_whipsaw_score: whipsaw.score,
@@ -196,6 +201,8 @@ pub struct DecisionLogRow {
     pub confidence_score: f32,
     pub calibrated_p: f32,
     pub risk_score: f32,
+    pub feature_observed_yes_range_so_far: f32,
+    pub feature_observed_range_high_cert_interaction: f32,
     pub edge: f32,
     pub has_model_output: bool,
     pub strategy_emitted_model_output: bool,
@@ -551,6 +558,7 @@ pub fn run_backtest<S: Strategy>(
                 event,
                 &model_output,
                 req.side,
+                market_yes_range_so_far,
                 secs_since_open as f32,
                 cfg.market_close_ns,
                 whipsaw_snapshot,
@@ -645,6 +653,9 @@ pub fn run_backtest<S: Strategy>(
                     confidence_score,
                     calibrated_p,
                     risk_score,
+                    feature_observed_yes_range_so_far: model_attribution.observed_yes_range_so_far,
+                    feature_observed_range_high_cert_interaction: model_attribution
+                        .observed_range_high_cert_interaction,
                     edge,
                     has_model_output,
                     strategy_emitted_model_output,
@@ -730,6 +741,9 @@ pub fn run_backtest<S: Strategy>(
                     confidence_score,
                     calibrated_p,
                     risk_score,
+                    feature_observed_yes_range_so_far: model_attribution.observed_yes_range_so_far,
+                    feature_observed_range_high_cert_interaction: model_attribution
+                        .observed_range_high_cert_interaction,
                     edge,
                     has_model_output,
                     strategy_emitted_model_output,
@@ -896,6 +910,16 @@ fn write_decision_rows_parquet(path: &Path, rows: &[DecisionLogRow]) -> Result<(
         Field::new("confidence_score", DataType::Float32, false),
         Field::new("calibrated_p", DataType::Float32, false),
         Field::new("risk_score", DataType::Float32, false),
+        Field::new(
+            "feature_observed_yes_range_so_far",
+            DataType::Float32,
+            false,
+        ),
+        Field::new(
+            "feature_observed_range_high_cert_interaction",
+            DataType::Float32,
+            false,
+        ),
         Field::new("edge", DataType::Float32, false),
         Field::new("has_model_output", DataType::Boolean, false),
         Field::new("strategy_emitted_model_output", DataType::Boolean, false),
@@ -998,6 +1022,13 @@ fn write_decision_rows_parquet(path: &Path, rows: &[DecisionLogRow]) -> Result<(
         )),
         Arc::new(Float32Array::from_iter_values(
             rows.iter().map(|r| r.risk_score),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_observed_yes_range_so_far),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter()
+                .map(|r| r.feature_observed_range_high_cert_interaction),
         )),
         Arc::new(Float32Array::from_iter_values(rows.iter().map(|r| r.edge))),
         Arc::new(BooleanArray::from_iter(
@@ -1341,6 +1372,7 @@ fn apply_maker_fill(
         confidence_score: model_context.map(|m| m.confidence_score),
         calibrated_p: model_context.map(|m| m.calibrated_p),
         risk_score: model_context.map(|m| m.risk_score),
+        market_yes_range_so_far: model_context.map(|m| m.market_yes_range_so_far),
         seconds_since_open: model_context.map(|m| m.seconds_since_open),
         seconds_to_close: model_context.map(|m| m.seconds_to_close),
         regime_whipsaw_score: model_context.map(|m| m.regime_whipsaw_score),
@@ -1380,9 +1412,7 @@ fn check_trade_driven_resting_fills(
                 continue;
             }
             let fills_order = match r.side {
-                Side::BuyYes | Side::SellNo => {
-                    !trade.aggressor_buy && trade.price <= r.limit_yes
-                }
+                Side::BuyYes | Side::SellNo => !trade.aggressor_buy && trade.price <= r.limit_yes,
                 Side::SellYes | Side::BuyNo => trade.aggressor_buy && trade.price >= r.limit_yes,
             };
             if !fills_order {
@@ -1544,6 +1574,7 @@ fn check_resting_fills(
             confidence_score: r.model_context.map(|m| m.confidence_score),
             calibrated_p: r.model_context.map(|m| m.calibrated_p),
             risk_score: r.model_context.map(|m| m.risk_score),
+            market_yes_range_so_far: r.model_context.map(|m| m.market_yes_range_so_far),
             seconds_since_open: r.model_context.map(|m| m.seconds_since_open),
             seconds_to_close: r.model_context.map(|m| m.seconds_to_close),
             regime_whipsaw_score: r.model_context.map(|m| m.regime_whipsaw_score),
@@ -1760,6 +1791,7 @@ fn apply_taker_order(
         confidence_score: model_context.map(|m| m.confidence_score),
         calibrated_p: model_context.map(|m| m.calibrated_p),
         risk_score: model_context.map(|m| m.risk_score),
+        market_yes_range_so_far: model_context.map(|m| m.market_yes_range_so_far),
         seconds_since_open: model_context.map(|m| m.seconds_since_open),
         seconds_to_close: model_context.map(|m| m.seconds_to_close),
         regime_whipsaw_score: model_context.map(|m| m.regime_whipsaw_score),
@@ -2050,6 +2082,7 @@ mod tests {
             &event,
             &model,
             req.side,
+            0.42,
             1.0,
             301_000_000_000,
             WhipsawRiskSnapshot::default(),
@@ -2079,6 +2112,7 @@ mod tests {
         assert_eq!(fill.side_model_p, Some(0.88));
         assert_eq!(fill.confidence_score, Some(0.72));
         assert_eq!(fill.risk_score, Some(0.20));
+        assert_eq!(fill.market_yes_range_so_far, Some(0.42));
         assert_eq!(fill.seconds_since_open, Some(1.0));
         assert_eq!(fill.seconds_to_close, Some(300.0));
         assert!((fill.side_edge_vs_mid.unwrap() - (0.88 - event.yes_mid)).abs() < 1e-6);
@@ -2105,6 +2139,7 @@ mod tests {
             &event,
             &model,
             req.side,
+            0.77,
             1.0,
             301_000_000_000,
             WhipsawRiskSnapshot::default(),
@@ -2608,6 +2643,8 @@ mod tests {
         assert_eq!(row.event_mtm_delta_usdc, 0.0);
         assert!((-1.0..=1.0).contains(&row.feature_book_imbalance_top3));
         assert!((0.0..=1.0).contains(&row.feature_stability));
+        assert!((0.0..=1.0).contains(&row.feature_observed_yes_range_so_far));
+        assert!((0.0..=1.0).contains(&row.feature_observed_range_high_cert_interaction));
         assert!((0.0..=1.0).contains(&row.feature_side_p_pre_meta));
         assert!((0.0..=1.0).contains(&row.feature_side_p_post_meta));
     }
