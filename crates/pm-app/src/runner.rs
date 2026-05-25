@@ -111,6 +111,15 @@ pub struct DecisionLogRow {
     pub feature_top3_delta_5s: f32,
     pub feature_top3_delta_15s: f32,
     pub feature_spot_score: f32,
+    pub feature_spot_fast_momentum: f32,
+    pub feature_spot_broad_momentum: f32,
+    pub feature_spot_momentum_600s: f32,
+    pub feature_spot_momentum_900s: f32,
+    pub feature_spot_momentum_1800s: f32,
+    pub feature_spot_momentum_3600s: f32,
+    pub feature_spot_fast_long_alignment: f32,
+    pub feature_spot_broad_trend_consistency: f32,
+    pub feature_spot_broad_acceleration: f32,
     pub feature_direction_raw: f32,
     pub feature_stability: f32,
     pub feature_sign_persistence: f32,
@@ -127,6 +136,9 @@ pub struct DecisionLogRow {
     pub feature_volatility_penalty: f32,
     pub feature_time_of_day_penalty: f32,
     pub feature_volatility_regime: f32,
+    pub feature_dir_flip_rate_8: f32,
+    pub feature_dir_std_8: f32,
+    pub feature_dir_abs_mean_8: f32,
     pub feature_side_p_pre_meta: f32,
     pub feature_side_p_post_meta: f32,
     pub meta_calibrator_updates: u32,
@@ -491,6 +503,21 @@ pub fn run_backtest<S: Strategy>(
                     feature_top3_delta_5s: model_attribution.direction.top3_delta_5s,
                     feature_top3_delta_15s: model_attribution.direction.top3_delta_15s,
                     feature_spot_score: model_attribution.spot_score,
+                    feature_spot_fast_momentum: model_attribution.direction.spot_fast_momentum,
+                    feature_spot_broad_momentum: model_attribution.direction.spot_broad_momentum,
+                    feature_spot_momentum_600s: model_attribution.direction.spot_momentum_600s,
+                    feature_spot_momentum_900s: model_attribution.direction.spot_momentum_900s,
+                    feature_spot_momentum_1800s: model_attribution.direction.spot_momentum_1800s,
+                    feature_spot_momentum_3600s: model_attribution.direction.spot_momentum_3600s,
+                    feature_spot_fast_long_alignment: model_attribution
+                        .direction
+                        .spot_fast_long_alignment,
+                    feature_spot_broad_trend_consistency: model_attribution
+                        .direction
+                        .spot_broad_trend_consistency,
+                    feature_spot_broad_acceleration: model_attribution
+                        .direction
+                        .spot_broad_acceleration,
                     feature_direction_raw: model_attribution.direction_raw,
                     feature_stability: model_attribution.confidence.stability,
                     feature_sign_persistence: model_attribution.confidence.sign_persistence,
@@ -509,6 +536,9 @@ pub fn run_backtest<S: Strategy>(
                     feature_volatility_penalty: model_attribution.risk.volatility_penalty,
                     feature_time_of_day_penalty: model_attribution.risk.time_of_day_penalty,
                     feature_volatility_regime: model_attribution.volatility_regime,
+                    feature_dir_flip_rate_8: model_attribution.sequence.dir_flip_rate_8,
+                    feature_dir_std_8: model_attribution.sequence.dir_std_8,
+                    feature_dir_abs_mean_8: model_attribution.sequence.dir_abs_mean_8,
                     feature_side_p_pre_meta: model_attribution.side_probability_pre_meta,
                     feature_side_p_post_meta: model_attribution.side_probability_post_meta,
                     meta_calibrator_updates: model_attribution.meta_calibrator_updates,
@@ -558,6 +588,21 @@ pub fn run_backtest<S: Strategy>(
                     feature_top3_delta_5s: model_attribution.direction.top3_delta_5s,
                     feature_top3_delta_15s: model_attribution.direction.top3_delta_15s,
                     feature_spot_score: model_attribution.spot_score,
+                    feature_spot_fast_momentum: model_attribution.direction.spot_fast_momentum,
+                    feature_spot_broad_momentum: model_attribution.direction.spot_broad_momentum,
+                    feature_spot_momentum_600s: model_attribution.direction.spot_momentum_600s,
+                    feature_spot_momentum_900s: model_attribution.direction.spot_momentum_900s,
+                    feature_spot_momentum_1800s: model_attribution.direction.spot_momentum_1800s,
+                    feature_spot_momentum_3600s: model_attribution.direction.spot_momentum_3600s,
+                    feature_spot_fast_long_alignment: model_attribution
+                        .direction
+                        .spot_fast_long_alignment,
+                    feature_spot_broad_trend_consistency: model_attribution
+                        .direction
+                        .spot_broad_trend_consistency,
+                    feature_spot_broad_acceleration: model_attribution
+                        .direction
+                        .spot_broad_acceleration,
                     feature_direction_raw: model_attribution.direction_raw,
                     feature_stability: model_attribution.confidence.stability,
                     feature_sign_persistence: model_attribution.confidence.sign_persistence,
@@ -576,6 +621,9 @@ pub fn run_backtest<S: Strategy>(
                     feature_volatility_penalty: model_attribution.risk.volatility_penalty,
                     feature_time_of_day_penalty: model_attribution.risk.time_of_day_penalty,
                     feature_volatility_regime: model_attribution.volatility_regime,
+                    feature_dir_flip_rate_8: model_attribution.sequence.dir_flip_rate_8,
+                    feature_dir_std_8: model_attribution.sequence.dir_std_8,
+                    feature_dir_abs_mean_8: model_attribution.sequence.dir_abs_mean_8,
                     feature_side_p_pre_meta: model_attribution.side_probability_pre_meta,
                     feature_side_p_post_meta: model_attribution.side_probability_post_meta,
                     meta_calibrator_updates: model_attribution.meta_calibrator_updates,
@@ -706,6 +754,19 @@ fn write_decision_rows_parquet(path: &Path, rows: &[DecisionLogRow]) -> Result<(
         Field::new("feature_top3_delta_5s", DataType::Float32, false),
         Field::new("feature_top3_delta_15s", DataType::Float32, false),
         Field::new("feature_spot_score", DataType::Float32, false),
+        Field::new("feature_spot_fast_momentum", DataType::Float32, false),
+        Field::new("feature_spot_broad_momentum", DataType::Float32, false),
+        Field::new("feature_spot_momentum_600s", DataType::Float32, false),
+        Field::new("feature_spot_momentum_900s", DataType::Float32, false),
+        Field::new("feature_spot_momentum_1800s", DataType::Float32, false),
+        Field::new("feature_spot_momentum_3600s", DataType::Float32, false),
+        Field::new("feature_spot_fast_long_alignment", DataType::Float32, false),
+        Field::new(
+            "feature_spot_broad_trend_consistency",
+            DataType::Float32,
+            false,
+        ),
+        Field::new("feature_spot_broad_acceleration", DataType::Float32, false),
         Field::new("feature_direction_raw", DataType::Float32, false),
         Field::new("feature_stability", DataType::Float32, false),
         Field::new("feature_sign_persistence", DataType::Float32, false),
@@ -722,6 +783,9 @@ fn write_decision_rows_parquet(path: &Path, rows: &[DecisionLogRow]) -> Result<(
         Field::new("feature_volatility_penalty", DataType::Float32, false),
         Field::new("feature_time_of_day_penalty", DataType::Float32, false),
         Field::new("feature_volatility_regime", DataType::Float32, false),
+        Field::new("feature_dir_flip_rate_8", DataType::Float32, false),
+        Field::new("feature_dir_std_8", DataType::Float32, false),
+        Field::new("feature_dir_abs_mean_8", DataType::Float32, false),
         Field::new("feature_side_p_pre_meta", DataType::Float32, false),
         Field::new("feature_side_p_post_meta", DataType::Float32, false),
         Field::new("meta_calibrator_updates", DataType::UInt32, false),
@@ -812,6 +876,33 @@ fn write_decision_rows_parquet(path: &Path, rows: &[DecisionLogRow]) -> Result<(
             rows.iter().map(|r| r.feature_spot_score),
         )),
         Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_fast_momentum),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_broad_momentum),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_momentum_600s),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_momentum_900s),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_momentum_1800s),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_momentum_3600s),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_fast_long_alignment),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_broad_trend_consistency),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_broad_acceleration),
+        )),
+        Arc::new(Float32Array::from_iter_values(
             rows.iter().map(|r| r.feature_direction_raw),
         )),
         Arc::new(Float32Array::from_iter_values(
@@ -858,6 +949,15 @@ fn write_decision_rows_parquet(path: &Path, rows: &[DecisionLogRow]) -> Result<(
         )),
         Arc::new(Float32Array::from_iter_values(
             rows.iter().map(|r| r.feature_volatility_regime),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_dir_flip_rate_8),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_dir_std_8),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_dir_abs_mean_8),
         )),
         Arc::new(Float32Array::from_iter_values(
             rows.iter().map(|r| r.feature_side_p_pre_meta),

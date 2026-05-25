@@ -13,7 +13,7 @@ const MOMENTUM_WINDOWS_SECONDS: [i64; 5] = [10, 30, 60, 120, 300];
 const MOMENTUM_WEIGHTS: [f32; 5] = [0.45, 0.25, 0.15, 0.10, 0.05];
 const SKEW_BINS: usize = 10;
 const HOUR_BINS: usize = 24;
-const META_FEATURES: usize = 44;
+const META_FEATURES: usize = 54;
 const META_CALIBRATOR_LR: f32 = 0.08;
 const META_CALIBRATOR_MIN_UPDATES: u32 = 12;
 const META_CALIBRATOR_WEIGHT_DECAY: f32 = 1.0e-3;
@@ -80,6 +80,16 @@ pub const META_FEATURE_NAMES: [&str; META_FEATURES] = [
     "spot_broad_momentum_side",
     "spot_fast_broad_alignment",
     "spot_acceleration_side",
+    "spot_momentum_600s_side",
+    "spot_momentum_900s_side",
+    "spot_momentum_1800s_side",
+    "spot_momentum_3600s_side",
+    "spot_fast_long_alignment",
+    "spot_broad_trend_consistency",
+    "spot_broad_acceleration_side",
+    "dir_flip_rate_8",
+    "dir_std_8",
+    "dir_abs_mean_8",
 ];
 
 /// Output contract expected by the 4-score engine.
@@ -113,6 +123,7 @@ pub struct ModelAttribution {
     pub direction: DirectionScore,
     pub confidence: ConfidenceScore,
     pub risk: RiskScore,
+    pub sequence: SequenceFeatures,
     pub book_imbalance_top3: f32,
     pub spot_score: f32,
     pub direction_raw: f32,
@@ -131,6 +142,7 @@ impl Default for ModelAttribution {
             direction: DirectionScore::default(),
             confidence: ConfidenceScore::default(),
             risk: RiskScore::default(),
+            sequence: SequenceFeatures::default(),
             book_imbalance_top3: 0.0,
             spot_score: 0.0,
             direction_raw: 0.0,
@@ -348,8 +360,15 @@ pub struct DirectionScore {
     pub spot_momentum: f32,
     pub spot_fast_momentum: f32,
     pub spot_broad_momentum: f32,
+    pub spot_momentum_600s: f32,
+    pub spot_momentum_900s: f32,
+    pub spot_momentum_1800s: f32,
+    pub spot_momentum_3600s: f32,
     pub spot_fast_broad_alignment: f32,
+    pub spot_fast_long_alignment: f32,
+    pub spot_broad_trend_consistency: f32,
     pub spot_acceleration: f32,
+    pub spot_broad_acceleration: f32,
     pub ofi: f32,
     pub microprice_dev: f32,
     pub microprice_spot_alignment: f32,
@@ -386,6 +405,9 @@ pub struct SequenceFeatures {
     pub dir_mean_3: f32,
     pub dir_mean_8: f32,
     pub dir_slope_8: f32,
+    pub dir_flip_rate_8: f32,
+    pub dir_std_8: f32,
+    pub dir_abs_mean_8: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -662,6 +684,26 @@ impl MetaFeatures {
         values[idx] = direction.spot_fast_broad_alignment;
         idx += 1;
         values[idx] = direction.spot_acceleration * side;
+        idx += 1;
+        values[idx] = direction.spot_momentum_600s * side;
+        idx += 1;
+        values[idx] = direction.spot_momentum_900s * side;
+        idx += 1;
+        values[idx] = direction.spot_momentum_1800s * side;
+        idx += 1;
+        values[idx] = direction.spot_momentum_3600s * side;
+        idx += 1;
+        values[idx] = direction.spot_fast_long_alignment;
+        idx += 1;
+        values[idx] = direction.spot_broad_trend_consistency;
+        idx += 1;
+        values[idx] = direction.spot_broad_acceleration * side;
+        idx += 1;
+        values[idx] = sequence.dir_flip_rate_8;
+        idx += 1;
+        values[idx] = sequence.dir_std_8;
+        idx += 1;
+        values[idx] = sequence.dir_abs_mean_8;
         Self { values }
     }
 }
@@ -1875,6 +1917,7 @@ impl ModelState {
                 direction: book_dir,
                 confidence: conf,
                 risk,
+                sequence,
                 book_imbalance_top3: book_imb3,
                 spot_score,
                 direction_raw,
@@ -1959,8 +2002,15 @@ pub fn direction_score(
         spot_momentum,
         spot_fast_momentum: spot_stack.fast,
         spot_broad_momentum: spot_stack.broad,
+        spot_momentum_600s: spot_stack.momentum_600s,
+        spot_momentum_900s: spot_stack.momentum_900s,
+        spot_momentum_1800s: spot_stack.momentum_1800s,
+        spot_momentum_3600s: spot_stack.momentum_3600s,
         spot_fast_broad_alignment: spot_stack.alignment,
+        spot_fast_long_alignment: spot_stack.fast_long_alignment,
+        spot_broad_trend_consistency: spot_stack.broad_trend_consistency,
         spot_acceleration: spot_stack.acceleration,
+        spot_broad_acceleration: spot_stack.broad_acceleration,
         ofi: ofi_v,
         microprice_dev,
         microprice_spot_alignment,
@@ -2052,6 +2102,15 @@ pub fn confidence_score(
 fn sequence_features(recent_dir_scores: &Ring) -> SequenceFeatures {
     let dir_mean_3 = recent_dir_scores.mean_last_n(3);
     let dir_mean_8 = recent_dir_scores.mean_last_n(8);
+    let n8 = recent_dir_scores.len().min(8);
+    let dir_flip_rate_8 = if n8 < 2 {
+        0.0
+    } else {
+        recent_dir_scores.sign_flips_last_n(n8) as f32 / (n8 - 1) as f32
+    }
+    .clamp(0.0, 1.0);
+    let dir_std_8 = recent_dir_scores.std_last_n(8).clamp(0.0, 1.0);
+    let dir_abs_mean_8 = mean_abs_last_n(recent_dir_scores, 8).clamp(0.0, 1.0);
     let newest = recent_dir_scores.newest().unwrap_or(0.0);
     let oldest = if recent_dir_scores.len() >= 8 {
         let idx = (recent_dir_scores.head + recent_dir_scores.cap - recent_dir_scores.len())
@@ -2064,7 +2123,22 @@ fn sequence_features(recent_dir_scores: &Ring) -> SequenceFeatures {
         dir_mean_3,
         dir_mean_8,
         dir_slope_8: (newest - oldest).clamp(-1.0, 1.0),
+        dir_flip_rate_8,
+        dir_std_8,
+        dir_abs_mean_8,
     }
+}
+
+fn mean_abs_last_n(values: &Ring, n: usize) -> f32 {
+    let n = n.min(values.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let start = values.len() - n;
+    let sum: f32 = (start..values.len())
+        .map(|i| values.buf[(values.head + values.cap - values.len() + i) % values.cap].abs())
+        .sum();
+    sum / n as f32
 }
 
 pub fn risk_score(
@@ -2169,9 +2243,16 @@ pub fn calibrated_p(direction: f32, confidence: f32, book_implied: f32, model_we
 struct SpotScoreStack {
     fast: f32,
     broad: f32,
+    momentum_600s: f32,
+    momentum_900s: f32,
+    momentum_1800s: f32,
+    momentum_3600s: f32,
     blended: f32,
     alignment: f32,
+    fast_long_alignment: f32,
+    broad_trend_consistency: f32,
     acceleration: f32,
+    broad_acceleration: f32,
 }
 
 fn spot_score_stack(ts_ns: i64, spot: &SpotHistory) -> SpotScoreStack {
@@ -2179,6 +2260,10 @@ fn spot_score_stack(ts_ns: i64, spot: &SpotHistory) -> SpotScoreStack {
     let broad = weighted_broad_multi_tf_return(ts_ns, spot);
     let fast_score = score_spot_return(fast, 250.0);
     let broad_score = score_spot_return(broad, 80.0);
+    let momentum_600s = score_spot_return(spot.simple_return(ts_ns, 600 * NS_PER_SECOND), 120.0);
+    let momentum_900s = score_spot_return(spot.simple_return(ts_ns, 900 * NS_PER_SECOND), 100.0);
+    let momentum_1800s = score_spot_return(spot.simple_return(ts_ns, 1800 * NS_PER_SECOND), 70.0);
+    let momentum_3600s = score_spot_return(spot.simple_return(ts_ns, 3600 * NS_PER_SECOND), 50.0);
     let alignment = if fast_score.abs() < 0.02 || broad_score.abs() < 0.02 {
         0.0
     } else if fast_score.signum() == broad_score.signum() {
@@ -2186,6 +2271,20 @@ fn spot_score_stack(ts_ns: i64, spot: &SpotHistory) -> SpotScoreStack {
     } else {
         -1.0
     };
+    let fast_long_alignment = directional_alignment(fast_score, momentum_3600s);
+    let broad_scores = [momentum_600s, momentum_900s, momentum_1800s, momentum_3600s];
+    let non_zero = broad_scores
+        .iter()
+        .filter(|score| score.abs() >= 0.02)
+        .count();
+    let positive = broad_scores.iter().filter(|score| **score >= 0.02).count();
+    let negative = broad_scores.iter().filter(|score| **score <= -0.02).count();
+    let broad_trend_consistency = if non_zero == 0 {
+        0.0
+    } else {
+        (positive.max(negative) as f32 / non_zero as f32).clamp(0.0, 1.0)
+    };
+    let broad_acceleration = (momentum_600s - momentum_3600s).clamp(-1.0, 1.0);
     let blended = if alignment == 0.0 {
         fast_score
     } else if alignment > 0.0 {
@@ -2196,9 +2295,26 @@ fn spot_score_stack(ts_ns: i64, spot: &SpotHistory) -> SpotScoreStack {
     SpotScoreStack {
         fast: fast_score,
         broad: broad_score,
+        momentum_600s,
+        momentum_900s,
+        momentum_1800s,
+        momentum_3600s,
         blended,
         alignment,
+        fast_long_alignment,
+        broad_trend_consistency,
         acceleration: (fast_score - broad_score).clamp(-1.0, 1.0),
+        broad_acceleration,
+    }
+}
+
+fn directional_alignment(a: f32, b: f32) -> f32 {
+    if a.abs() < 0.02 || b.abs() < 0.02 {
+        0.0
+    } else if a.signum() == b.signum() {
+        1.0
+    } else {
+        -1.0
     }
 }
 
