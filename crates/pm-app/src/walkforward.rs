@@ -109,6 +109,7 @@ pub struct WalkForwardConfig {
     /// Optional research-speed replay thinning. `0` keeps every raw event.
     /// Non-zero keeps first/last plus at most one event per interval.
     pub replay_sample_ms: u64,
+    pub load_pm_trades: bool,
     pub use_outcome_label: bool,
     pub maker_rebate_bps: f64,
     pub taker_fee_bps: f64,
@@ -250,6 +251,7 @@ impl Default for WalkForwardConfig {
             strategies: vec![StratId::ReactiveDirectional, StratId::PairedMm],
             max_concurrent_fetches: 16,
             replay_sample_ms: 0,
+            load_pm_trades: true,
             use_outcome_label: false,
             maker_rebate_bps: 0.0,
             taker_fee_bps: 0.0,
@@ -401,6 +403,7 @@ pub struct SummaryRunConfig {
     pub max_per_market_exposure_usdc: f64,
     pub max_per_market_exposure_frac: Option<f64>,
     pub replay_sample_ms: u64,
+    pub load_pm_trades: bool,
     pub clip_fraction_of_equity: Option<f64>,
     pub clip_drawdown_soft_pct: f64,
     pub clip_drawdown_hard_pct: f64,
@@ -2164,15 +2167,19 @@ async fn run_markets(
                 events.as_slice()
             };
             // Per-market trades (best effort: skip if missing/erroring).
-            let trades = match resolve_pm_trades_day(&store_for_resolve, &m.date, &m.asset_id).await {
-                Ok(tp) => match load_pm_trades_async(store_inner.clone(), tp).await {
-                    Ok((ticks, _)) => Arc::new(TradeHistory::new(ticks)),
-                    Err(e) => {
-                        tracing::debug!(market = %m.slug, error = %e, "trades load failed");
-                        Arc::new(TradeHistory::default())
-                    }
-                },
-                Err(_) => Arc::new(TradeHistory::default()),
+            let trades = if cfg_arc.load_pm_trades {
+                match resolve_pm_trades_day(&store_for_resolve, &m.date, &m.asset_id).await {
+                    Ok(tp) => match load_pm_trades_async(store_inner.clone(), tp).await {
+                        Ok((ticks, _)) => Arc::new(TradeHistory::new(ticks)),
+                        Err(e) => {
+                            tracing::debug!(market = %m.slug, error = %e, "trades load failed");
+                            Arc::new(TradeHistory::default())
+                        }
+                    },
+                    Err(_) => Arc::new(TradeHistory::default()),
+                }
+            } else {
+                Arc::new(TradeHistory::default())
             };
             let spot = if cfg_arc.spot_symbol.is_empty() {
                 spot_empty
@@ -2564,12 +2571,16 @@ async fn run_portfolio(
         } else {
             events.as_slice()
         };
-        let trades = match resolve_pm_trades_day(store, &m.date, &m.asset_id).await {
-            Ok(tp) => match load_pm_trades_async(store_inner.clone(), tp).await {
-                Ok((ticks, _)) => Arc::new(TradeHistory::new(ticks)),
+        let trades = if cfg.load_pm_trades {
+            match resolve_pm_trades_day(store, &m.date, &m.asset_id).await {
+                Ok(tp) => match load_pm_trades_async(store_inner.clone(), tp).await {
+                    Ok((ticks, _)) => Arc::new(TradeHistory::new(ticks)),
+                    Err(_) => Arc::new(TradeHistory::default()),
+                },
                 Err(_) => Arc::new(TradeHistory::default()),
-            },
-            Err(_) => Arc::new(TradeHistory::default()),
+            }
+        } else {
+            Arc::new(TradeHistory::default())
         };
         let spot = if cfg.spot_symbol.is_empty() {
             empty_spot.clone()
@@ -3050,6 +3061,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         max_per_market_exposure_usdc: cfg.max_per_market_exposure_usdc,
         max_per_market_exposure_frac: cfg.max_per_market_exposure_frac,
         replay_sample_ms: cfg.replay_sample_ms,
+        load_pm_trades: cfg.load_pm_trades,
         clip_fraction_of_equity: cfg.clip_fraction_of_equity,
         clip_drawdown_soft_pct: cfg.clip_drawdown_soft_pct,
         clip_drawdown_hard_pct: cfg.clip_drawdown_hard_pct,

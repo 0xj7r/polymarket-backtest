@@ -271,6 +271,9 @@ enum Cmd {
         /// Research-speed replay thinning in milliseconds. 0 keeps every raw event.
         #[arg(long, default_value = "0")]
         replay_sample_ms: u64,
+        /// Skip loading Polymarket trade prints and run with empty trade-flow history.
+        #[arg(long, default_value_t = false)]
+        disable_pm_trades: bool,
         /// If set, use the outcome label from discovery instead of inferring
         /// from yes_mid.
         #[arg(long, default_value_t = false)]
@@ -845,6 +848,7 @@ async fn main() -> Result<()> {
             strategies,
             max_concurrent_fetches,
             replay_sample_ms,
+            disable_pm_trades,
             use_outcome_label,
             portfolio_mode,
             volatility_regime_threshold,
@@ -940,6 +944,7 @@ async fn main() -> Result<()> {
                 strategies,
                 max_concurrent_fetches,
                 replay_sample_ms,
+                !disable_pm_trades,
                 use_outcome_label,
                 portfolio_mode,
                 volatility_regime_threshold,
@@ -1481,6 +1486,7 @@ async fn walk_forward(
     strategies_csv: String,
     max_concurrent_fetches: usize,
     replay_sample_ms: u64,
+    load_pm_trades: bool,
     use_outcome_label: bool,
     portfolio_mode: bool,
     volatility_regime_threshold: f64,
@@ -1613,6 +1619,7 @@ async fn walk_forward(
         strategies,
         max_concurrent_fetches,
         replay_sample_ms,
+        load_pm_trades,
         use_outcome_label,
         maker_rebate_bps: 10.0,
         taker_fee_bps: 0.0,
