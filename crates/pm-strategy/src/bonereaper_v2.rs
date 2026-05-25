@@ -87,6 +87,7 @@ pub struct BonereaperV2GateStats {
     pub late_favourite_whipsaw_fail: u64,
     pub late_favourite_reversal_pressure_fail: u64,
     pub late_favourite_path_efficiency_fail: u64,
+    pub late_favourite_market_range_fail: u64,
     pub late_favourite_adverse_momentum_fail: u64,
     pub late_favourite_entry_pullback_fail: u64,
     pub late_favourite_avg_entry_drawdown_fail: u64,
@@ -144,6 +145,7 @@ impl BonereaperV2GateStats {
         self.late_favourite_whipsaw_fail += other.late_favourite_whipsaw_fail;
         self.late_favourite_reversal_pressure_fail += other.late_favourite_reversal_pressure_fail;
         self.late_favourite_path_efficiency_fail += other.late_favourite_path_efficiency_fail;
+        self.late_favourite_market_range_fail += other.late_favourite_market_range_fail;
         self.late_favourite_adverse_momentum_fail += other.late_favourite_adverse_momentum_fail;
         self.late_favourite_entry_pullback_fail += other.late_favourite_entry_pullback_fail;
         self.late_favourite_avg_entry_drawdown_fail += other.late_favourite_avg_entry_drawdown_fail;
@@ -211,6 +213,7 @@ pub struct BonereaperV2Config {
     pub late_favourite_max_whipsaw_score: f32,
     pub late_favourite_max_reversal_pressure: f32,
     pub late_favourite_min_path_efficiency: f32,
+    pub late_favourite_max_observed_range: f32,
     pub late_favourite_max_adverse_fast_momentum: f32,
     pub late_favourite_max_entry_pullback: f32,
     pub late_favourite_max_avg_entry_drawdown: f32,
@@ -297,6 +300,9 @@ impl Default for BonereaperV2Config {
             late_favourite_max_whipsaw_score: 0.75,
             late_favourite_max_reversal_pressure: 1.0,
             late_favourite_min_path_efficiency: 0.0,
+            // Disabled by default. Set below 1.0 to reject late favourite
+            // loads in markets that already traversed too much YES-mid range.
+            late_favourite_max_observed_range: 1.0,
             // Disabled by default for backward-compatible sweeps. Set to a
             // small positive value (e.g. 0.04) to reject favourite loads when
             // the fast BTC impulse is actively moving against the favourite.
@@ -980,6 +986,8 @@ impl Strategy for BonereaperV2 {
                     self.gate_stats.late_favourite_reversal_pressure_fail += 1;
                 } else if whipsaw.path_efficiency < self.cfg.late_favourite_min_path_efficiency {
                     self.gate_stats.late_favourite_path_efficiency_fail += 1;
+                } else if ctx.market_yes_range_so_far > self.cfg.late_favourite_max_observed_range {
+                    self.gate_stats.late_favourite_market_range_fail += 1;
                 } else {
                     let side = if skew_signed > 0.0 {
                         Side::BuyYes
@@ -1227,6 +1235,7 @@ mod tests {
             yes_shares: 0.0,
             no_shares: 0.0,
             cash_usdc: 100.0,
+            market_yes_range_so_far: 0.0,
             model_output: Some(ModelOutput {
                 direction_score: 0.8,
                 confidence_score: 0.9,

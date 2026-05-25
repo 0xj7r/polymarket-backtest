@@ -189,6 +189,7 @@ mod tests {
             yes_shares: 0.0,
             no_shares: 0.0,
             cash_usdc: 100.0,
+            market_yes_range_so_far: 0.0,
             model_output: None,
             market_close_ns: close_ns,
         };
@@ -228,6 +229,7 @@ mod tests {
             yes_shares: 5.0,
             no_shares: 0.0,
             cash_usdc: 100.0,
+            market_yes_range_so_far: 0.0,
             model_output: None,
             market_close_ns: close_ns,
         };
@@ -265,6 +267,7 @@ mod tests {
             yes_shares: 0.0,
             no_shares: 0.0,
             cash_usdc: 100.0,
+            market_yes_range_so_far: 0.0,
             model_output: None,
             market_close_ns: close_ns,
         };

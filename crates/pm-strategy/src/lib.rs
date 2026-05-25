@@ -50,6 +50,9 @@ pub struct Ctx {
     pub yes_shares: f64,
     pub no_shares: f64,
     pub cash_usdc: f64,
+    /// Observed market volatility so far as `max(yes_mid) - min(yes_mid)`.
+    /// This is live-safe: it only includes ticks already seen by the runner.
+    pub market_yes_range_so_far: f32,
     /// Canonical 4-score model output for this event, produced by the shared
     /// model state before the strategy hook. Strategies can use this for
     /// ML-gated lanes while the runner still owns attribution and parity.

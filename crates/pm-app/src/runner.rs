@@ -361,6 +361,8 @@ pub fn run_backtest<S: Strategy>(
     let mut total_rebates = 0.0f64;
     let mut resting: Vec<RestingOrder> = Vec::new();
     let mut events_processed = 0usize;
+    let mut market_yes_min = f32::INFINITY;
+    let mut market_yes_max = f32::NEG_INFINITY;
     let mut model_state = ModelState::new();
     if let Some(snapshot) = cfg.meta_calibrator_snapshot.clone() {
         model_state.load_meta_calibrator_snapshot(snapshot);
@@ -409,6 +411,13 @@ pub fn run_backtest<S: Strategy>(
             break;
         }
         last_mid = event.yes_mid;
+        market_yes_min = market_yes_min.min(event.yes_mid);
+        market_yes_max = market_yes_max.max(event.yes_mid);
+        let market_yes_range_so_far = if market_yes_min.is_finite() && market_yes_max.is_finite() {
+            market_yes_max - market_yes_min
+        } else {
+            0.0
+        };
         last_window_idx = idx as isize;
         events_processed += 1;
 
@@ -470,6 +479,7 @@ pub fn run_backtest<S: Strategy>(
             yes_shares,
             no_shares,
             cash_usdc: cash,
+            market_yes_range_so_far,
             model_output: Some(canonical_model_eval.output),
             market_close_ns: cfg.market_close_ns,
         };
