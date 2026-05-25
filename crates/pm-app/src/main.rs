@@ -345,6 +345,9 @@ enum Cmd {
         /// Bonereaper v2 minimum ask price for late-favourite loads.
         #[arg(long, default_value = "0.70")]
         br2_late_favourite_min_ask: f32,
+        /// Bonereaper v2 maximum ask price for late-favourite loads.
+        #[arg(long, default_value = "0.97")]
+        br2_late_favourite_max_ask: f32,
         /// Bonereaper v2 late-favourite clip multiplier.
         #[arg(long, default_value = "1.00")]
         br2_late_favourite_clip_frac: f32,
@@ -828,6 +831,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_start_secs,
             br2_late_favourite_threshold,
             br2_late_favourite_min_ask,
+            br2_late_favourite_max_ask,
             br2_late_favourite_clip_frac,
             br2_late_favourite_max_clips,
             br2_late_favourite_min_sustain_secs,
@@ -910,6 +914,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_start_secs,
                 br2_late_favourite_threshold,
                 br2_late_favourite_min_ask,
+                br2_late_favourite_max_ask,
                 br2_late_favourite_clip_frac,
                 br2_late_favourite_max_clips,
                 br2_late_favourite_min_sustain_secs,
@@ -1438,6 +1443,7 @@ async fn walk_forward(
     br2_late_favourite_start_secs: f32,
     br2_late_favourite_threshold: f32,
     br2_late_favourite_min_ask: f32,
+    br2_late_favourite_max_ask: f32,
     br2_late_favourite_clip_frac: f32,
     br2_late_favourite_max_clips: usize,
     br2_late_favourite_min_sustain_secs: f32,
@@ -1554,6 +1560,7 @@ async fn walk_forward(
         br2_late_favourite_start_secs,
         br2_late_favourite_threshold,
         br2_late_favourite_min_ask,
+        br2_late_favourite_max_ask,
         br2_late_favourite_clip_frac,
         br2_late_favourite_max_clips,
         br2_late_favourite_min_sustain_secs,
