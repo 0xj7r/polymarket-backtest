@@ -200,6 +200,7 @@ pub struct BonereaperV2Config {
     pub late_favourite_high_cert_ask: f32,
     pub late_favourite_max_ask: f32,
     pub late_favourite_clip_frac: f32,
+    pub late_favourite_high_cert_clip_frac: f32,
     pub late_favourite_max_clips: usize,
     pub late_favourite_refresh_secs: f32,
     pub late_favourite_min_sustain_secs: f32,
@@ -210,6 +211,7 @@ pub struct BonereaperV2Config {
     pub late_favourite_max_model_risk: f32,
     pub late_favourite_min_model_side_p: f32,
     pub late_favourite_min_model_edge: f32,
+    pub late_favourite_high_cert_min_model_edge: f32,
     pub late_favourite_max_whipsaw_score: f32,
     pub late_favourite_max_reversal_pressure: f32,
     pub late_favourite_min_path_efficiency: f32,
@@ -283,6 +285,7 @@ impl Default for BonereaperV2Config {
             late_favourite_high_cert_ask: 0.90,
             late_favourite_max_ask: 0.97,
             late_favourite_clip_frac: 1.00,
+            late_favourite_high_cert_clip_frac: 1.00,
             late_favourite_max_clips: 12,
             late_favourite_refresh_secs: 4.0,
             late_favourite_min_sustain_secs: 0.0,
@@ -297,6 +300,7 @@ impl Default for BonereaperV2Config {
             // side probability/confidence/risk, and require a smaller positive
             // edge for the high-cert ladder.
             late_favourite_min_model_edge: 0.00,
+            late_favourite_high_cert_min_model_edge: 0.00,
             late_favourite_max_whipsaw_score: 0.75,
             late_favourite_max_reversal_pressure: 1.0,
             late_favourite_min_path_efficiency: 0.0,
@@ -1039,6 +1043,11 @@ impl Strategy for BonereaperV2 {
                     {
                         self.gate_stats.late_favourite_model_direction_fail += 1;
                     } else {
+                        let min_model_edge = if high_cert_favourite {
+                            self.cfg.late_favourite_high_cert_min_model_edge
+                        } else {
+                            self.cfg.late_favourite_min_model_edge
+                        };
                         let model_support = self.model_support_for_side(
                             ctx,
                             side,
@@ -1046,7 +1055,7 @@ impl Strategy for BonereaperV2 {
                             self.cfg.late_favourite_max_model_risk,
                             self.cfg.late_favourite_min_model_side_p,
                             px as f32,
-                            self.cfg.late_favourite_min_model_edge,
+                            min_model_edge,
                         );
                         if !model_support.is_supported() {
                             bump_model_fail(
@@ -1064,8 +1073,12 @@ impl Strategy for BonereaperV2 {
                                 .min(self.cfg.late_favourite_sweep_depth.max(1))
                                 .min(remaining_clips.max(1));
                             let price_taper = late_favourite_high_cert_price_taper(px);
-                            let clip =
-                                self.cfg.max_clip_usdc * self.cfg.late_favourite_clip_frac as f64;
+                            let clip_frac = if high_cert_favourite {
+                                self.cfg.late_favourite_high_cert_clip_frac
+                            } else {
+                                self.cfg.late_favourite_clip_frac
+                            };
+                            let clip = self.cfg.max_clip_usdc * clip_frac as f64;
                             let desired_notional = clip * levels as f64 * price_taper;
                             let shares = shares_capped(desired_notional, px);
                             if shares > 0.0 {
@@ -1077,7 +1090,7 @@ impl Strategy for BonereaperV2 {
                                         ctx,
                                         side,
                                         self.cfg.late_favourite_max_ask,
-                                        self.cfg.late_favourite_min_model_edge,
+                                        min_model_edge,
                                     )),
                                     tag: "br2_late_favourite_load",
                                 });

@@ -354,6 +354,9 @@ enum Cmd {
         /// Bonereaper v2 late-favourite clip multiplier.
         #[arg(long, default_value = "1.00")]
         br2_late_favourite_clip_frac: f32,
+        /// Bonereaper v2 late-favourite clip multiplier once ask is >= high-cert threshold.
+        #[arg(long, default_value = "1.00")]
+        br2_late_favourite_high_cert_clip_frac: f32,
         /// Bonereaper v2 maximum late-favourite load clips.
         #[arg(long, default_value = "12")]
         br2_late_favourite_max_clips: usize,
@@ -378,6 +381,9 @@ enum Cmd {
         /// Bonereaper v2 minimum ML probability edge over entry price for late-favourite loads.
         #[arg(long, default_value = "0.00")]
         br2_late_favourite_min_model_edge: f32,
+        /// Bonereaper v2 minimum ML edge over entry price once ask is >= high-cert threshold.
+        #[arg(long, default_value = "0.00")]
+        br2_late_favourite_high_cert_min_model_edge: f32,
         /// Bonereaper v2 maximum continuous whipsaw score for late-favourite loads.
         #[arg(long, default_value = "0.75")]
         br2_late_favourite_max_whipsaw_score: f32,
@@ -855,6 +861,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_min_ask,
             br2_late_favourite_max_ask,
             br2_late_favourite_clip_frac,
+            br2_late_favourite_high_cert_clip_frac,
             br2_late_favourite_max_clips,
             br2_late_favourite_min_sustain_secs,
             br2_late_favourite_sweep_depth,
@@ -863,6 +870,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_max_model_risk,
             br2_late_favourite_min_model_side_p,
             br2_late_favourite_min_model_edge,
+            br2_late_favourite_high_cert_min_model_edge,
             br2_late_favourite_max_whipsaw_score,
             br2_late_favourite_max_reversal_pressure,
             br2_late_favourite_min_path_efficiency,
@@ -945,6 +953,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_min_ask,
                 br2_late_favourite_max_ask,
                 br2_late_favourite_clip_frac,
+                br2_late_favourite_high_cert_clip_frac,
                 br2_late_favourite_max_clips,
                 br2_late_favourite_min_sustain_secs,
                 br2_late_favourite_sweep_depth,
@@ -953,6 +962,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_max_model_risk,
                 br2_late_favourite_min_model_side_p,
                 br2_late_favourite_min_model_edge,
+                br2_late_favourite_high_cert_min_model_edge,
                 br2_late_favourite_max_whipsaw_score,
                 br2_late_favourite_max_reversal_pressure,
                 br2_late_favourite_min_path_efficiency,
@@ -1481,6 +1491,7 @@ async fn walk_forward(
     br2_late_favourite_min_ask: f32,
     br2_late_favourite_max_ask: f32,
     br2_late_favourite_clip_frac: f32,
+    br2_late_favourite_high_cert_clip_frac: f32,
     br2_late_favourite_max_clips: usize,
     br2_late_favourite_min_sustain_secs: f32,
     br2_late_favourite_sweep_depth: usize,
@@ -1489,6 +1500,7 @@ async fn walk_forward(
     br2_late_favourite_max_model_risk: f32,
     br2_late_favourite_min_model_side_p: f32,
     br2_late_favourite_min_model_edge: f32,
+    br2_late_favourite_high_cert_min_model_edge: f32,
     br2_late_favourite_max_whipsaw_score: f32,
     br2_late_favourite_max_reversal_pressure: f32,
     br2_late_favourite_min_path_efficiency: f32,
@@ -1609,6 +1621,7 @@ async fn walk_forward(
         br2_late_favourite_min_ask,
         br2_late_favourite_max_ask,
         br2_late_favourite_clip_frac,
+        br2_late_favourite_high_cert_clip_frac,
         br2_late_favourite_max_clips,
         br2_late_favourite_min_sustain_secs,
         br2_late_favourite_sweep_depth,
@@ -1617,6 +1630,7 @@ async fn walk_forward(
         br2_late_favourite_max_model_risk,
         br2_late_favourite_min_model_side_p,
         br2_late_favourite_min_model_edge,
+        br2_late_favourite_high_cert_min_model_edge,
         br2_late_favourite_max_whipsaw_score,
         br2_late_favourite_max_reversal_pressure,
         br2_late_favourite_min_path_efficiency,
