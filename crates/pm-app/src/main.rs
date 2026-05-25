@@ -393,6 +393,9 @@ enum Cmd {
         /// Bonereaper v2 minimum ML edge over entry price once ask is >= high-cert threshold.
         #[arg(long, default_value = "0.00")]
         br2_late_favourite_high_cert_min_model_edge: f32,
+        /// Let high-cert favourite loads use par-discount logic instead of requiring calibrated_p >= entry price.
+        #[arg(long, default_value_t = false)]
+        br2_late_favourite_high_cert_bypass_model_edge: bool,
         /// Bonereaper v2 maximum continuous whipsaw score for late-favourite loads.
         #[arg(long, default_value = "0.75")]
         br2_late_favourite_max_whipsaw_score: f32,
@@ -886,6 +889,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_min_model_side_p,
             br2_late_favourite_min_model_edge,
             br2_late_favourite_high_cert_min_model_edge,
+            br2_late_favourite_high_cert_bypass_model_edge,
             br2_late_favourite_max_whipsaw_score,
             br2_late_favourite_max_reversal_pressure,
             br2_late_favourite_min_path_efficiency,
@@ -982,6 +986,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_min_model_side_p,
                 br2_late_favourite_min_model_edge,
                 br2_late_favourite_high_cert_min_model_edge,
+                br2_late_favourite_high_cert_bypass_model_edge,
                 br2_late_favourite_max_whipsaw_score,
                 br2_late_favourite_max_reversal_pressure,
                 br2_late_favourite_min_path_efficiency,
@@ -1524,6 +1529,7 @@ async fn walk_forward(
     br2_late_favourite_min_model_side_p: f32,
     br2_late_favourite_min_model_edge: f32,
     br2_late_favourite_high_cert_min_model_edge: f32,
+    br2_late_favourite_high_cert_bypass_model_edge: bool,
     br2_late_favourite_max_whipsaw_score: f32,
     br2_late_favourite_max_reversal_pressure: f32,
     br2_late_favourite_min_path_efficiency: f32,
@@ -1658,6 +1664,7 @@ async fn walk_forward(
         br2_late_favourite_min_model_side_p,
         br2_late_favourite_min_model_edge,
         br2_late_favourite_high_cert_min_model_edge,
+        br2_late_favourite_high_cert_bypass_model_edge,
         br2_late_favourite_max_whipsaw_score,
         br2_late_favourite_max_reversal_pressure,
         br2_late_favourite_min_path_efficiency,

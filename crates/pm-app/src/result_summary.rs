@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use pm_strategy::bonereaper_v2::BonereaperV2GateStats;
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +32,25 @@ pub struct ResultSummary {
     pub best_market_slug: Option<String>,
     pub best_market_pnl_usdc: f64,
     pub by_fill_tag: HashMap<String, FillTagSummary>,
+    pub by_day: Vec<DailyResultSummary>,
     pub bonereaper_v2_gate_stats: Option<BonereaperV2GateStats>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyResultSummary {
+    pub day: String,
+    pub markets: usize,
+    pub first_start_equity_usdc: f64,
+    pub last_end_equity_usdc: f64,
+    pub pnl_usdc: f64,
+    pub return_pct: f64,
+    pub max_drawdown_pct: f64,
+    pub orders_filled: usize,
+    pub markets_with_fills: usize,
+    pub winning_markets: usize,
+    pub losing_markets: usize,
+    pub worst_market_slug: Option<String>,
+    pub worst_market_pnl_usdc: f64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -139,6 +158,8 @@ impl FillTagAccumulator {
 #[derive(Debug, Deserialize)]
 struct MarketResultRow {
     slug: String,
+    #[serde(default)]
+    close_ts: Option<i64>,
     per_strategy: HashMap<String, StrategyResultRow>,
 }
 
@@ -182,6 +203,82 @@ struct FillRow {
     regime_realized_vol_180s_bps: Option<f64>,
 }
 
+#[derive(Debug, Default)]
+struct DailyAccumulator {
+    markets: usize,
+    first_start_equity: Option<f64>,
+    last_end_equity: f64,
+    peak_equity: f64,
+    max_drawdown: f64,
+    pnl: f64,
+    orders_filled: usize,
+    markets_with_fills: usize,
+    winning_markets: usize,
+    losing_markets: usize,
+    worst_market_slug: Option<String>,
+    worst_market_pnl: f64,
+}
+
+impl DailyAccumulator {
+    fn push(&mut self, slug: &str, strategy_row: &StrategyResultRow) {
+        self.markets += 1;
+        self.first_start_equity
+            .get_or_insert(strategy_row.start_equity_usdc);
+        self.last_end_equity = strategy_row.end_equity_usdc;
+        self.peak_equity = self.peak_equity.max(strategy_row.end_equity_usdc);
+        if self.peak_equity > 0.0 {
+            self.max_drawdown = self
+                .max_drawdown
+                .max((self.peak_equity - strategy_row.end_equity_usdc) / self.peak_equity);
+        }
+        self.pnl += strategy_row.pnl_usdc;
+        self.orders_filled += strategy_row.orders_filled;
+        if strategy_row.orders_filled > 0 {
+            self.markets_with_fills += 1;
+        }
+        if strategy_row.pnl_usdc > 0.0 {
+            self.winning_markets += 1;
+        } else if strategy_row.pnl_usdc < 0.0 {
+            self.losing_markets += 1;
+        }
+        if strategy_row.pnl_usdc < self.worst_market_pnl {
+            self.worst_market_pnl = strategy_row.pnl_usdc;
+            self.worst_market_slug = Some(slug.to_string());
+        }
+    }
+
+    fn into_summary(self, day: String) -> DailyResultSummary {
+        let first_start_equity = self.first_start_equity.unwrap_or(0.0);
+        let return_pct = if first_start_equity > 0.0 {
+            (self.last_end_equity / first_start_equity - 1.0) * 100.0
+        } else {
+            0.0
+        };
+        DailyResultSummary {
+            day,
+            markets: self.markets,
+            first_start_equity_usdc: first_start_equity,
+            last_end_equity_usdc: self.last_end_equity,
+            pnl_usdc: self.pnl,
+            return_pct,
+            max_drawdown_pct: self.max_drawdown * 100.0,
+            orders_filled: self.orders_filled,
+            markets_with_fills: self.markets_with_fills,
+            winning_markets: self.winning_markets,
+            losing_markets: self.losing_markets,
+            worst_market_slug: self.worst_market_slug,
+            worst_market_pnl_usdc: self.worst_market_pnl,
+        }
+    }
+}
+
+fn close_day_key(close_ts: Option<i64>, market_index: usize) -> String {
+    close_ts
+        .and_then(|ts| DateTime::<Utc>::from_timestamp(ts, 0))
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| format!("day_{:04}", market_index / MARKETS_PER_DAY as usize + 1))
+}
+
 pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSummary> {
     let file = File::open(path).with_context(|| format!("open {}", path.display()))?;
     let reader = BufReader::new(file);
@@ -202,6 +299,7 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
     let mut best_market_slug = None::<String>;
     let mut best_market_pnl = 0.0f64;
     let mut tag_acc: HashMap<String, FillTagAccumulator> = HashMap::new();
+    let mut day_acc: BTreeMap<String, DailyAccumulator> = BTreeMap::new();
     let mut bonereaper_v2_gate_stats = None::<BonereaperV2GateStats>;
 
     for (line_no, line) in reader.lines().enumerate() {
@@ -214,6 +312,12 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
         let Some(strategy_row) = row.per_strategy.get(strategy) else {
             continue;
         };
+
+        let day_key = close_day_key(row.close_ts, markets);
+        day_acc
+            .entry(day_key)
+            .or_default()
+            .push(&row.slug, strategy_row);
 
         markets += 1;
         first_start_equity.get_or_insert(strategy_row.start_equity_usdc);
@@ -279,6 +383,10 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
         .into_iter()
         .map(|(tag, acc)| (tag, acc.into_summary()))
         .collect();
+    let by_day = day_acc
+        .into_iter()
+        .map(|(day, acc)| acc.into_summary(day))
+        .collect();
 
     Ok(ResultSummary {
         strategy: strategy.to_string(),
@@ -301,6 +409,7 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
         best_market_slug,
         best_market_pnl_usdc: best_market_pnl,
         by_fill_tag,
+        by_day,
         bonereaper_v2_gate_stats,
     })
 }
@@ -396,6 +505,23 @@ pub fn print_result_summary(summary: &ResultSummary) {
             stats.late_favourite_entry_pullback_fail,
             stats.late_favourite_avg_entry_drawdown_fail
         );
+    }
+    if !summary.by_day.is_empty() {
+        println!("daily slices:");
+        for day in &summary.by_day {
+            println!(
+                "  {} markets={:<4} pnl={:+.2} ret={:+.2}% dd={:.2}% fills={} W/L={}/{} worst={:+.2}",
+                day.day,
+                day.markets,
+                day.pnl_usdc,
+                day.return_pct,
+                day.max_drawdown_pct,
+                day.orders_filled,
+                day.winning_markets,
+                day.losing_markets,
+                day.worst_market_pnl_usdc
+            );
+        }
     }
 }
 

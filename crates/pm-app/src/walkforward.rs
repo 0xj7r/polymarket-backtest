@@ -162,6 +162,7 @@ pub struct WalkForwardConfig {
     pub br2_late_favourite_min_model_side_p: f32,
     pub br2_late_favourite_min_model_edge: f32,
     pub br2_late_favourite_high_cert_min_model_edge: f32,
+    pub br2_late_favourite_high_cert_bypass_model_edge: bool,
     pub br2_late_favourite_max_whipsaw_score: f32,
     pub br2_late_favourite_max_reversal_pressure: f32,
     pub br2_late_favourite_min_path_efficiency: f32,
@@ -290,6 +291,7 @@ impl Default for WalkForwardConfig {
             br2_late_favourite_min_model_side_p: 0.62,
             br2_late_favourite_min_model_edge: 0.00,
             br2_late_favourite_high_cert_min_model_edge: 0.00,
+            br2_late_favourite_high_cert_bypass_model_edge: false,
             br2_late_favourite_max_whipsaw_score: 0.75,
             br2_late_favourite_max_reversal_pressure: 1.0,
             br2_late_favourite_min_path_efficiency: 0.0,
@@ -438,6 +440,7 @@ pub struct SummaryRunConfig {
     pub br2_late_favourite_min_model_side_p: f32,
     pub br2_late_favourite_min_model_edge: f32,
     pub br2_late_favourite_high_cert_min_model_edge: f32,
+    pub br2_late_favourite_high_cert_bypass_model_edge: bool,
     pub br2_late_favourite_max_whipsaw_score: f32,
     pub br2_late_favourite_max_reversal_pressure: f32,
     pub br2_late_favourite_min_path_efficiency: f32,
@@ -2430,6 +2433,8 @@ fn run_one_strategy(
                 late_favourite_min_model_edge: cfg.br2_late_favourite_min_model_edge,
                 late_favourite_high_cert_min_model_edge: cfg
                     .br2_late_favourite_high_cert_min_model_edge,
+                late_favourite_high_cert_bypass_model_edge: cfg
+                    .br2_late_favourite_high_cert_bypass_model_edge,
                 late_favourite_max_whipsaw_score: cfg.br2_late_favourite_max_whipsaw_score,
                 late_favourite_max_reversal_pressure: cfg.br2_late_favourite_max_reversal_pressure,
                 late_favourite_min_path_efficiency: cfg.br2_late_favourite_min_path_efficiency,
@@ -3098,6 +3103,8 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_late_favourite_min_model_edge: cfg.br2_late_favourite_min_model_edge,
         br2_late_favourite_high_cert_min_model_edge: cfg
             .br2_late_favourite_high_cert_min_model_edge,
+        br2_late_favourite_high_cert_bypass_model_edge: cfg
+            .br2_late_favourite_high_cert_bypass_model_edge,
         br2_late_favourite_max_whipsaw_score: cfg.br2_late_favourite_max_whipsaw_score,
         br2_late_favourite_max_reversal_pressure: cfg.br2_late_favourite_max_reversal_pressure,
         br2_late_favourite_min_path_efficiency: cfg.br2_late_favourite_min_path_efficiency,

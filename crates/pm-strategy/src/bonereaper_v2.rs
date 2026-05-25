@@ -213,6 +213,11 @@ pub struct BonereaperV2Config {
     pub late_favourite_min_model_side_p: f32,
     pub late_favourite_min_model_edge: f32,
     pub late_favourite_high_cert_min_model_edge: f32,
+    /// High-cert favourites are a par-discount trade, not a raw calibrated-p
+    /// edge trade. When enabled, still require model side/confidence/risk, but
+    /// do not require calibrated_p >= entry_px for asks above the high-cert
+    /// threshold.
+    pub late_favourite_high_cert_bypass_model_edge: bool,
     pub late_favourite_max_whipsaw_score: f32,
     pub late_favourite_max_reversal_pressure: f32,
     pub late_favourite_min_path_efficiency: f32,
@@ -304,6 +309,7 @@ impl Default for BonereaperV2Config {
             // edge for the high-cert ladder.
             late_favourite_min_model_edge: 0.00,
             late_favourite_high_cert_min_model_edge: 0.00,
+            late_favourite_high_cert_bypass_model_edge: false,
             late_favourite_max_whipsaw_score: 0.75,
             late_favourite_max_reversal_pressure: 1.0,
             late_favourite_min_path_efficiency: 0.0,
@@ -1085,6 +1091,8 @@ impl Strategy for BonereaperV2 {
                         } else {
                             self.cfg.late_favourite_min_model_edge
                         };
+                        let bypass_high_cert_edge = high_cert_favourite
+                            && self.cfg.late_favourite_high_cert_bypass_model_edge;
                         let model_support = self.model_support_for_side(
                             ctx,
                             side,
@@ -1092,7 +1100,11 @@ impl Strategy for BonereaperV2 {
                             self.cfg.late_favourite_max_model_risk,
                             self.cfg.late_favourite_min_model_side_p,
                             px as f32,
-                            min_model_edge,
+                            if bypass_high_cert_edge {
+                                -1.0
+                            } else {
+                                min_model_edge
+                            },
                         );
                         if !model_support.is_supported() {
                             bump_model_fail(
@@ -1116,15 +1128,20 @@ impl Strategy for BonereaperV2 {
                                 self.cfg.late_favourite_clip_frac
                             };
                             let edge_taper = if high_cert_favourite {
-                                model_side_probability(ctx, side)
-                                    .map(|side_p| {
-                                        late_favourite_high_cert_edge_taper(
-                                            side_p - px as f32,
-                                            min_model_edge,
-                                            self.cfg.late_favourite_high_cert_full_clip_edge,
-                                        )
-                                    })
-                                    .unwrap_or(0.0)
+                                if bypass_high_cert_edge {
+                                    1.0
+                                } else {
+                                    model_side_probability(ctx, side)
+                                        .map(|side_p| {
+                                            late_favourite_high_cert_edge_taper(
+                                                side_p - px as f32,
+                                                min_model_edge,
+                                                self.cfg
+                                                    .late_favourite_high_cert_full_clip_edge,
+                                            )
+                                        })
+                                        .unwrap_or(0.0)
+                                }
                             } else {
                                 1.0
                             };
@@ -1136,12 +1153,16 @@ impl Strategy for BonereaperV2 {
                                     side,
                                     shares,
                                     max_depth: levels,
-                                    limit_price: Some(model_limited_buy_price(
-                                        ctx,
-                                        side,
-                                        self.cfg.late_favourite_max_ask,
-                                        min_model_edge,
-                                    )),
+                                    limit_price: Some(if bypass_high_cert_edge {
+                                        self.cfg.late_favourite_max_ask
+                                    } else {
+                                        model_limited_buy_price(
+                                            ctx,
+                                            side,
+                                            self.cfg.late_favourite_max_ask,
+                                            min_model_edge,
+                                        )
+                                    }),
                                     tag: "br2_late_favourite_load",
                                 });
                                 self.late_favourite_clips += levels;
