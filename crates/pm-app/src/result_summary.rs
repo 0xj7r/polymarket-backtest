@@ -286,13 +286,14 @@ pub fn print_result_summary(summary: &ResultSummary) {
             stats.late_favourite_whipsaw_fail
         );
         println!(
-            "  model_conf_fail={} model_risk_fail={} model_side_p_fail={} reversal_fail={} path_eff_fail={} adverse_mom_fail={}",
+            "  model_conf_fail={} model_risk_fail={} model_side_p_fail={} reversal_fail={} path_eff_fail={} adverse_mom_fail={} pullback_fail={}",
             stats.late_favourite_model_confidence_fail,
             stats.late_favourite_model_risk_fail,
             stats.late_favourite_model_side_p_fail,
             stats.late_favourite_reversal_pressure_fail,
             stats.late_favourite_path_efficiency_fail,
-            stats.late_favourite_adverse_momentum_fail
+            stats.late_favourite_adverse_momentum_fail,
+            stats.late_favourite_entry_pullback_fail
         );
     }
 }

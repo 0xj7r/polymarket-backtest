@@ -381,6 +381,9 @@ enum Cmd {
         /// Bonereaper v2 maximum fast BTC momentum allowed against the late favourite direction.
         #[arg(long, default_value = "1.0")]
         br2_late_favourite_max_adverse_fast_momentum: f32,
+        /// Bonereaper v2 maximum same-side late-favourite entry pullback from best prior entry price.
+        #[arg(long, default_value = "1.0")]
+        br2_late_favourite_max_entry_pullback: f32,
         /// Bonereaper v2 convex-tail clip multiplier.
         #[arg(long, default_value = "0.10")]
         br2_tail_clip_frac: f32,
@@ -825,6 +828,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_max_reversal_pressure,
             br2_late_favourite_min_path_efficiency,
             br2_late_favourite_max_adverse_fast_momentum,
+            br2_late_favourite_max_entry_pullback,
             br2_tail_clip_frac,
             br2_tail_max_clips,
             br2_tail_max_ask,
@@ -902,6 +906,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_max_reversal_pressure,
                 br2_late_favourite_min_path_efficiency,
                 br2_late_favourite_max_adverse_fast_momentum,
+                br2_late_favourite_max_entry_pullback,
                 br2_tail_clip_frac,
                 br2_tail_max_clips,
                 br2_tail_max_ask,
@@ -1425,6 +1430,7 @@ async fn walk_forward(
     br2_late_favourite_max_reversal_pressure: f32,
     br2_late_favourite_min_path_efficiency: f32,
     br2_late_favourite_max_adverse_fast_momentum: f32,
+    br2_late_favourite_max_entry_pullback: f32,
     br2_tail_clip_frac: f32,
     br2_tail_max_clips: usize,
     br2_tail_max_ask: f32,
@@ -1536,6 +1542,7 @@ async fn walk_forward(
         br2_late_favourite_max_reversal_pressure,
         br2_late_favourite_min_path_efficiency,
         br2_late_favourite_max_adverse_fast_momentum,
+        br2_late_favourite_max_entry_pullback,
         br2_tail_clip_frac,
         br2_tail_max_clips,
         br2_tail_max_ask,

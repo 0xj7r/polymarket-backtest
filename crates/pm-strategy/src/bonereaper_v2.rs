@@ -87,6 +87,7 @@ pub struct BonereaperV2GateStats {
     pub late_favourite_reversal_pressure_fail: u64,
     pub late_favourite_path_efficiency_fail: u64,
     pub late_favourite_adverse_momentum_fail: u64,
+    pub late_favourite_entry_pullback_fail: u64,
     pub late_favourite_shares_fail: u64,
     pub late_favourite_emits: u64,
 }
@@ -141,6 +142,7 @@ impl BonereaperV2GateStats {
         self.late_favourite_reversal_pressure_fail += other.late_favourite_reversal_pressure_fail;
         self.late_favourite_path_efficiency_fail += other.late_favourite_path_efficiency_fail;
         self.late_favourite_adverse_momentum_fail += other.late_favourite_adverse_momentum_fail;
+        self.late_favourite_entry_pullback_fail += other.late_favourite_entry_pullback_fail;
         self.late_favourite_shares_fail += other.late_favourite_shares_fail;
         self.late_favourite_emits += other.late_favourite_emits;
     }
@@ -205,6 +207,7 @@ pub struct BonereaperV2Config {
     pub late_favourite_max_reversal_pressure: f32,
     pub late_favourite_min_path_efficiency: f32,
     pub late_favourite_max_adverse_fast_momentum: f32,
+    pub late_favourite_max_entry_pullback: f32,
 
     // Convex tail ladder. Real Bonereaper buys the losing side in multiple
     // rungs as the book moves further away from the tail side; each rung is
@@ -291,6 +294,10 @@ impl Default for BonereaperV2Config {
             // small positive value (e.g. 0.04) to reject favourite loads when
             // the fast BTC impulse is actively moving against the favourite.
             late_favourite_max_adverse_fast_momentum: 1.0,
+            // Disabled by default. Set to a small price distance (e.g. 0.015)
+            // to stop adding to the same favourite after it rolls over from
+            // the best prior entry price.
+            late_favourite_max_entry_pullback: 1.0,
             // Tail ladder: cheap convex bets. Threshold raised to match the
             // skew level where a "cheap" side actually exists.
             // Paired late tails were negative in walk-forward attribution:
@@ -326,6 +333,7 @@ pub struct BonereaperV2 {
     late_favourite_side: Option<Side>,
     late_favourite_shares_emitted: f64,
     late_favourite_notional_emitted: f64,
+    late_favourite_peak_entry_px: f64,
     skew_high_first_ns: Option<i64>,
     skew_low_first_ns: Option<i64>,
     tail_clips: usize,
@@ -353,6 +361,7 @@ impl BonereaperV2 {
             late_favourite_side: None,
             late_favourite_shares_emitted: 0.0,
             late_favourite_notional_emitted: 0.0,
+            late_favourite_peak_entry_px: 0.0,
             skew_high_first_ns: None,
             skew_low_first_ns: None,
             tail_clips: 0,
@@ -948,6 +957,14 @@ impl Strategy for BonereaperV2 {
                     let adverse_fast_momentum = buy_side_sign(side) * spot_fast_mom
                         < -self.cfg.late_favourite_max_adverse_fast_momentum;
                     let px = buy_px(event, side);
+                    let entry_pullback = if self.cfg.late_favourite_max_entry_pullback < 1.0
+                        && self.late_favourite_side == Some(side)
+                        && self.late_favourite_peak_entry_px > 0.0
+                    {
+                        self.late_favourite_peak_entry_px - px
+                    } else {
+                        0.0
+                    };
                     let high_cert_favourite = px as f32 >= self.cfg.late_favourite_high_cert_ask;
                     if px <= 0.0
                         || px as f32 > self.cfg.late_favourite_max_ask
@@ -956,6 +973,8 @@ impl Strategy for BonereaperV2 {
                         self.gate_stats.late_favourite_price_fail += 1;
                     } else if adverse_fast_momentum {
                         self.gate_stats.late_favourite_adverse_momentum_fail += 1;
+                    } else if entry_pullback > self.cfg.late_favourite_max_entry_pullback as f64 {
+                        self.gate_stats.late_favourite_entry_pullback_fail += 1;
                     } else if !high_cert_favourite && !(composite_aligned || spot_aligned) {
                         self.gate_stats.late_favourite_alignment_fail += 1;
                     } else {
@@ -998,6 +1017,12 @@ impl Strategy for BonereaperV2 {
                                 });
                                 self.late_favourite_clips += levels;
                                 self.last_late_favourite_ns = event.ts_ns;
+                                if self.late_favourite_side != Some(side) {
+                                    self.late_favourite_peak_entry_px = px;
+                                } else {
+                                    self.late_favourite_peak_entry_px =
+                                        self.late_favourite_peak_entry_px.max(px);
+                                }
                                 self.late_favourite_side = Some(side);
                                 self.late_favourite_shares_emitted += shares;
                                 self.late_favourite_notional_emitted += shares * px;
@@ -1127,5 +1152,18 @@ mod tests {
     fn buy_side_sign_matches_resolution_direction() {
         assert_eq!(buy_side_sign(Side::BuyYes), 1.0);
         assert_eq!(buy_side_sign(Side::BuyNo), -1.0);
+    }
+
+    #[test]
+    fn gate_stats_accumulate_late_favourite_pullback_failures() {
+        let mut a = BonereaperV2GateStats {
+            late_favourite_entry_pullback_fail: 3,
+            ..BonereaperV2GateStats::default()
+        };
+        a.add_assign(BonereaperV2GateStats {
+            late_favourite_entry_pullback_fail: 5,
+            ..BonereaperV2GateStats::default()
+        });
+        assert_eq!(a.late_favourite_entry_pullback_fail, 8);
     }
 }
