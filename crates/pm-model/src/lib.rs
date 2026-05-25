@@ -35,8 +35,6 @@ const BETA_CALIBRATOR_COEFF_CLIP: f32 = 5.0;
 const ISOTONIC_MIN_SAMPLES: usize = 256;
 const ISOTONIC_SHRINKAGE: f32 = 500.0;
 const OBSERVED_RANGE_HIGH_CERT_RISK_WEIGHT: f32 = 0.35;
-const BTC_PATH_INEFFICIENCY_RISK_WEIGHT: f32 = 0.14;
-const BTC_WHIPSAW_RISK_WEIGHT: f32 = 0.08;
 
 pub const META_FEATURE_NAMES: [&str; META_FEATURES] = [
     "direction_score_side",
@@ -2320,8 +2318,6 @@ pub fn risk_score(
     let composite = (base
         + 0.10 * skew_penalty
         + OBSERVED_RANGE_HIGH_CERT_RISK_WEIGHT * range_high_cert_risk
-        + BTC_PATH_INEFFICIENCY_RISK_WEIGHT * btc_path_inefficiency_risk
-        + BTC_WHIPSAW_RISK_WEIGHT * btc_whipsaw_risk
         + volatility_weight * volatility_penalty
         + time_of_day_weight * 0.5 * time_of_day_penalty)
         .clamp(0.0, 1.0);
