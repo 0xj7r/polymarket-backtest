@@ -39,6 +39,101 @@ pub struct FillTagSummary {
     pub fills: usize,
     pub total_notional_usdc: f64,
     pub avg_fill_price: f64,
+    pub avg_side_edge_vs_fill: f64,
+    pub avg_regime_whipsaw_score: f64,
+    pub avg_regime_path_efficiency: f64,
+    pub avg_regime_reversal_pressure: f64,
+    pub avg_regime_sign_flip_rate: f64,
+    pub avg_regime_realized_vol_180s_bps: f64,
+}
+
+#[derive(Debug, Default)]
+struct FillTagAccumulator {
+    fills: usize,
+    total_notional_usdc: f64,
+    sum_fill_price: f64,
+    sum_side_edge_vs_fill: f64,
+    side_edge_samples: usize,
+    sum_regime_whipsaw_score: f64,
+    sum_regime_path_efficiency: f64,
+    sum_regime_reversal_pressure: f64,
+    sum_regime_sign_flip_rate: f64,
+    sum_regime_realized_vol_180s_bps: f64,
+    regime_samples: usize,
+}
+
+impl FillTagAccumulator {
+    fn push(&mut self, fill: &FillRow) {
+        self.fills += 1;
+        self.total_notional_usdc += fill.notional;
+        self.sum_fill_price += fill.price;
+        if let Some(edge) = fill.side_edge_vs_fill {
+            self.sum_side_edge_vs_fill += edge;
+            self.side_edge_samples += 1;
+        }
+        if let (
+            Some(whipsaw),
+            Some(path_efficiency),
+            Some(reversal_pressure),
+            Some(sign_flip_rate),
+            Some(realized_vol),
+        ) = (
+            fill.regime_whipsaw_score,
+            fill.regime_path_efficiency,
+            fill.regime_reversal_pressure,
+            fill.regime_sign_flip_rate,
+            fill.regime_realized_vol_180s_bps,
+        ) {
+            self.sum_regime_whipsaw_score += whipsaw;
+            self.sum_regime_path_efficiency += path_efficiency;
+            self.sum_regime_reversal_pressure += reversal_pressure;
+            self.sum_regime_sign_flip_rate += sign_flip_rate;
+            self.sum_regime_realized_vol_180s_bps += realized_vol;
+            self.regime_samples += 1;
+        }
+    }
+
+    fn into_summary(self) -> FillTagSummary {
+        FillTagSummary {
+            fills: self.fills,
+            total_notional_usdc: self.total_notional_usdc,
+            avg_fill_price: if self.fills > 0 {
+                self.sum_fill_price / self.fills as f64
+            } else {
+                0.0
+            },
+            avg_side_edge_vs_fill: if self.side_edge_samples > 0 {
+                self.sum_side_edge_vs_fill / self.side_edge_samples as f64
+            } else {
+                0.0
+            },
+            avg_regime_whipsaw_score: if self.regime_samples > 0 {
+                self.sum_regime_whipsaw_score / self.regime_samples as f64
+            } else {
+                0.0
+            },
+            avg_regime_path_efficiency: if self.regime_samples > 0 {
+                self.sum_regime_path_efficiency / self.regime_samples as f64
+            } else {
+                0.0
+            },
+            avg_regime_reversal_pressure: if self.regime_samples > 0 {
+                self.sum_regime_reversal_pressure / self.regime_samples as f64
+            } else {
+                0.0
+            },
+            avg_regime_sign_flip_rate: if self.regime_samples > 0 {
+                self.sum_regime_sign_flip_rate / self.regime_samples as f64
+            } else {
+                0.0
+            },
+            avg_regime_realized_vol_180s_bps: if self.regime_samples > 0 {
+                self.sum_regime_realized_vol_180s_bps / self.regime_samples as f64
+            } else {
+                0.0
+            },
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +168,18 @@ struct FillRow {
     notional: f64,
     #[serde(default)]
     tag: String,
+    #[serde(default)]
+    side_edge_vs_fill: Option<f64>,
+    #[serde(default)]
+    regime_whipsaw_score: Option<f64>,
+    #[serde(default)]
+    regime_path_efficiency: Option<f64>,
+    #[serde(default)]
+    regime_reversal_pressure: Option<f64>,
+    #[serde(default)]
+    regime_sign_flip_rate: Option<f64>,
+    #[serde(default)]
+    regime_realized_vol_180s_bps: Option<f64>,
 }
 
 pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSummary> {
@@ -94,7 +201,7 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
     let mut worst_market_pnl = 0.0f64;
     let mut best_market_slug = None::<String>;
     let mut best_market_pnl = 0.0f64;
-    let mut tag_acc: HashMap<String, (usize, f64, f64)> = HashMap::new();
+    let mut tag_acc: HashMap<String, FillTagAccumulator> = HashMap::new();
     let mut bonereaper_v2_gate_stats = None::<BonereaperV2GateStats>;
 
     for (line_no, line) in reader.lines().enumerate() {
@@ -141,10 +248,7 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
             } else {
                 fill.tag.clone()
             };
-            let entry = tag_acc.entry(tag).or_insert((0, 0.0, 0.0));
-            entry.0 += 1;
-            entry.1 += fill.notional;
-            entry.2 += fill.price;
+            tag_acc.entry(tag).or_default().push(fill);
         }
         if let Some(stats) = strategy_row.bonereaper_v2_gate_stats {
             bonereaper_v2_gate_stats
@@ -173,20 +277,7 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
     };
     let by_fill_tag = tag_acc
         .into_iter()
-        .map(|(tag, (fills, total_notional, sum_price))| {
-            (
-                tag,
-                FillTagSummary {
-                    fills,
-                    total_notional_usdc: total_notional,
-                    avg_fill_price: if fills > 0 {
-                        sum_price / fills as f64
-                    } else {
-                        0.0
-                    },
-                },
-            )
-        })
+        .map(|(tag, acc)| (tag, acc.into_summary()))
         .collect();
 
     Ok(ResultSummary {
@@ -269,8 +360,15 @@ pub fn print_result_summary(summary: &ResultSummary) {
         tags.sort_by(|a, b| a.0.cmp(b.0));
         for (tag, agg) in tags {
             println!(
-                "  {:28} fills={:<6} notional={:.2} avg_px={:.4}",
-                tag, agg.fills, agg.total_notional_usdc, agg.avg_fill_price
+                "  {:28} fills={:<6} notional={:.2} avg_px={:.4} edge_fill={:+.4} whip={:.3} path={:.3} rev={:.3}",
+                tag,
+                agg.fills,
+                agg.total_notional_usdc,
+                agg.avg_fill_price,
+                agg.avg_side_edge_vs_fill,
+                agg.avg_regime_whipsaw_score,
+                agg.avg_regime_path_efficiency,
+                agg.avg_regime_reversal_pressure
             );
         }
     }

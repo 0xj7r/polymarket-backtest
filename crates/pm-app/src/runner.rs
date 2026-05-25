@@ -25,6 +25,7 @@ use pm_model::{
     OnlineMetaCalibratorSnapshot, edge_vs_mid,
 };
 use pm_risk::{PortfolioLimits, PortfolioSnapshot, PortfolioState};
+use pm_strategy::regime::WhipsawRiskSnapshot;
 use pm_strategy::{Ctx, OrderRequest, Side, Strategy};
 use pm_types::{ReplayEvent, SpotHistory, TradeHistory};
 use serde::{Deserialize, Serialize};
@@ -67,6 +68,16 @@ pub struct Fill {
     pub seconds_since_open: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seconds_to_close: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regime_whipsaw_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regime_path_efficiency: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regime_reversal_pressure: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regime_sign_flip_rate: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regime_realized_vol_180s_bps: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -82,6 +93,11 @@ struct FillModelContext {
     risk_score: f32,
     seconds_since_open: f32,
     seconds_to_close: f32,
+    regime_whipsaw_score: f32,
+    regime_path_efficiency: f32,
+    regime_reversal_pressure: f32,
+    regime_sign_flip_rate: f32,
+    regime_realized_vol_180s_bps: f32,
 }
 
 impl FillModelContext {
@@ -91,6 +107,7 @@ impl FillModelContext {
         side: Side,
         seconds_since_open: f32,
         market_close_ns: i64,
+        whipsaw: WhipsawRiskSnapshot,
     ) -> Self {
         let yes_side = order_adds_yes_exposure(side);
         let side_market_mid = if yes_side {
@@ -116,6 +133,11 @@ impl FillModelContext {
             risk_score: model_output.risk_score,
             seconds_since_open,
             seconds_to_close: ((market_close_ns - event.ts_ns).max(0) as f32) / 1e9,
+            regime_whipsaw_score: whipsaw.score,
+            regime_path_efficiency: whipsaw.path_efficiency,
+            regime_reversal_pressure: whipsaw.reversal_pressure,
+            regime_sign_flip_rate: whipsaw.sign_flip_rate,
+            regime_realized_vol_180s_bps: whipsaw.realized_vol_180s_bps,
         }
     }
 }
@@ -455,6 +477,11 @@ pub fn run_backtest<S: Strategy>(
         let strategy_emitted_model_output = strategy_model_output.is_some();
         let model_output = strategy_model_output.unwrap_or(canonical_model_eval.output);
         let model_attribution = canonical_model_eval.attribution;
+        let whipsaw_snapshot = if spot.is_empty() {
+            WhipsawRiskSnapshot::default()
+        } else {
+            WhipsawRiskSnapshot::from_history(event.ts_ns, spot)
+        };
         let has_model_attribution = true;
         let edge = edge_vs_mid(&model_output, event.yes_mid);
         let direction_score = model_output.direction_score;
@@ -500,6 +527,7 @@ pub fn run_backtest<S: Strategy>(
                 req.side,
                 secs_since_open as f32,
                 cfg.market_close_ns,
+                whipsaw_snapshot,
             ));
             match req.limit_price {
                 None => {
@@ -1317,6 +1345,11 @@ fn check_resting_fills(
             risk_score: r.model_context.map(|m| m.risk_score),
             seconds_since_open: r.model_context.map(|m| m.seconds_since_open),
             seconds_to_close: r.model_context.map(|m| m.seconds_to_close),
+            regime_whipsaw_score: r.model_context.map(|m| m.regime_whipsaw_score),
+            regime_path_efficiency: r.model_context.map(|m| m.regime_path_efficiency),
+            regime_reversal_pressure: r.model_context.map(|m| m.regime_reversal_pressure),
+            regime_sign_flip_rate: r.model_context.map(|m| m.regime_sign_flip_rate),
+            regime_realized_vol_180s_bps: r.model_context.map(|m| m.regime_realized_vol_180s_bps),
         });
         let _ = r.submit_ts_ns;
         resting.swap_remove(i);
@@ -1528,6 +1561,11 @@ fn apply_taker_order(
         risk_score: model_context.map(|m| m.risk_score),
         seconds_since_open: model_context.map(|m| m.seconds_since_open),
         seconds_to_close: model_context.map(|m| m.seconds_to_close),
+        regime_whipsaw_score: model_context.map(|m| m.regime_whipsaw_score),
+        regime_path_efficiency: model_context.map(|m| m.regime_path_efficiency),
+        regime_reversal_pressure: model_context.map(|m| m.regime_reversal_pressure),
+        regime_sign_flip_rate: model_context.map(|m| m.regime_sign_flip_rate),
+        regime_realized_vol_180s_bps: model_context.map(|m| m.regime_realized_vol_180s_bps),
     });
 }
 
@@ -1807,7 +1845,14 @@ mod tests {
             calibrated_p: 0.88,
             risk_score: 0.20,
         };
-        let context = FillModelContext::from_event(&event, &model, req.side, 1.0, 301_000_000_000);
+        let context = FillModelContext::from_event(
+            &event,
+            &model,
+            req.side,
+            1.0,
+            301_000_000_000,
+            WhipsawRiskSnapshot::default(),
+        );
 
         let mut cash = 100.0;
         let mut yes = 0.0;
@@ -1855,7 +1900,14 @@ mod tests {
             calibrated_p: 0.91,
             risk_score: 0.18,
         };
-        let context = FillModelContext::from_event(&event, &model, req.side, 1.0, 301_000_000_000);
+        let context = FillModelContext::from_event(
+            &event,
+            &model,
+            req.side,
+            1.0,
+            301_000_000_000,
+            WhipsawRiskSnapshot::default(),
+        );
 
         let mut cash = 100.0;
         let mut yes = 0.0;

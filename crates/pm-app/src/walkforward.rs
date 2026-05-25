@@ -691,6 +691,118 @@ pub struct FillTagAggregate {
     pub mean_pnl_usdc: f64,
     pub avg_fill_price: f64,
     pub hit_rate: f64,
+    pub avg_side_edge_vs_fill: f64,
+    pub avg_regime_whipsaw_score: f64,
+    pub avg_regime_path_efficiency: f64,
+    pub avg_regime_reversal_pressure: f64,
+    pub avg_regime_sign_flip_rate: f64,
+    pub avg_regime_realized_vol_180s_bps: f64,
+}
+
+#[derive(Debug, Default)]
+struct FillTagAccumulator {
+    fills: usize,
+    wins: usize,
+    total_pnl_usdc: f64,
+    total_notional_usdc: f64,
+    sum_fill_price: f64,
+    sum_side_edge_vs_fill: f64,
+    side_edge_samples: usize,
+    sum_regime_whipsaw_score: f64,
+    sum_regime_path_efficiency: f64,
+    sum_regime_reversal_pressure: f64,
+    sum_regime_sign_flip_rate: f64,
+    sum_regime_realized_vol_180s_bps: f64,
+    regime_samples: usize,
+}
+
+impl FillTagAccumulator {
+    fn push(&mut self, fill: &crate::runner::Fill, pnl: f64) {
+        self.fills += 1;
+        self.total_pnl_usdc += pnl;
+        self.total_notional_usdc += fill.notional;
+        self.sum_fill_price += fill.price as f64;
+        if pnl > 0.0 {
+            self.wins += 1;
+        }
+        if let Some(edge) = fill.side_edge_vs_fill {
+            self.sum_side_edge_vs_fill += edge as f64;
+            self.side_edge_samples += 1;
+        }
+        if let (
+            Some(whipsaw),
+            Some(path_efficiency),
+            Some(reversal_pressure),
+            Some(sign_flip_rate),
+            Some(realized_vol),
+        ) = (
+            fill.regime_whipsaw_score,
+            fill.regime_path_efficiency,
+            fill.regime_reversal_pressure,
+            fill.regime_sign_flip_rate,
+            fill.regime_realized_vol_180s_bps,
+        ) {
+            self.sum_regime_whipsaw_score += whipsaw as f64;
+            self.sum_regime_path_efficiency += path_efficiency as f64;
+            self.sum_regime_reversal_pressure += reversal_pressure as f64;
+            self.sum_regime_sign_flip_rate += sign_flip_rate as f64;
+            self.sum_regime_realized_vol_180s_bps += realized_vol as f64;
+            self.regime_samples += 1;
+        }
+    }
+
+    fn into_aggregate(self) -> FillTagAggregate {
+        FillTagAggregate {
+            fills: self.fills,
+            total_notional_usdc: self.total_notional_usdc,
+            total_pnl_usdc: self.total_pnl_usdc,
+            mean_pnl_usdc: if self.fills > 0 {
+                self.total_pnl_usdc / self.fills as f64
+            } else {
+                0.0
+            },
+            avg_fill_price: if self.fills > 0 {
+                self.sum_fill_price / self.fills as f64
+            } else {
+                0.0
+            },
+            hit_rate: if self.fills > 0 {
+                self.wins as f64 / self.fills as f64
+            } else {
+                0.0
+            },
+            avg_side_edge_vs_fill: if self.side_edge_samples > 0 {
+                self.sum_side_edge_vs_fill / self.side_edge_samples as f64
+            } else {
+                0.0
+            },
+            avg_regime_whipsaw_score: if self.regime_samples > 0 {
+                self.sum_regime_whipsaw_score / self.regime_samples as f64
+            } else {
+                0.0
+            },
+            avg_regime_path_efficiency: if self.regime_samples > 0 {
+                self.sum_regime_path_efficiency / self.regime_samples as f64
+            } else {
+                0.0
+            },
+            avg_regime_reversal_pressure: if self.regime_samples > 0 {
+                self.sum_regime_reversal_pressure / self.regime_samples as f64
+            } else {
+                0.0
+            },
+            avg_regime_sign_flip_rate: if self.regime_samples > 0 {
+                self.sum_regime_sign_flip_rate / self.regime_samples as f64
+            } else {
+                0.0
+            },
+            avg_regime_realized_vol_180s_bps: if self.regime_samples > 0 {
+                self.sum_regime_realized_vol_180s_bps / self.regime_samples as f64
+            } else {
+                0.0
+            },
+        }
+    }
 }
 
 /// Per-market spot-history cache so we don't re-download the same Binance day.
@@ -2703,7 +2815,7 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
     let mut total_orders_rejected_model_gate_confidence = 0usize;
     let mut total_orders_rejected_model_gate_risk = 0usize;
     let mut total_orders_rejected_model_gate_edge = 0usize;
-    let mut tag_fills: HashMap<String, Vec<(f64, f64, f64)>> = HashMap::new();
+    let mut tag_fills: HashMap<String, FillTagAccumulator> = HashMap::new();
     let mut bonereaper_v2_gate_stats: Option<BonereaperV2GateStats> = None;
     let first_start_equity = records
         .first()
@@ -2731,11 +2843,10 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
         total_orders_rejected_model_gate_edge += r.orders_rejected_model_gate_edge;
         for fill in &r.fills_detail {
             let pnl = fill_resolution_pnl(fill, r.yes_resolved);
-            tag_fills.entry(fill.tag.clone()).or_default().push((
-                pnl,
-                fill.notional,
-                fill.price as f64,
-            ));
+            tag_fills
+                .entry(fill.tag.clone())
+                .or_default()
+                .push(fill, pnl);
         }
         if let Some(stats) = r.bonereaper_v2_gate_stats {
             bonereaper_v2_gate_stats
@@ -2784,36 +2895,7 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
     }
     let by_fill_tag = tag_fills
         .into_iter()
-        .map(|(tag, fills)| {
-            let count = fills.len();
-            let total_pnl = fills.iter().map(|(pnl, _, _)| *pnl).sum::<f64>();
-            let total_notional = fills.iter().map(|(_, notional, _)| *notional).sum::<f64>();
-            let avg_fill_price = if count > 0 {
-                fills.iter().map(|(_, _, price)| *price).sum::<f64>() / count as f64
-            } else {
-                0.0
-            };
-            let hit_rate = if count > 0 {
-                fills.iter().filter(|(pnl, _, _)| *pnl > 0.0).count() as f64 / count as f64
-            } else {
-                0.0
-            };
-            (
-                tag,
-                FillTagAggregate {
-                    fills: count,
-                    total_notional_usdc: total_notional,
-                    total_pnl_usdc: total_pnl,
-                    mean_pnl_usdc: if count > 0 {
-                        total_pnl / count as f64
-                    } else {
-                        0.0
-                    },
-                    avg_fill_price,
-                    hit_rate,
-                },
-            )
-        })
+        .map(|(tag, fills)| (tag, fills.into_aggregate()))
         .collect();
     StrategyAggregate {
         total_pnl_usdc: total,
