@@ -98,7 +98,8 @@ impl FillModelContext {
         } else {
             1.0 - event.yes_mid
         };
-        let side_model_p = if yes_side {
+        let predicted_yes = model_output.direction_score >= 0.0;
+        let side_model_p = if yes_side == predicted_yes {
             model_output.calibrated_p
         } else {
             1.0 - model_output.calibrated_p
@@ -1766,6 +1767,52 @@ mod tests {
         assert_eq!(fill.seconds_to_close, Some(300.0));
         assert!((fill.side_edge_vs_mid.unwrap() - (0.88 - event.yes_mid)).abs() < 1e-6);
         assert!((fill.side_edge_vs_fill.unwrap() - 0.08).abs() < 1e-6);
+    }
+
+    #[test]
+    fn taker_fill_records_predicted_no_side_probability() {
+        let event = evt(1_000_000_000, 0.19, 0.20, 10.0);
+        let req = OrderRequest {
+            side: Side::BuyNo,
+            shares: 2.0,
+            max_depth: 1,
+            limit_price: None,
+            tag: "ctx_no",
+        };
+        let model = ModelOutput {
+            direction_score: -0.5,
+            confidence_score: 0.82,
+            calibrated_p: 0.91,
+            risk_score: 0.18,
+        };
+        let context = FillModelContext::from_event(&event, &model, req.side, 1.0, 301_000_000_000);
+
+        let mut cash = 100.0;
+        let mut yes = 0.0;
+        let mut no = 0.0;
+        let mut portfolio = PortfolioState::new(100.0, PortfolioLimits::default());
+        let mut counters = StrategyCounters::default();
+        let mut fills = Vec::new();
+        apply_taker_order(
+            &event,
+            &req,
+            &mut cash,
+            &mut yes,
+            &mut no,
+            &mut portfolio,
+            &mut counters,
+            &mut fills,
+            0.0,
+            0.0,
+            Some(context),
+        );
+
+        let fill = fills.first().expect("expected fill");
+        assert_eq!(fill.side_model_p, Some(0.91));
+        assert_eq!(fill.calibrated_p, Some(0.91));
+        assert!((fill.price - 0.81).abs() < 1e-6);
+        assert!((fill.side_edge_vs_mid.unwrap() - (0.91 - (1.0 - event.yes_mid))).abs() < 1e-6);
+        assert!((fill.side_edge_vs_fill.unwrap() - 0.10).abs() < 1e-6);
     }
 
     #[test]
