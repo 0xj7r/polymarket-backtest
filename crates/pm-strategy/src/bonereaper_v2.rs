@@ -251,6 +251,10 @@ pub struct BonereaperV2Config {
     pub tail_refresh_secs: f32,
     pub tail_min_ask: f32,
     pub tail_max_ask: f32,
+    /// Minimum seconds remaining in the 5m window before opening a new
+    /// convex-tail rung. Default 0 preserves legacy behaviour; setting this
+    /// avoids paying for tails with almost no time left to reverse.
+    pub tail_min_seconds_to_close: f32,
     /// Minimum live-observed YES-mid range required before buying convex tail.
     /// Useful for avoiding steady favourite markets where tail bleed is most
     /// likely and reserving spend for reversal-prone expanded-range regimes.
@@ -360,6 +364,7 @@ impl Default for BonereaperV2Config {
             tail_refresh_secs: 5.0,
             tail_min_ask: 0.01,
             tail_max_ask: 0.10,
+            tail_min_seconds_to_close: 0.0,
             tail_min_observed_range: 0.0,
             tail_target_favourite_loss_coverage_frac: 0.0,
             tail_budget_favourite_spend_frac: 0.05,
@@ -537,6 +542,10 @@ fn late_favourite_high_cert_max_levels(favourite_ask: f64, base_levels: usize) -
 
 fn tail_observed_range_allowed(range: f32, min_range: f32) -> bool {
     range >= min_range.clamp(0.0, 1.0)
+}
+
+fn tail_seconds_to_close_allowed(seconds_to_close: f32, min_seconds_to_close: f32) -> bool {
+    seconds_to_close >= min_seconds_to_close.max(0.0)
 }
 
 fn range_throttle(range: f32, soft: f32, hard: f32) -> f32 {
@@ -905,10 +914,15 @@ impl Strategy for BonereaperV2 {
                                 Side::BuyNo => Side::BuyYes,
                                 _ => unreachable!(),
                             };
+                            let seconds_to_close = BETTING_WINDOW_SECS as f32 - secs_in;
                             let tail_px = buy_px(event, tail_side);
                             let tail_px32 = tail_px as f32;
                             if tail_px32 >= self.cfg.tail_min_ask
                                 && tail_px32 <= self.cfg.tail_max_ask
+                                && tail_seconds_to_close_allowed(
+                                    seconds_to_close,
+                                    self.cfg.tail_min_seconds_to_close,
+                                )
                             {
                                 let tail_clip =
                                     self.cfg.max_clip_usdc * self.cfg.paired_tail_clip_frac as f64;
@@ -1238,6 +1252,7 @@ impl Strategy for BonereaperV2 {
             && (event.ts_ns - self.last_tail_ns) as f64 / 1e9 > self.cfg.tail_refresh_secs as f64
         {
             let skew_mag = (event.yes_mid - 0.5).abs();
+            let seconds_to_close = BETTING_WINDOW_SECS as f32 - secs_in;
             let starting_fresh = self.tail_clips == 0;
             let advanced = skew_mag - self.last_tail_skew_mag >= self.cfg.tail_min_skew_step;
             if skew_mag >= self.cfg.tail_extreme_threshold
@@ -1246,6 +1261,10 @@ impl Strategy for BonereaperV2 {
                 && tail_observed_range_allowed(
                     ctx.market_yes_range_so_far,
                     self.cfg.tail_min_observed_range,
+                )
+                && tail_seconds_to_close_allowed(
+                    seconds_to_close,
+                    self.cfg.tail_min_seconds_to_close,
                 )
             {
                 let Some(favourite_side) = self.late_favourite_side else {
@@ -1455,5 +1474,13 @@ mod tests {
         assert!(!tail_observed_range_allowed(0.74, 0.75));
         assert!(tail_observed_range_allowed(0.75, 0.75));
         assert!(!tail_observed_range_allowed(0.95, 2.0));
+    }
+
+    #[test]
+    fn tail_seconds_to_close_gate_blocks_buzzer_tails() {
+        assert!(tail_seconds_to_close_allowed(9.9, 0.0));
+        assert!(!tail_seconds_to_close_allowed(9.9, 10.0));
+        assert!(tail_seconds_to_close_allowed(10.0, 10.0));
+        assert!(tail_seconds_to_close_allowed(0.0, -5.0));
     }
 }
