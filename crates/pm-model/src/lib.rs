@@ -13,7 +13,7 @@ const MOMENTUM_WINDOWS_SECONDS: [i64; 5] = [10, 30, 60, 120, 300];
 const MOMENTUM_WEIGHTS: [f32; 5] = [0.45, 0.25, 0.15, 0.10, 0.05];
 const SKEW_BINS: usize = 10;
 const HOUR_BINS: usize = 24;
-const META_FEATURES: usize = 60;
+const META_FEATURES: usize = 62;
 const META_CALIBRATOR_LR: f32 = 0.08;
 const META_CALIBRATOR_MIN_UPDATES: u32 = 12;
 const META_CALIBRATOR_WEIGHT_DECAY: f32 = 1.0e-3;
@@ -96,6 +96,8 @@ pub const META_FEATURE_NAMES: [&str; META_FEATURES] = [
     "final_120s_norm",
     "high_cert_side_price",
     "side_favourite_skew",
+    "observed_yes_range_so_far",
+    "observed_range_high_cert_interaction",
 ];
 
 /// Output contract expected by the 4-score engine.
@@ -603,6 +605,7 @@ impl MetaFeatures {
         book_imbalance: f32,
         market_mid: f32,
         side_probability_pre_meta: f32,
+        observed_yes_range_so_far: f32,
         seconds_since_window_open: f32,
     ) -> Self {
         let side = if direction_score >= 0.0 { 1.0 } else { -1.0 };
@@ -738,6 +741,14 @@ impl MetaFeatures {
         values[idx] = ((side_market_price - 0.85) / 0.15).clamp(0.0, 1.0);
         idx += 1;
         values[idx] = (2.0 * (side_market_price - 0.5)).clamp(-1.0, 1.0);
+        idx += 1;
+        let observed_range = observed_yes_range_so_far.clamp(0.0, 1.0);
+        values[idx] = observed_range;
+        idx += 1;
+        values[idx] =
+            (observed_range * ((side_market_price - 0.75) / 0.25).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+        idx += 1;
+        debug_assert_eq!(idx, META_FEATURES);
         Self { values }
     }
 }
@@ -1754,6 +1765,8 @@ pub struct ModelState {
     vol_state: VolatilityState,
     tod_table: TimeOfDayTable,
     last_event_ts_ns: i64,
+    market_mid_min: f32,
+    market_mid_max: f32,
     meta_calibrator: OnlineMetaCalibrator,
     dir_markov: DirectionMarkov,
     pending_meta_features: Option<PendingMetaTrainingSample>,
@@ -1783,6 +1796,8 @@ impl ModelState {
             vol_state: VolatilityState::default(),
             tod_table: TimeOfDayTable::default(),
             last_event_ts_ns: 0,
+            market_mid_min: f32::INFINITY,
+            market_mid_max: f32::NEG_INFINITY,
             meta_calibrator: OnlineMetaCalibrator::default(),
             dir_markov: DirectionMarkov::default(),
             pending_meta_features: None,
@@ -1821,6 +1836,8 @@ impl ModelState {
         self.recent_dir.clear();
         self.top3_imbalance.clear();
         self.dir_markov = DirectionMarkov::default();
+        self.market_mid_min = f32::INFINITY;
+        self.market_mid_max = f32::NEG_INFINITY;
         self.pending_meta_features = None;
     }
 
@@ -1861,6 +1878,14 @@ impl ModelState {
         self.last_event_ts_ns = event.ts_ns;
         self.vol_state.on_event(event);
         self.recent_mids.push(event.ts_ns, event.yes_mid);
+        self.market_mid_min = self.market_mid_min.min(event.yes_mid);
+        self.market_mid_max = self.market_mid_max.max(event.yes_mid);
+        let observed_yes_range_so_far =
+            if self.market_mid_min.is_finite() && self.market_mid_max.is_finite() {
+                self.market_mid_max - self.market_mid_min
+            } else {
+                0.0
+            };
 
         let book_imb3 = top_n_ofi(event, 3);
         self.top3_imbalance.push(event.ts_ns, book_imb3);
@@ -1938,6 +1963,7 @@ impl ModelState {
             book_imb3,
             event.yes_mid,
             side_p_pre_meta,
+            observed_yes_range_so_far,
             seconds_since_window_open,
         );
         self.pending_meta_features = Some(PendingMetaTrainingSample {
@@ -3071,16 +3097,19 @@ mod tests {
             0.0,
             0.20,
             0.86,
+            0.42,
             240.0,
         );
 
-        let side_price_idx = META_FEATURES - 6;
+        let side_price_idx = META_FEATURES - 8;
         assert!((features.values[side_price_idx] - 0.80).abs() < 1.0e-6);
         assert!((features.values[side_price_idx + 1] - 0.06).abs() < 1.0e-6);
         assert!((features.values[side_price_idx + 2] - 0.80).abs() < 1.0e-6);
         assert!((features.values[side_price_idx + 3] - 0.50).abs() < 1.0e-6);
         assert_eq!(features.values[side_price_idx + 4], 0.0);
         assert!((features.values[side_price_idx + 5] - 0.60).abs() < 1.0e-6);
+        assert!((features.values[side_price_idx + 6] - 0.42).abs() < 1.0e-6);
+        assert!((features.values[side_price_idx + 7] - 0.084).abs() < 1.0e-6);
     }
 
     #[test]
