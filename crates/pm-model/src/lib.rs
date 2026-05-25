@@ -13,7 +13,7 @@ const MOMENTUM_WINDOWS_SECONDS: [i64; 5] = [10, 30, 60, 120, 300];
 const MOMENTUM_WEIGHTS: [f32; 5] = [0.45, 0.25, 0.15, 0.10, 0.05];
 const SKEW_BINS: usize = 10;
 const HOUR_BINS: usize = 24;
-const META_FEATURES: usize = 62;
+const META_FEATURES: usize = 70;
 const META_CALIBRATOR_LR: f32 = 0.08;
 const META_CALIBRATOR_MIN_UPDATES: u32 = 12;
 const META_CALIBRATOR_WEIGHT_DECAY: f32 = 1.0e-3;
@@ -35,6 +35,8 @@ const BETA_CALIBRATOR_COEFF_CLIP: f32 = 5.0;
 const ISOTONIC_MIN_SAMPLES: usize = 256;
 const ISOTONIC_SHRINKAGE: f32 = 500.0;
 const OBSERVED_RANGE_HIGH_CERT_RISK_WEIGHT: f32 = 0.35;
+const BTC_PATH_INEFFICIENCY_RISK_WEIGHT: f32 = 0.14;
+const BTC_WHIPSAW_RISK_WEIGHT: f32 = 0.08;
 
 pub const META_FEATURE_NAMES: [&str; META_FEATURES] = [
     "direction_score_side",
@@ -99,6 +101,14 @@ pub const META_FEATURE_NAMES: [&str; META_FEATURES] = [
     "side_favourite_skew",
     "observed_yes_range_so_far",
     "observed_range_high_cert_interaction",
+    "btc_whipsaw_score",
+    "btc_path_efficiency",
+    "btc_path_inefficiency",
+    "btc_sign_flip_rate",
+    "btc_realized_vol_180s",
+    "btc_reversal_pressure",
+    "side_high_cert_path_inefficiency",
+    "side_high_cert_reversal_pressure",
 ];
 
 /// Output contract expected by the 4-score engine.
@@ -143,6 +153,7 @@ pub struct ModelAttribution {
     pub time_of_day_edge: f32,
     pub observed_yes_range_so_far: f32,
     pub observed_range_high_cert_interaction: f32,
+    pub spot_regime: SpotRegimeFeatures,
     pub meta_calibrator_updates: u32,
 }
 
@@ -164,6 +175,7 @@ impl Default for ModelAttribution {
             time_of_day_edge: 0.5,
             observed_yes_range_so_far: 0.0,
             observed_range_high_cert_interaction: 0.0,
+            spot_regime: SpotRegimeFeatures::default(),
             meta_calibrator_updates: 0,
         }
     }
@@ -417,9 +429,22 @@ pub struct RiskScore {
     pub markov_reversal_risk: f32,
     pub skew_penalty: f32,
     pub observed_range_high_cert_risk: f32,
+    pub btc_whipsaw_risk: f32,
+    pub btc_path_inefficiency_risk: f32,
+    pub btc_reversal_pressure: f32,
     pub volatility_penalty: f32,
     pub time_of_day_penalty: f32,
     pub composite: f32,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SpotRegimeFeatures {
+    pub whipsaw_score: f32,
+    pub path_efficiency: f32,
+    pub path_inefficiency: f32,
+    pub sign_flip_rate: f32,
+    pub realized_vol_180s_bps: f32,
+    pub reversal_pressure: f32,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -612,6 +637,7 @@ impl MetaFeatures {
         market_mid: f32,
         side_probability_pre_meta: f32,
         observed_yes_range_so_far: f32,
+        spot_regime: SpotRegimeFeatures,
         seconds_since_window_open: f32,
     ) -> Self {
         let side = if direction_score >= 0.0 { 1.0 } else { -1.0 };
@@ -753,6 +779,23 @@ impl MetaFeatures {
         idx += 1;
         values[idx] =
             (observed_range * ((side_market_price - 0.75) / 0.25).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = spot_regime.whipsaw_score.clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = spot_regime.path_efficiency.clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = spot_regime.path_inefficiency.clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = spot_regime.sign_flip_rate.clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = (spot_regime.realized_vol_180s_bps / 12.0).clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = spot_regime.reversal_pressure.clamp(0.0, 1.0);
+        idx += 1;
+        let high_cert = ((side_market_price - 0.82) / 0.15).clamp(0.0, 1.0);
+        values[idx] = (high_cert * spot_regime.path_inefficiency).clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = (high_cert * spot_regime.reversal_pressure).clamp(0.0, 1.0);
         idx += 1;
         debug_assert_eq!(idx, META_FEATURES);
         Self { values }
@@ -1902,6 +1945,7 @@ impl ModelState {
         book_dir.top3_delta_5s = delta_5s;
         book_dir.top3_delta_15s = delta_15s;
         let imbalance_boost = (0.3 * delta_5s + 0.2 * delta_15s).clamp(-1.0, 1.0);
+        let spot_regime = spot_regime_features(event.ts_ns, spot);
 
         let spot_score = book_dir.spot_momentum;
         let direction_raw = (book_dir.composite + 0.12 * imbalance_boost).clamp(-1.0, 1.0);
@@ -1945,6 +1989,7 @@ impl ModelState {
             cfg.time_of_day_weight,
             cfg.volatility_weight,
             1.0 - markov_persistence,
+            spot_regime,
         );
 
         let calibrated_yes_p = calibrated_p(
@@ -1972,6 +2017,7 @@ impl ModelState {
             event.yes_mid,
             side_p_pre_meta,
             observed_yes_range_so_far,
+            spot_regime,
             seconds_since_window_open,
         );
         self.pending_meta_features = Some(PendingMetaTrainingSample {
@@ -2011,6 +2057,7 @@ impl ModelState {
                 time_of_day_edge: predicted_side_edge,
                 observed_yes_range_so_far: observed_yes_range_so_far.clamp(0.0, 1.0),
                 observed_range_high_cert_interaction: risk.observed_range_high_cert_risk,
+                spot_regime,
                 meta_calibrator_updates: self.meta_calibrator.updates(),
             },
         }
@@ -2239,6 +2286,7 @@ pub fn risk_score(
     time_of_day_weight: f32,
     volatility_weight: f32,
     markov_reversal_risk: f32,
+    spot_regime: SpotRegimeFeatures,
 ) -> RiskScore {
     let flips = recent_dir_scores.sign_flips() as f32;
     let denom = (recent_dir_scores.len().saturating_sub(1).max(1)) as f32;
@@ -2259,6 +2307,8 @@ pub fn risk_score(
     };
     let range_high_cert_risk =
         observed_range_high_cert_risk(observed_yes_range_so_far, side_market_price);
+    let btc_path_inefficiency_risk = spot_regime.path_inefficiency.clamp(0.0, 1.0);
+    let btc_whipsaw_risk = spot_regime.whipsaw_score.clamp(0.0, 1.0);
     let base = 0.42 * whipsaw
         + 0.16 * path_risk
         + 0.16 * (1.0 - liquidity)
@@ -2270,6 +2320,8 @@ pub fn risk_score(
     let composite = (base
         + 0.10 * skew_penalty
         + OBSERVED_RANGE_HIGH_CERT_RISK_WEIGHT * range_high_cert_risk
+        + BTC_PATH_INEFFICIENCY_RISK_WEIGHT * btc_path_inefficiency_risk
+        + BTC_WHIPSAW_RISK_WEIGHT * btc_whipsaw_risk
         + volatility_weight * volatility_penalty
         + time_of_day_weight * 0.5 * time_of_day_penalty)
         .clamp(0.0, 1.0);
@@ -2282,6 +2334,9 @@ pub fn risk_score(
         markov_reversal_risk,
         skew_penalty,
         observed_range_high_cert_risk: range_high_cert_risk,
+        btc_whipsaw_risk,
+        btc_path_inefficiency_risk,
+        btc_reversal_pressure: spot_regime.reversal_pressure.clamp(0.0, 1.0),
         volatility_penalty,
         time_of_day_penalty,
         composite,
@@ -2433,6 +2488,113 @@ fn directional_alignment(a: f32, b: f32) -> f32 {
 
 pub fn spot_score(ts_ns: i64, spot: &SpotHistory) -> f32 {
     spot_score_stack(ts_ns, spot).blended
+}
+
+fn spot_regime_features(now_ns: i64, spot: &SpotHistory) -> SpotRegimeFeatures {
+    const WINDOW_SECS: i64 = 180;
+    const STEP_SECS: i64 = 5;
+    const MAX_SAMPLES: usize = (WINDOW_SECS / STEP_SECS) as usize + 1;
+
+    if spot.is_empty() {
+        return SpotRegimeFeatures::default();
+    }
+
+    let start_ns = now_ns - WINDOW_SECS * NS_PER_SECOND;
+    let mut prices = [0.0f64; MAX_SAMPLES];
+    let mut len = 0usize;
+    let mut next_ns = start_ns;
+    while next_ns <= now_ns && len < MAX_SAMPLES {
+        if let Some(price) = spot.price_at_or_before(next_ns) {
+            if price.is_finite() && price > 0.0 {
+                prices[len] = price;
+                len += 1;
+            }
+        }
+        next_ns += STEP_SECS * NS_PER_SECOND;
+    }
+    if len < 8 {
+        return SpotRegimeFeatures::default();
+    }
+
+    let first = prices[0];
+    let last = prices[len - 1];
+    if first <= 0.0 || last <= 0.0 {
+        return SpotRegimeFeatures::default();
+    }
+
+    let mut path_abs = 0.0f64;
+    let mut sumsq = 0.0f64;
+    let mut returns_len = 0usize;
+    let mut flips = 0usize;
+    let mut prev_sign = 0i8;
+    for idx in 1..len {
+        let prev = prices[idx - 1];
+        let next = prices[idx];
+        if prev <= 0.0 || next <= 0.0 {
+            continue;
+        }
+        let r = (next / prev).ln();
+        if !r.is_finite() {
+            continue;
+        }
+        path_abs += r.abs();
+        sumsq += r * r;
+        returns_len += 1;
+        let sign = if r > 0.0 {
+            1
+        } else if r < 0.0 {
+            -1
+        } else {
+            0
+        };
+        if sign != 0 {
+            if prev_sign != 0 && sign != prev_sign {
+                flips += 1;
+            }
+            prev_sign = sign;
+        }
+    }
+    if returns_len < 7 || path_abs <= 0.0 {
+        return SpotRegimeFeatures::default();
+    }
+
+    let net = (last / first).ln().abs();
+    let path_efficiency = (net / path_abs).clamp(0.0, 1.0) as f32;
+    let sign_flip_rate =
+        (flips as f32 / returns_len.saturating_sub(1).max(1) as f32).clamp(0.0, 1.0);
+    let realized_vol_180s_bps = ((sumsq / returns_len as f64).sqrt() * 10_000.0) as f32;
+
+    let ret_30 = spot
+        .simple_return(now_ns, 30 * NS_PER_SECOND)
+        .unwrap_or(0.0);
+    let ret_120 = spot
+        .simple_return(now_ns, 120 * NS_PER_SECOND)
+        .unwrap_or(0.0);
+    let ret_180 = spot
+        .simple_return(now_ns, 180 * NS_PER_SECOND)
+        .unwrap_or(0.0);
+    let reversal = ret_30.abs() * 10_000.0 >= 1.0
+        && ret_120.abs().max(ret_180.abs()) * 10_000.0 >= 2.0
+        && ret_30.signum() != ret_120.signum()
+        && ret_30.signum() != ret_180.signum();
+
+    let vol_component = (realized_vol_180s_bps / 7.5).clamp(0.0, 1.0);
+    let path_inefficiency = (1.0 - path_efficiency).clamp(0.0, 1.0);
+    let chop = path_inefficiency * vol_component;
+    let reversal_flag = if reversal { 1.0 } else { 0.0 };
+    let reversal_pressure = (0.7 * sign_flip_rate + 0.3 * reversal_flag).clamp(0.0, 1.0);
+    let whipsaw_score =
+        (0.50 * chop + 0.30 * sign_flip_rate + 0.15 * vol_component + 0.05 * reversal_flag)
+            .clamp(0.0, 1.0);
+
+    SpotRegimeFeatures {
+        whipsaw_score,
+        path_efficiency,
+        path_inefficiency,
+        sign_flip_rate,
+        realized_vol_180s_bps,
+        reversal_pressure,
+    }
 }
 
 pub fn weighted_multi_tf_return(now_ns: i64, spot: &SpotHistory) -> Option<f64> {
@@ -2814,11 +2976,35 @@ mod tests {
         imbalance.push(1_000_000_000, 0.2);
         imbalance.push(2_000_000_000, 0.4);
         let r0 = risk_score(
-            &event, &dir, &imbalance, 2000.0, true, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.4,
+            &event,
+            &dir,
+            &imbalance,
+            2000.0,
+            true,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.2,
+            0.4,
+            SpotRegimeFeatures::default(),
         )
         .composite;
         let r1 = risk_score(
-            &event, &dir, &imbalance, 2000.0, true, 0.0, 1.0, 0.0, 0.0, 0.0, 0.2, 0.4,
+            &event,
+            &dir,
+            &imbalance,
+            2000.0,
+            true,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.2,
+            0.4,
+            SpotRegimeFeatures::default(),
         )
         .composite;
         assert!(r1 >= r0);
@@ -2834,10 +3020,34 @@ mod tests {
         imbalance.push(2_000_000_000, 0.0);
 
         let calm = risk_score(
-            &event, &dir, &imbalance, 2000.0, true, 0.40, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            &event,
+            &dir,
+            &imbalance,
+            2000.0,
+            true,
+            0.40,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            SpotRegimeFeatures::default(),
         );
         let extreme = risk_score(
-            &event, &dir, &imbalance, 2000.0, true, 0.98, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            &event,
+            &dir,
+            &imbalance,
+            2000.0,
+            true,
+            0.98,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            SpotRegimeFeatures::default(),
         );
 
         assert!(extreme.observed_range_high_cert_risk > 0.5);
@@ -2854,7 +3064,19 @@ mod tests {
         imbalance.push(2_000_000_000, 0.2);
 
         let risk = risk_score(
-            &event, &dir, &imbalance, 2000.0, true, 0.0, 0.11, 0.22, 0.33, 0.44, 0.55, 0.66,
+            &event,
+            &dir,
+            &imbalance,
+            2000.0,
+            true,
+            0.0,
+            0.11,
+            0.22,
+            0.33,
+            0.44,
+            0.55,
+            0.66,
+            SpotRegimeFeatures::default(),
         );
 
         assert!((risk.skew_penalty - 0.11).abs() < f32::EPSILON);
@@ -3156,10 +3378,21 @@ mod tests {
             0.20,
             0.86,
             0.42,
+            SpotRegimeFeatures {
+                whipsaw_score: 0.31,
+                path_efficiency: 0.40,
+                path_inefficiency: 0.60,
+                sign_flip_rate: 0.50,
+                realized_vol_180s_bps: 6.0,
+                reversal_pressure: 0.25,
+            },
             240.0,
         );
 
-        let side_price_idx = META_FEATURES - 8;
+        let side_price_idx = META_FEATURE_NAMES
+            .iter()
+            .position(|name| *name == "side_market_price")
+            .unwrap();
         assert!((features.values[side_price_idx] - 0.80).abs() < 1.0e-6);
         assert!((features.values[side_price_idx + 1] - 0.06).abs() < 1.0e-6);
         assert!((features.values[side_price_idx + 2] - 0.80).abs() < 1.0e-6);
@@ -3168,6 +3401,15 @@ mod tests {
         assert!((features.values[side_price_idx + 5] - 0.60).abs() < 1.0e-6);
         assert!((features.values[side_price_idx + 6] - 0.42).abs() < 1.0e-6);
         assert!((features.values[side_price_idx + 7] - 0.084).abs() < 1.0e-6);
+        let regime_idx = META_FEATURE_NAMES
+            .iter()
+            .position(|name| *name == "btc_whipsaw_score")
+            .unwrap();
+        assert!((features.values[regime_idx] - 0.31).abs() < 1.0e-6);
+        assert!((features.values[regime_idx + 1] - 0.40).abs() < 1.0e-6);
+        assert!((features.values[regime_idx + 2] - 0.60).abs() < 1.0e-6);
+        assert!((features.values[regime_idx + 4] - 0.50).abs() < 1.0e-6);
+        assert_eq!(features.values[regime_idx + 6], 0.0);
     }
 
     #[test]
