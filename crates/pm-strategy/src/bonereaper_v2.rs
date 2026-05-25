@@ -234,6 +234,7 @@ pub struct BonereaperV2Config {
     pub tail_refresh_secs: f32,
     pub tail_min_ask: f32,
     pub tail_max_ask: f32,
+    pub tail_target_favourite_loss_coverage_frac: f32,
     pub tail_budget_favourite_spend_frac: f32,
     pub tail_budget_favourite_upside_frac: f32,
 }
@@ -332,6 +333,7 @@ impl Default for BonereaperV2Config {
             tail_refresh_secs: 5.0,
             tail_min_ask: 0.01,
             tail_max_ask: 0.10,
+            tail_target_favourite_loss_coverage_frac: 0.0,
             tail_budget_favourite_spend_frac: 0.05,
             tail_budget_favourite_upside_frac: 0.25,
         }
@@ -647,6 +649,30 @@ fn buy_side_sign(side: Side) -> f32 {
         Side::BuyNo => -1.0,
         _ => 0.0,
     }
+}
+
+fn tail_clip_notional(
+    base_clip: f64,
+    tail_clip_frac: f32,
+    favourite_notional: f64,
+    tail_notional: f64,
+    tail_px: f64,
+    coverage_frac: f32,
+    remaining_tail_budget: f64,
+) -> f64 {
+    let remaining_tail_budget = remaining_tail_budget.max(0.0);
+    if remaining_tail_budget <= 0.0 {
+        return 0.0;
+    }
+    if coverage_frac > 0.0 {
+        let target_tail_notional =
+            favourite_notional * coverage_frac.clamp(0.0, 1.0) as f64 * tail_px.clamp(0.0, 1.0);
+        return (target_tail_notional - tail_notional)
+            .max(0.0)
+            .min(remaining_tail_budget);
+    }
+
+    (base_clip * tail_clip_frac as f64).min(remaining_tail_budget)
 }
 
 impl Strategy for BonereaperV2 {
@@ -1158,8 +1184,15 @@ impl Strategy for BonereaperV2 {
                         favourite_win_upside * self.cfg.tail_budget_favourite_upside_frac as f64;
                     let remaining_tail_budget =
                         cap_by_fav_spend.min(cap_by_win_upside) - self.tail_notional_emitted;
-                    let clip = (self.cfg.max_clip_usdc * self.cfg.tail_clip_frac as f64)
-                        .min(remaining_tail_budget.max(0.0));
+                    let clip = tail_clip_notional(
+                        self.cfg.max_clip_usdc,
+                        self.cfg.tail_clip_frac,
+                        self.late_favourite_notional_emitted,
+                        self.tail_notional_emitted,
+                        tail_px,
+                        self.cfg.tail_target_favourite_loss_coverage_frac,
+                        remaining_tail_budget,
+                    );
                     let shares = if clip > 0.0 {
                         shares_capped(clip, tail_px)
                     } else {
@@ -1276,5 +1309,23 @@ mod tests {
         });
         assert_eq!(a.late_favourite_entry_pullback_fail, 8);
         assert_eq!(a.late_favourite_avg_entry_drawdown_fail, 9);
+    }
+
+    #[test]
+    fn tail_clip_can_target_favourite_loss_coverage() {
+        let clip = tail_clip_notional(40.0, 0.15, 240.0, 8.0, 0.08, 0.80, 60.0);
+        assert!((clip - 7.36).abs() < 1e-6);
+    }
+
+    #[test]
+    fn tail_clip_uses_legacy_clip_when_coverage_disabled() {
+        let clip = tail_clip_notional(40.0, 0.15, 240.0, 8.0, 0.08, 0.0, 60.0);
+        assert!((clip - 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn tail_clip_respects_budget_under_coverage_target() {
+        let clip = tail_clip_notional(40.0, 0.15, 240.0, 0.0, 0.08, 0.80, 5.0);
+        assert!((clip - 5.0).abs() < 1e-9);
     }
 }
