@@ -21,8 +21,8 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use parquet::arrow::ArrowWriter;
 use pm_model::{
-    MetaFeatures, MetaTrainingSample, ModelConfig, ModelState, OnlineMetaCalibratorSnapshot,
-    edge_vs_mid,
+    MetaFeatures, MetaTrainingSample, ModelConfig, ModelOutput, ModelState,
+    OnlineMetaCalibratorSnapshot, edge_vs_mid,
 };
 use pm_risk::{PortfolioLimits, PortfolioSnapshot, PortfolioState};
 use pm_strategy::{Ctx, OrderRequest, Side, Strategy};
@@ -43,6 +43,80 @@ pub struct Fill {
     pub maker: bool,
     pub rebate_usdc: f64,
     pub slippage_bps: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub yes_mid: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub yes_bid: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub yes_ask: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub side_model_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub side_edge_vs_mid: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub side_edge_vs_fill: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calibrated_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub risk_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seconds_since_open: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seconds_to_close: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FillModelContext {
+    yes_mid: f32,
+    yes_bid: f32,
+    yes_ask: f32,
+    side_model_p: f32,
+    side_edge_vs_mid: f32,
+    direction_score: f32,
+    confidence_score: f32,
+    calibrated_p: f32,
+    risk_score: f32,
+    seconds_since_open: f32,
+    seconds_to_close: f32,
+}
+
+impl FillModelContext {
+    fn from_event(
+        event: &ReplayEvent,
+        model_output: &ModelOutput,
+        side: Side,
+        seconds_since_open: f32,
+        market_close_ns: i64,
+    ) -> Self {
+        let yes_side = order_adds_yes_exposure(side);
+        let side_market_mid = if yes_side {
+            event.yes_mid
+        } else {
+            1.0 - event.yes_mid
+        };
+        let side_model_p = if yes_side {
+            model_output.calibrated_p
+        } else {
+            1.0 - model_output.calibrated_p
+        };
+        Self {
+            yes_mid: event.yes_mid,
+            yes_bid: event.yes_bid,
+            yes_ask: event.yes_ask,
+            side_model_p,
+            side_edge_vs_mid: side_model_p - side_market_mid,
+            direction_score: model_output.direction_score,
+            confidence_score: model_output.confidence_score,
+            calibrated_p: model_output.calibrated_p,
+            risk_score: model_output.risk_score,
+            seconds_since_open,
+            seconds_to_close: ((market_close_ns - event.ts_ns).max(0) as f32) / 1e9,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -241,6 +315,7 @@ struct RestingOrder {
     shares: f64,
     submit_ts_ns: i64,
     tag: &'static str,
+    model_context: Option<FillModelContext>,
 }
 
 pub fn run_backtest<S: Strategy>(
@@ -405,6 +480,13 @@ pub fn run_backtest<S: Strategy>(
             counters.orders_submitted += 1;
             requested_shares += req.shares;
             requested_notional += order_request_notional_usdc(req, event).unwrap_or(0.0);
+            let fill_context = Some(FillModelContext::from_event(
+                event,
+                &model_output,
+                req.side,
+                secs_since_open as f32,
+                cfg.market_close_ns,
+            ));
             match req.limit_price {
                 None => {
                     apply_taker_order(
@@ -418,6 +500,7 @@ pub fn run_backtest<S: Strategy>(
                         &mut fills,
                         cfg.taker_fee_bps,
                         cfg.taker_slippage_bps,
+                        fill_context,
                     );
                 }
                 Some(limit) => {
@@ -436,6 +519,7 @@ pub fn run_backtest<S: Strategy>(
                         cfg.maker_rebate_bps,
                         cfg.taker_fee_bps,
                         cfg.taker_slippage_bps,
+                        fill_context,
                     );
                 }
             }
@@ -1207,6 +1291,18 @@ fn check_resting_fills(
             maker: true,
             rebate_usdc: rebate,
             slippage_bps: 0.0,
+            yes_mid: r.model_context.map(|m| m.yes_mid),
+            yes_bid: r.model_context.map(|m| m.yes_bid),
+            yes_ask: r.model_context.map(|m| m.yes_ask),
+            side_model_p: r.model_context.map(|m| m.side_model_p),
+            side_edge_vs_mid: r.model_context.map(|m| m.side_edge_vs_mid),
+            side_edge_vs_fill: r.model_context.map(|m| m.side_model_p - fill_price_native),
+            direction_score: r.model_context.map(|m| m.direction_score),
+            confidence_score: r.model_context.map(|m| m.confidence_score),
+            calibrated_p: r.model_context.map(|m| m.calibrated_p),
+            risk_score: r.model_context.map(|m| m.risk_score),
+            seconds_since_open: r.model_context.map(|m| m.seconds_since_open),
+            seconds_to_close: r.model_context.map(|m| m.seconds_to_close),
         });
         let _ = r.submit_ts_ns;
         resting.swap_remove(i);
@@ -1229,6 +1325,7 @@ fn submit_maker_order(
     maker_rebate_bps: f64,
     taker_fee_bps: f64,
     taker_slippage_bps: f64,
+    model_context: Option<FillModelContext>,
 ) {
     let limit_yes = limit_to_yes_terms(req.side, limit);
     // Crosses immediately = strategy was actually a taker. Apply taker fill at
@@ -1258,6 +1355,7 @@ fn submit_maker_order(
             fills,
             taker_fee_bps,
             taker_slippage_bps,
+            model_context,
         );
         return;
     }
@@ -1288,6 +1386,7 @@ fn submit_maker_order(
         shares: req.shares,
         submit_ts_ns: event.ts_ns,
         tag: req.tag,
+        model_context,
     });
 }
 
@@ -1304,6 +1403,7 @@ fn apply_taker_order(
     fills: &mut Vec<Fill>,
     taker_fee_bps: f64,
     taker_slippage_bps: f64,
+    model_context: Option<FillModelContext>,
 ) {
     let Some((raw_fill, fillable_shares)) = depth_weighted_fill(event, req) else {
         counters.orders_rejected_no_liquidity += 1;
@@ -1398,6 +1498,18 @@ fn apply_taker_order(
         rebate_usdc: -fee,
         slippage_bps: (((fill_price as f64 - raw_fill as f64).abs() / (raw_fill as f64).max(1e-12))
             * 10_000.0) as f32,
+        yes_mid: model_context.map(|m| m.yes_mid),
+        yes_bid: model_context.map(|m| m.yes_bid),
+        yes_ask: model_context.map(|m| m.yes_ask),
+        side_model_p: model_context.map(|m| m.side_model_p),
+        side_edge_vs_mid: model_context.map(|m| m.side_edge_vs_mid),
+        side_edge_vs_fill: model_context.map(|m| m.side_model_p - fill_price),
+        direction_score: model_context.map(|m| m.direction_score),
+        confidence_score: model_context.map(|m| m.confidence_score),
+        calibrated_p: model_context.map(|m| m.calibrated_p),
+        risk_score: model_context.map(|m| m.risk_score),
+        seconds_since_open: model_context.map(|m| m.seconds_since_open),
+        seconds_to_close: model_context.map(|m| m.seconds_to_close),
     });
 }
 
@@ -1577,6 +1689,7 @@ mod tests {
             &mut shallow_fills,
             0.0,
             0.0,
+            None,
         );
 
         let mut deep_cash = 100.0;
@@ -1596,6 +1709,7 @@ mod tests {
             &mut deep_fills,
             0.0,
             0.0,
+            None,
         );
 
         assert_eq!(shallow_fills.len(), 1);
@@ -1604,6 +1718,54 @@ mod tests {
         assert_eq!(deep_fills[0].shares, 12.0);
         assert!((shallow_fills[0].price - 0.50).abs() < 1e-6);
         assert!((deep_fills[0].price - 0.5375).abs() < 1e-5);
+    }
+
+    #[test]
+    fn taker_fill_records_model_context_and_side_edge() {
+        let event = evt(1_000_000_000, 0.79, 0.80, 10.0);
+        let req = OrderRequest {
+            side: Side::BuyYes,
+            shares: 2.0,
+            max_depth: 1,
+            limit_price: None,
+            tag: "ctx",
+        };
+        let model = ModelOutput {
+            direction_score: 0.5,
+            confidence_score: 0.72,
+            calibrated_p: 0.88,
+            risk_score: 0.20,
+        };
+        let context = FillModelContext::from_event(&event, &model, req.side, 1.0, 301_000_000_000);
+
+        let mut cash = 100.0;
+        let mut yes = 0.0;
+        let mut no = 0.0;
+        let mut portfolio = PortfolioState::new(100.0, PortfolioLimits::default());
+        let mut counters = StrategyCounters::default();
+        let mut fills = Vec::new();
+        apply_taker_order(
+            &event,
+            &req,
+            &mut cash,
+            &mut yes,
+            &mut no,
+            &mut portfolio,
+            &mut counters,
+            &mut fills,
+            0.0,
+            0.0,
+            Some(context),
+        );
+
+        let fill = fills.first().expect("expected fill");
+        assert_eq!(fill.side_model_p, Some(0.88));
+        assert_eq!(fill.confidence_score, Some(0.72));
+        assert_eq!(fill.risk_score, Some(0.20));
+        assert_eq!(fill.seconds_since_open, Some(1.0));
+        assert_eq!(fill.seconds_to_close, Some(300.0));
+        assert!((fill.side_edge_vs_mid.unwrap() - (0.88 - event.yes_mid)).abs() < 1e-6);
+        assert!((fill.side_edge_vs_fill.unwrap() - 0.08).abs() < 1e-6);
     }
 
     #[test]
