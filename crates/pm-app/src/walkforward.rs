@@ -2273,6 +2273,8 @@ async fn run_portfolio(
         if *strat == StratId::ReactiveDirectional {
             shared_skew_tables.insert(strat.name(), Arc::new(Mutex::new(SkewWinRateTable::new())));
             shared_model_states.insert(strat.name(), Arc::new(Mutex::new(ModelState::new())));
+        } else {
+            shared_model_states.insert(strat.name(), Arc::new(Mutex::new(ModelState::new())));
         }
     }
     let mut results: Vec<MarketResult> = Vec::with_capacity(markets.len());
@@ -2368,7 +2370,11 @@ async fn run_portfolio(
                 taker_fee_bps: cfg.taker_fee_bps,
                 decision_log_jsonl: None,
                 decision_log_parquet: None,
-                shared_model_state: None,
+                shared_model_state: if strat == StratId::ReactiveDirectional {
+                    None
+                } else {
+                    shared_model_states.get(strat.name()).cloned()
+                },
                 meta_calibrator_snapshot: meta_calibrator_snapshot.clone(),
                 enable_meta_calibration: cfg.enable_meta_calibration,
                 decision_log_every_n: 1_000_000,

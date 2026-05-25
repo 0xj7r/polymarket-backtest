@@ -194,6 +194,10 @@ impl Ring {
     pub fn is_full(&self) -> bool {
         self.len == self.cap
     }
+    pub fn clear(&mut self) {
+        self.head = 0;
+        self.len = 0;
+    }
     pub fn oldest(&self) -> Option<f32> {
         if self.len == 0 {
             return None;
@@ -319,6 +323,10 @@ impl TimedRing {
         if self.len < self.cap {
             self.len += 1;
         }
+    }
+    pub fn clear(&mut self) {
+        self.head = 0;
+        self.len = 0;
     }
 
     pub fn len(&self) -> usize {
@@ -1775,6 +1783,15 @@ impl ModelState {
                 side_observed,
             );
         }
+        self.reset_market_rolling_state();
+    }
+
+    fn reset_market_rolling_state(&mut self) {
+        self.recent_mids.clear();
+        self.recent_dir.clear();
+        self.top3_imbalance.clear();
+        self.dir_markov = DirectionMarkov::default();
+        self.pending_meta_features = None;
     }
 
     pub fn meta_calibrator_snapshot(&self) -> OnlineMetaCalibratorSnapshot {
