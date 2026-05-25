@@ -456,6 +456,15 @@ enum Cmd {
         /// Maximum market-balanced OOS samples used in summary diagnostics.
         #[arg(long, default_value_t = 120_000)]
         meta_max_oos_evaluation_samples: usize,
+        /// Keep only meta-training samples with base predicted-side probability at least this high.
+        #[arg(long, default_value = "0.0")]
+        meta_train_min_base_p: f32,
+        /// Keep only meta-training samples with early-market penalty at most this high.
+        #[arg(long, default_value = "1.0")]
+        meta_train_max_early_penalty: f32,
+        /// Keep only meta-training samples with `2 * abs(mid - 0.5)` at least this high.
+        #[arg(long, default_value = "0.0")]
+        meta_train_min_mid_distance: f32,
         /// JSON cache for extracted meta-calibrator training samples.
         #[arg(long)]
         meta_training_samples_cache: Option<PathBuf>,
@@ -850,6 +859,9 @@ async fn main() -> Result<()> {
             meta_max_validation_samples,
             meta_max_samples_per_market,
             meta_max_oos_evaluation_samples,
+            meta_train_min_base_p,
+            meta_train_max_early_penalty,
+            meta_train_min_mid_distance,
             meta_training_samples_cache,
             meta_calibrator_snapshot_in,
             meta_calibrator_snapshot_out,
@@ -927,6 +939,9 @@ async fn main() -> Result<()> {
                 meta_max_validation_samples,
                 meta_max_samples_per_market,
                 meta_max_oos_evaluation_samples,
+                meta_train_min_base_p,
+                meta_train_max_early_penalty,
+                meta_train_min_mid_distance,
                 meta_training_samples_cache,
                 meta_calibrator_snapshot_in,
                 meta_calibrator_snapshot_out,
@@ -1451,6 +1466,9 @@ async fn walk_forward(
     meta_max_validation_samples: usize,
     meta_max_samples_per_market: usize,
     meta_max_oos_evaluation_samples: usize,
+    meta_train_min_base_p: f32,
+    meta_train_max_early_penalty: f32,
+    meta_train_min_mid_distance: f32,
     meta_training_samples_cache: Option<PathBuf>,
     meta_calibrator_snapshot_in: Option<PathBuf>,
     meta_calibrator_snapshot_out: Option<PathBuf>,
@@ -1567,6 +1585,9 @@ async fn walk_forward(
         meta_max_validation_samples,
         meta_max_samples_per_market,
         meta_max_oos_evaluation_samples,
+        meta_train_min_base_p,
+        meta_train_max_early_penalty,
+        meta_train_min_mid_distance,
         meta_training_samples_cache,
         meta_calibrator_snapshot_in,
         meta_calibrator_snapshot_out,

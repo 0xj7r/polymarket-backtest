@@ -198,6 +198,14 @@ pub struct WalkForwardConfig {
     pub meta_max_samples_per_market: usize,
     /// Maximum market-balanced OOS samples used in summary diagnostics.
     pub meta_max_oos_evaluation_samples: usize,
+    /// Optional training/evaluation filter: keep only meta samples with base
+    /// predicted-side probability at least this high.
+    pub meta_train_min_base_p: f32,
+    /// Optional training/evaluation filter: keep only samples past the early
+    /// market penalty, e.g. `0.05` for late/candidate-regime calibration.
+    pub meta_train_max_early_penalty: f32,
+    /// Optional training/evaluation filter on `2 * abs(mid - 0.5)`.
+    pub meta_train_min_mid_distance: f32,
     /// Optional JSON cache for extracted meta-calibrator training samples.
     /// Intended for AWS Batch/local sweeps where the train window is fixed.
     pub meta_training_samples_cache: Option<PathBuf>,
@@ -284,6 +292,9 @@ impl Default for WalkForwardConfig {
             meta_max_validation_samples: DEFAULT_META_MAX_VALIDATION_SAMPLES,
             meta_max_samples_per_market: DEFAULT_META_MAX_SAMPLES_PER_MARKET,
             meta_max_oos_evaluation_samples: DEFAULT_META_MAX_OOS_EVALUATION_SAMPLES,
+            meta_train_min_base_p: 0.0,
+            meta_train_max_early_penalty: 1.0,
+            meta_train_min_mid_distance: 0.0,
             meta_training_samples_cache: None,
             meta_calibrator_snapshot_in: None,
             meta_calibrator_snapshot_out: None,
@@ -408,6 +419,9 @@ pub struct SummaryRunConfig {
     pub meta_max_validation_samples: usize,
     pub meta_max_samples_per_market: usize,
     pub meta_max_oos_evaluation_samples: usize,
+    pub meta_train_min_base_p: f32,
+    pub meta_train_max_early_penalty: f32,
+    pub meta_train_min_mid_distance: f32,
     pub enable_meta_calibration: bool,
 }
 
@@ -1139,11 +1153,17 @@ struct SelectedMetaCalibrator {
     report: MetaCalibrationReport,
 }
 
+const META_FEATURE_EARLY_MARKET_PENALTY: usize = 20;
+const META_FEATURE_MID_DISTANCE_FROM_HALF: usize = 38;
+
 #[derive(Debug, Clone, Copy)]
 struct MetaSampleLimits {
     max_fit_samples: usize,
     max_validation_samples: usize,
     max_samples_per_market: usize,
+    min_base_p: f32,
+    max_early_penalty: f32,
+    min_mid_distance: f32,
 }
 
 impl MetaSampleLimits {
@@ -1152,8 +1172,32 @@ impl MetaSampleLimits {
             max_fit_samples: cfg.meta_max_fit_samples,
             max_validation_samples: cfg.meta_max_validation_samples,
             max_samples_per_market: cfg.meta_max_samples_per_market,
+            min_base_p: cfg.meta_train_min_base_p,
+            max_early_penalty: cfg.meta_train_max_early_penalty,
+            min_mid_distance: cfg.meta_train_min_mid_distance,
         }
     }
+}
+
+fn filter_meta_samples_for_training(
+    samples: &[MetaTrainingSample],
+    limits: MetaSampleLimits,
+) -> Vec<MetaTrainingSample> {
+    let min_base_p = limits.min_base_p.clamp(0.0, 1.0);
+    let max_early_penalty = limits.max_early_penalty.clamp(0.0, 1.0);
+    let min_mid_distance = limits.min_mid_distance.clamp(0.0, 1.0);
+    if min_base_p <= 0.0 && max_early_penalty >= 1.0 && min_mid_distance <= 0.0 {
+        return samples.to_vec();
+    }
+    samples
+        .iter()
+        .copied()
+        .filter(|sample| {
+            sample.base_side_probability >= min_base_p
+                && sample.features.values[META_FEATURE_EARLY_MARKET_PENALTY] <= max_early_penalty
+                && sample.features.values[META_FEATURE_MID_DISTANCE_FROM_HALF] >= min_mid_distance
+        })
+        .collect()
 }
 
 fn train_validated_meta_calibrator(
@@ -1163,6 +1207,18 @@ fn train_validated_meta_calibrator(
     limits: MetaSampleLimits,
     snapshot_out: Option<&std::path::Path>,
 ) -> Result<SelectedMetaCalibrator> {
+    let filtered_training_samples = filter_meta_samples_for_training(training_samples, limits);
+    if filtered_training_samples.len() != training_samples.len() {
+        tracing::info!(
+            raw_samples = training_samples.len(),
+            filtered_samples = filtered_training_samples.len(),
+            min_base_p = limits.min_base_p,
+            max_early_penalty = limits.max_early_penalty,
+            min_mid_distance = limits.min_mid_distance,
+            "filtered meta training samples"
+        );
+    }
+    let training_samples = filtered_training_samples.as_slice();
     if training_samples.len() < 2 {
         let snapshot = OnlineMetaCalibrator::default().snapshot();
         if let Some(path) = snapshot_out {
@@ -2472,8 +2528,12 @@ async fn run_portfolio(
     if let Some(report) = meta_report.as_mut() {
         report.oos_samples = oos_meta_samples.len();
         if let Some(snapshot) = meta_calibrator_snapshot.as_ref() {
-            let evaluation_samples = market_balanced_meta_samples(
+            let filtered_oos_samples = filter_meta_samples_for_training(
                 &oos_meta_samples,
+                MetaSampleLimits::from_config(cfg),
+            );
+            let evaluation_samples = market_balanced_meta_samples(
+                &filtered_oos_samples,
                 cfg.meta_max_oos_evaluation_samples,
                 cfg.meta_max_samples_per_market,
             );
@@ -2498,8 +2558,12 @@ fn write_portfolio_checkpoint(
         let mut report = report.clone();
         report.oos_samples = oos_meta_samples.len();
         if let Some(snapshot) = meta_calibrator_snapshot {
-            let evaluation_samples = market_balanced_meta_samples(
+            let filtered_oos_samples = filter_meta_samples_for_training(
                 oos_meta_samples,
+                MetaSampleLimits::from_config(cfg),
+            );
+            let evaluation_samples = market_balanced_meta_samples(
+                &filtered_oos_samples,
                 cfg.meta_max_oos_evaluation_samples,
                 cfg.meta_max_samples_per_market,
             );
@@ -2857,6 +2921,9 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         meta_max_validation_samples: cfg.meta_max_validation_samples,
         meta_max_samples_per_market: cfg.meta_max_samples_per_market,
         meta_max_oos_evaluation_samples: cfg.meta_max_oos_evaluation_samples,
+        meta_train_min_base_p: cfg.meta_train_min_base_p,
+        meta_train_max_early_penalty: cfg.meta_train_max_early_penalty,
+        meta_train_min_mid_distance: cfg.meta_train_min_mid_distance,
         enable_meta_calibration: cfg.enable_meta_calibration,
     }
 }

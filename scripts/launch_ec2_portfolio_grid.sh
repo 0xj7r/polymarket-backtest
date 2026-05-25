@@ -89,6 +89,9 @@ META_MAX_FIT_SAMPLES="120000"
 META_MAX_VALIDATION_SAMPLES="60000"
 META_MAX_SAMPLES_PER_MARKET="64"
 META_MAX_OOS_EVALUATION_SAMPLES="120000"
+META_TRAIN_MIN_BASE_P="0.0"
+META_TRAIN_MAX_EARLY_PENALTY="1.0"
+META_TRAIN_MIN_MID_DISTANCE="0.0"
 DISABLE_META_CALIBRATION="0"
 CLIP_FRACTIONS="0.015,0.02,0.03"
 GROSS_CAPS="250,500,750"
@@ -164,6 +167,9 @@ while [ $# -gt 0 ]; do
         --meta-max-validation-samples) META_MAX_VALIDATION_SAMPLES="$2"; shift 2 ;;
         --meta-max-samples-per-market) META_MAX_SAMPLES_PER_MARKET="$2"; shift 2 ;;
         --meta-max-oos-evaluation-samples) META_MAX_OOS_EVALUATION_SAMPLES="$2"; shift 2 ;;
+        --meta-train-min-base-p) META_TRAIN_MIN_BASE_P="$2"; shift 2 ;;
+        --meta-train-max-early-penalty) META_TRAIN_MAX_EARLY_PENALTY="$2"; shift 2 ;;
+        --meta-train-min-mid-distance) META_TRAIN_MIN_MID_DISTANCE="$2"; shift 2 ;;
         --disable-meta-calibration) DISABLE_META_CALIBRATION="1"; shift ;;
         --clip-fractions) CLIP_FRACTIONS="$2"; shift 2 ;;
         --gross-caps) GROSS_CAPS="$2"; shift 2 ;;
@@ -380,6 +386,9 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --meta-max-validation-samples "${META_MAX_VALIDATION_SAMPLES}" \\
       --meta-max-samples-per-market "${META_MAX_SAMPLES_PER_MARKET}" \\
       --meta-max-oos-evaluation-samples "${META_MAX_OOS_EVALUATION_SAMPLES}" \\
+      --meta-train-min-base-p "${META_TRAIN_MIN_BASE_P}" \\
+      --meta-train-max-early-penalty "${META_TRAIN_MAX_EARLY_PENALTY}" \\
+      --meta-train-min-mid-distance "${META_TRAIN_MIN_MID_DISTANCE}" \\
       --max-concurrent-fetches "${MAX_CONCURRENT_FETCHES}" \\
       --replay-sample-ms "${REPLAY_SAMPLE_MS}" \\
       --portfolio-checkpoint-every-markets "${PORTFOLIO_CHECKPOINT_EVERY_MARKETS}" \\
