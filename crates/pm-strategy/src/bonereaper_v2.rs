@@ -202,6 +202,13 @@ pub struct BonereaperV2Config {
     pub late_favourite_clip_frac: f32,
     pub late_favourite_high_cert_clip_frac: f32,
     pub late_favourite_high_cert_full_clip_edge: f32,
+    /// Additional size multiplier for high-cert favourite loads with tiny
+    /// model edge and weak spot path efficiency. Disabled when trigger ask is
+    /// >= 1.0 or size fraction is >= 1.0.
+    pub late_favourite_fragile_high_cert_ask: f32,
+    pub late_favourite_fragile_high_cert_max_edge: f32,
+    pub late_favourite_fragile_high_cert_max_path_efficiency: f32,
+    pub late_favourite_fragile_high_cert_size_frac: f32,
     pub late_favourite_max_clips: usize,
     pub late_favourite_refresh_secs: f32,
     pub late_favourite_min_sustain_secs: f32,
@@ -313,6 +320,10 @@ impl Default for BonereaperV2Config {
             late_favourite_clip_frac: 1.00,
             late_favourite_high_cert_clip_frac: 1.00,
             late_favourite_high_cert_full_clip_edge: 0.00,
+            late_favourite_fragile_high_cert_ask: 1.0,
+            late_favourite_fragile_high_cert_max_edge: 0.0,
+            late_favourite_fragile_high_cert_max_path_efficiency: 0.0,
+            late_favourite_fragile_high_cert_size_frac: 1.0,
             late_favourite_max_clips: 12,
             late_favourite_refresh_secs: 4.0,
             late_favourite_min_sustain_secs: 0.0,
@@ -528,6 +539,27 @@ fn late_favourite_high_cert_edge_taper(edge: f32, min_edge: f32, full_clip_edge:
     ((edge - min_edge) / (full_clip_edge - min_edge))
         .clamp(0.0, 1.0)
         .into()
+}
+
+fn late_favourite_fragile_high_cert_taper(
+    favourite_ask: f64,
+    edge: f32,
+    path_efficiency: f32,
+    trigger_ask: f32,
+    max_edge: f32,
+    max_path_efficiency: f32,
+    size_frac: f32,
+) -> f64 {
+    if trigger_ask >= 1.0 || size_frac >= 1.0 {
+        return 1.0;
+    }
+    if favourite_ask as f32 >= trigger_ask
+        && edge <= max_edge
+        && path_efficiency <= max_path_efficiency
+    {
+        return size_frac.clamp(0.0, 1.0) as f64;
+    }
+    1.0
 }
 
 fn late_favourite_high_cert_max_levels(favourite_ask: f64, base_levels: usize) -> usize {
@@ -1200,10 +1232,27 @@ impl Strategy for BonereaperV2 {
                             } else {
                                 1.0
                             };
+                            let model_edge = model_side_probability(ctx, side)
+                                .map(|side_p| side_p - px as f32)
+                                .unwrap_or(0.0);
+                            let fragile_taper = late_favourite_fragile_high_cert_taper(
+                                px,
+                                model_edge,
+                                whipsaw.path_efficiency,
+                                self.cfg.late_favourite_fragile_high_cert_ask,
+                                self.cfg.late_favourite_fragile_high_cert_max_edge,
+                                self.cfg
+                                    .late_favourite_fragile_high_cert_max_path_efficiency,
+                                self.cfg.late_favourite_fragile_high_cert_size_frac,
+                            );
                             let clip = self.cfg.max_clip_usdc * clip_frac as f64;
                             let range_size_taper = (1.0 - range_throttle as f64).clamp(0.0, 1.0);
-                            let desired_notional =
-                                clip * levels as f64 * price_taper * edge_taper * range_size_taper;
+                            let desired_notional = clip
+                                * levels as f64
+                                * price_taper
+                                * edge_taper
+                                * range_size_taper
+                                * fragile_taper;
                             let shares = shares_capped(desired_notional, px);
                             if shares > 0.0 {
                                 orders.push(OrderRequest {
@@ -1377,6 +1426,30 @@ mod tests {
             0.0
         );
         assert_eq!(late_favourite_high_cert_edge_taper(0.010, 0.010, 0.0), 1.0);
+    }
+
+    #[test]
+    fn fragile_high_cert_taper_only_hits_low_edge_weak_path_regime() {
+        assert_eq!(
+            late_favourite_fragile_high_cert_taper(0.924, 0.004, 0.40, 0.923, 0.005, 0.50, 0.5),
+            0.5
+        );
+        assert_eq!(
+            late_favourite_fragile_high_cert_taper(0.922, 0.004, 0.40, 0.923, 0.005, 0.50, 0.5),
+            1.0
+        );
+        assert_eq!(
+            late_favourite_fragile_high_cert_taper(0.924, 0.006, 0.40, 0.923, 0.005, 0.50, 0.5),
+            1.0
+        );
+        assert_eq!(
+            late_favourite_fragile_high_cert_taper(0.924, 0.004, 0.60, 0.923, 0.005, 0.50, 0.5),
+            1.0
+        );
+        assert_eq!(
+            late_favourite_fragile_high_cert_taper(0.924, 0.004, 0.40, 1.0, 0.005, 0.50, 0.5),
+            1.0
+        );
     }
 
     #[test]

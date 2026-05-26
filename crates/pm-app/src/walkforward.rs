@@ -157,6 +157,10 @@ pub struct WalkForwardConfig {
     pub br2_late_favourite_clip_frac: f32,
     pub br2_late_favourite_high_cert_clip_frac: f32,
     pub br2_late_favourite_high_cert_full_clip_edge: f32,
+    pub br2_late_favourite_fragile_high_cert_ask: f32,
+    pub br2_late_favourite_fragile_high_cert_max_edge: f32,
+    pub br2_late_favourite_fragile_high_cert_max_path_efficiency: f32,
+    pub br2_late_favourite_fragile_high_cert_size_frac: f32,
     pub br2_late_favourite_max_clips: usize,
     pub br2_late_favourite_min_sustain_secs: f32,
     pub br2_late_favourite_sweep_depth: usize,
@@ -292,6 +296,10 @@ impl Default for WalkForwardConfig {
             br2_late_favourite_clip_frac: 1.00,
             br2_late_favourite_high_cert_clip_frac: 1.00,
             br2_late_favourite_high_cert_full_clip_edge: 0.00,
+            br2_late_favourite_fragile_high_cert_ask: 1.0,
+            br2_late_favourite_fragile_high_cert_max_edge: 0.0,
+            br2_late_favourite_fragile_high_cert_max_path_efficiency: 0.0,
+            br2_late_favourite_fragile_high_cert_size_frac: 1.0,
             br2_late_favourite_max_clips: 12,
             br2_late_favourite_min_sustain_secs: 0.0,
             br2_late_favourite_sweep_depth: 7,
@@ -447,6 +455,10 @@ pub struct SummaryRunConfig {
     pub br2_late_favourite_clip_frac: f32,
     pub br2_late_favourite_high_cert_clip_frac: f32,
     pub br2_late_favourite_high_cert_full_clip_edge: f32,
+    pub br2_late_favourite_fragile_high_cert_ask: f32,
+    pub br2_late_favourite_fragile_high_cert_max_edge: f32,
+    pub br2_late_favourite_fragile_high_cert_max_path_efficiency: f32,
+    pub br2_late_favourite_fragile_high_cert_size_frac: f32,
     pub br2_late_favourite_max_clips: usize,
     pub br2_late_favourite_min_sustain_secs: f32,
     pub br2_late_favourite_sweep_depth: usize,
@@ -2472,6 +2484,13 @@ fn run_one_strategy(
                 late_favourite_high_cert_clip_frac: cfg.br2_late_favourite_high_cert_clip_frac,
                 late_favourite_high_cert_full_clip_edge: cfg
                     .br2_late_favourite_high_cert_full_clip_edge,
+                late_favourite_fragile_high_cert_ask: cfg.br2_late_favourite_fragile_high_cert_ask,
+                late_favourite_fragile_high_cert_max_edge: cfg
+                    .br2_late_favourite_fragile_high_cert_max_edge,
+                late_favourite_fragile_high_cert_max_path_efficiency: cfg
+                    .br2_late_favourite_fragile_high_cert_max_path_efficiency,
+                late_favourite_fragile_high_cert_size_frac: cfg
+                    .br2_late_favourite_fragile_high_cert_size_frac,
                 late_favourite_max_clips: cfg.br2_late_favourite_max_clips,
                 late_favourite_min_sustain_secs: cfg.br2_late_favourite_min_sustain_secs,
                 late_favourite_sweep_depth: cfg.br2_late_favourite_sweep_depth,
@@ -3150,6 +3169,13 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_late_favourite_high_cert_clip_frac: cfg.br2_late_favourite_high_cert_clip_frac,
         br2_late_favourite_high_cert_full_clip_edge: cfg
             .br2_late_favourite_high_cert_full_clip_edge,
+        br2_late_favourite_fragile_high_cert_ask: cfg.br2_late_favourite_fragile_high_cert_ask,
+        br2_late_favourite_fragile_high_cert_max_edge: cfg
+            .br2_late_favourite_fragile_high_cert_max_edge,
+        br2_late_favourite_fragile_high_cert_max_path_efficiency: cfg
+            .br2_late_favourite_fragile_high_cert_max_path_efficiency,
+        br2_late_favourite_fragile_high_cert_size_frac: cfg
+            .br2_late_favourite_fragile_high_cert_size_frac,
         br2_late_favourite_max_clips: cfg.br2_late_favourite_max_clips,
         br2_late_favourite_min_sustain_secs: cfg.br2_late_favourite_min_sustain_secs,
         br2_late_favourite_sweep_depth: cfg.br2_late_favourite_sweep_depth,

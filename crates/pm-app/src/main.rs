@@ -366,6 +366,18 @@ enum Cmd {
         /// Bonereaper v2 high-cert edge where late-favourite loads reach full clip size.
         #[arg(long, default_value = "0.00")]
         br2_late_favourite_high_cert_full_clip_edge: f32,
+        /// Ask threshold for fragile high-cert late-favourite size taper; disabled at 1.0.
+        #[arg(long, default_value = "1.0")]
+        br2_late_favourite_fragile_high_cert_ask: f32,
+        /// Maximum model edge for fragile high-cert late-favourite size taper.
+        #[arg(long, default_value = "0.0")]
+        br2_late_favourite_fragile_high_cert_max_edge: f32,
+        /// Maximum BTC path efficiency for fragile high-cert late-favourite size taper.
+        #[arg(long, default_value = "0.0")]
+        br2_late_favourite_fragile_high_cert_max_path_efficiency: f32,
+        /// Size multiplier applied to fragile high-cert late-favourite loads.
+        #[arg(long, default_value = "1.0")]
+        br2_late_favourite_fragile_high_cert_size_frac: f32,
         /// Bonereaper v2 maximum late-favourite load clips.
         #[arg(long, default_value = "12")]
         br2_late_favourite_max_clips: usize,
@@ -898,6 +910,10 @@ async fn main() -> Result<()> {
             br2_late_favourite_clip_frac,
             br2_late_favourite_high_cert_clip_frac,
             br2_late_favourite_high_cert_full_clip_edge,
+            br2_late_favourite_fragile_high_cert_ask,
+            br2_late_favourite_fragile_high_cert_max_edge,
+            br2_late_favourite_fragile_high_cert_max_path_efficiency,
+            br2_late_favourite_fragile_high_cert_size_frac,
             br2_late_favourite_max_clips,
             br2_late_favourite_min_sustain_secs,
             br2_late_favourite_sweep_depth,
@@ -1001,6 +1017,10 @@ async fn main() -> Result<()> {
                 br2_late_favourite_clip_frac,
                 br2_late_favourite_high_cert_clip_frac,
                 br2_late_favourite_high_cert_full_clip_edge,
+                br2_late_favourite_fragile_high_cert_ask,
+                br2_late_favourite_fragile_high_cert_max_edge,
+                br2_late_favourite_fragile_high_cert_max_path_efficiency,
+                br2_late_favourite_fragile_high_cert_size_frac,
                 br2_late_favourite_max_clips,
                 br2_late_favourite_min_sustain_secs,
                 br2_late_favourite_sweep_depth,
@@ -1550,6 +1570,10 @@ async fn walk_forward(
     br2_late_favourite_clip_frac: f32,
     br2_late_favourite_high_cert_clip_frac: f32,
     br2_late_favourite_high_cert_full_clip_edge: f32,
+    br2_late_favourite_fragile_high_cert_ask: f32,
+    br2_late_favourite_fragile_high_cert_max_edge: f32,
+    br2_late_favourite_fragile_high_cert_max_path_efficiency: f32,
+    br2_late_favourite_fragile_high_cert_size_frac: f32,
     br2_late_favourite_max_clips: usize,
     br2_late_favourite_min_sustain_secs: f32,
     br2_late_favourite_sweep_depth: usize,
@@ -1691,6 +1715,10 @@ async fn walk_forward(
         br2_late_favourite_clip_frac,
         br2_late_favourite_high_cert_clip_frac,
         br2_late_favourite_high_cert_full_clip_edge,
+        br2_late_favourite_fragile_high_cert_ask,
+        br2_late_favourite_fragile_high_cert_max_edge,
+        br2_late_favourite_fragile_high_cert_max_path_efficiency,
+        br2_late_favourite_fragile_high_cert_size_frac,
         br2_late_favourite_max_clips,
         br2_late_favourite_min_sustain_secs,
         br2_late_favourite_sweep_depth,
