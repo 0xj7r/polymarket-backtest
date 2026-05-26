@@ -288,7 +288,7 @@ impl Default for WalkForwardConfig {
             br2_late_favourite_start_secs: 180.0,
             br2_late_favourite_threshold: 0.22,
             br2_late_favourite_min_ask: 0.70,
-            br2_late_favourite_max_ask: 0.97,
+            br2_late_favourite_max_ask: 0.92,
             br2_late_favourite_clip_frac: 1.00,
             br2_late_favourite_high_cert_clip_frac: 1.00,
             br2_late_favourite_high_cert_full_clip_edge: 0.00,
