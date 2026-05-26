@@ -385,6 +385,8 @@ pub struct MarketResult {
 pub struct StrategyMarketResult {
     pub orders_submitted: usize,
     pub orders_filled: usize,
+    pub orders_filled_taker: usize,
+    pub orders_filled_maker: usize,
     pub orders_rejected_model_gate: usize,
     pub orders_rejected_model_gate_confidence: usize,
     pub orders_rejected_model_gate_risk: usize,
@@ -395,6 +397,11 @@ pub struct StrategyMarketResult {
     pub max_drawdown_pct: f64,
     pub fills: usize,
     pub maker_rebates_usdc: f64,
+    pub requested_shares: f64,
+    pub requested_notional_usdc: f64,
+    pub filled_notional_usdc: f64,
+    pub fill_notional_ratio: f64,
+    pub avg_slippage_bps: f64,
     pub clip_used_usdc: f64,
     pub yes_resolved: bool,
     /// Per-fill detail: ts, side, shares, price, notional, tag, maker, rebate.
@@ -756,6 +763,13 @@ pub struct StrategyAggregate {
     pub markets_with_orders: usize,
     pub total_orders_submitted: usize,
     pub total_orders_filled: usize,
+    pub total_orders_filled_taker: usize,
+    pub total_orders_filled_maker: usize,
+    pub maker_fill_rate: f64,
+    pub total_requested_notional_usdc: f64,
+    pub total_filled_notional_usdc: f64,
+    pub fill_notional_ratio: f64,
+    pub avg_slippage_bps: f64,
     pub total_orders_rejected_model_gate: usize,
     pub total_orders_rejected_model_gate_confidence: usize,
     pub total_orders_rejected_model_gate_risk: usize,
@@ -771,10 +785,14 @@ pub struct StrategyAggregate {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct FillTagAggregate {
     pub fills: usize,
+    pub maker_fills: usize,
+    pub taker_fills: usize,
+    pub maker_fill_rate: f64,
     pub total_notional_usdc: f64,
     pub total_pnl_usdc: f64,
     pub mean_pnl_usdc: f64,
     pub avg_fill_price: f64,
+    pub avg_slippage_bps: f64,
     pub hit_rate: f64,
     pub avg_side_edge_vs_fill: f64,
     pub avg_market_yes_range_so_far: f64,
@@ -788,10 +806,13 @@ pub struct FillTagAggregate {
 #[derive(Debug, Default)]
 struct FillTagAccumulator {
     fills: usize,
+    maker_fills: usize,
+    taker_fills: usize,
     wins: usize,
     total_pnl_usdc: f64,
     total_notional_usdc: f64,
     sum_fill_price: f64,
+    slippage_notional: f64,
     sum_side_edge_vs_fill: f64,
     side_edge_samples: usize,
     sum_market_yes_range_so_far: f64,
@@ -807,9 +828,15 @@ struct FillTagAccumulator {
 impl FillTagAccumulator {
     fn push(&mut self, fill: &crate::runner::Fill, pnl: f64) {
         self.fills += 1;
+        if fill.maker {
+            self.maker_fills += 1;
+        } else {
+            self.taker_fills += 1;
+        }
         self.total_pnl_usdc += pnl;
         self.total_notional_usdc += fill.notional;
         self.sum_fill_price += fill.price as f64;
+        self.slippage_notional += fill.slippage_bps as f64 * fill.notional;
         if pnl > 0.0 {
             self.wins += 1;
         }
@@ -846,6 +873,13 @@ impl FillTagAccumulator {
     fn into_aggregate(self) -> FillTagAggregate {
         FillTagAggregate {
             fills: self.fills,
+            maker_fills: self.maker_fills,
+            taker_fills: self.taker_fills,
+            maker_fill_rate: if self.fills > 0 {
+                self.maker_fills as f64 / self.fills as f64
+            } else {
+                0.0
+            },
             total_notional_usdc: self.total_notional_usdc,
             total_pnl_usdc: self.total_pnl_usdc,
             mean_pnl_usdc: if self.fills > 0 {
@@ -855,6 +889,11 @@ impl FillTagAccumulator {
             },
             avg_fill_price: if self.fills > 0 {
                 self.sum_fill_price / self.fills as f64
+            } else {
+                0.0
+            },
+            avg_slippage_bps: if self.total_notional_usdc > 0.0 {
+                self.slippage_notional / self.total_notional_usdc
             } else {
                 0.0
             },
@@ -2579,9 +2618,22 @@ fn run_one_strategy(
             )
         }
     };
+    let filled_notional_usdc = report.filled_notional_usdc;
+    let avg_slippage_bps = if filled_notional_usdc > 0.0 {
+        report
+            .fills
+            .iter()
+            .map(|fill| fill.slippage_bps as f64 * fill.notional)
+            .sum::<f64>()
+            / filled_notional_usdc
+    } else {
+        0.0
+    };
     Ok(StrategyMarketResult {
         orders_submitted: report.counters.orders_submitted,
         orders_filled: report.counters.orders_filled_taker + report.counters.orders_filled_maker,
+        orders_filled_taker: report.counters.orders_filled_taker,
+        orders_filled_maker: report.counters.orders_filled_maker,
         orders_rejected_model_gate: report.counters.orders_rejected_model_gate,
         orders_rejected_model_gate_confidence: report
             .counters
@@ -2594,6 +2646,15 @@ fn run_one_strategy(
         max_drawdown_pct: report.max_drawdown_pct,
         fills: report.fills.len(),
         maker_rebates_usdc: report.maker_rebates_usdc,
+        requested_shares: report.requested_shares,
+        requested_notional_usdc: report.requested_notional_usdc,
+        filled_notional_usdc,
+        fill_notional_ratio: if report.requested_notional_usdc > 0.0 {
+            filled_notional_usdc / report.requested_notional_usdc
+        } else {
+            0.0
+        },
+        avg_slippage_bps,
         clip_used_usdc: clip,
         yes_resolved: report.yes_resolved,
         fills_detail: report.fills,
@@ -2967,6 +3028,11 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
     let mut markets_with_orders = 0usize;
     let mut total_orders_submitted = 0usize;
     let mut total_orders_filled = 0usize;
+    let mut total_orders_filled_taker = 0usize;
+    let mut total_orders_filled_maker = 0usize;
+    let mut total_requested_notional = 0.0f64;
+    let mut total_filled_notional = 0.0f64;
+    let mut total_slippage_notional = 0.0f64;
     let mut total_orders_rejected_model_gate = 0usize;
     let mut total_orders_rejected_model_gate_confidence = 0usize;
     let mut total_orders_rejected_model_gate_risk = 0usize;
@@ -2993,6 +3059,11 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
         }
         total_orders_submitted += r.orders_submitted;
         total_orders_filled += r.orders_filled;
+        total_orders_filled_taker += r.orders_filled_taker;
+        total_orders_filled_maker += r.orders_filled_maker;
+        total_requested_notional += r.requested_notional_usdc;
+        total_filled_notional += r.filled_notional_usdc;
+        total_slippage_notional += r.avg_slippage_bps * r.filled_notional_usdc;
         total_orders_rejected_model_gate += r.orders_rejected_model_gate;
         total_orders_rejected_model_gate_confidence += r.orders_rejected_model_gate_confidence;
         total_orders_rejected_model_gate_risk += r.orders_rejected_model_gate_risk;
@@ -3072,6 +3143,25 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
         markets_with_orders,
         total_orders_submitted,
         total_orders_filled,
+        total_orders_filled_taker,
+        total_orders_filled_maker,
+        maker_fill_rate: if total_orders_filled > 0 {
+            total_orders_filled_maker as f64 / total_orders_filled as f64
+        } else {
+            0.0
+        },
+        total_requested_notional_usdc: total_requested_notional,
+        total_filled_notional_usdc: total_filled_notional,
+        fill_notional_ratio: if total_requested_notional > 0.0 {
+            total_filled_notional / total_requested_notional
+        } else {
+            0.0
+        },
+        avg_slippage_bps: if total_filled_notional > 0.0 {
+            total_slippage_notional / total_filled_notional
+        } else {
+            0.0
+        },
         total_orders_rejected_model_gate,
         total_orders_rejected_model_gate_confidence,
         total_orders_rejected_model_gate_risk,
@@ -3263,7 +3353,7 @@ pub fn print_summary(summary: &WalkForwardSummary) {
     fn print_table(title: &str, per_strategy: &HashMap<&'static str, StrategyAggregate>) {
         println!("{title}");
         println!(
-            "{:>22}  {:>10}  {:>10}  {:>9}  {:>8}  {:>10}  {:>10}  {:>10}  {:>8}  {:>9}  {:>14}  {:>10}",
+            "{:>22}  {:>10}  {:>10}  {:>9}  {:>8}  {:>10}  {:>10}  {:>10}  {:>8}  {:>9}  {:>8}  {:>8}  {:>14}  {:>10}",
             "strategy",
             "total_pnl",
             "end_eq",
@@ -3274,6 +3364,8 @@ pub fn print_summary(summary: &WalkForwardSummary) {
             "stdev",
             "hit",
             "sharpe",
+            "fill%",
+            "slip",
             "fills",
             "worst",
         );
@@ -3285,7 +3377,7 @@ pub fn print_summary(summary: &WalkForwardSummary) {
         });
         for (name, agg) in rows {
             println!(
-                "{:>22}  {:>+10.4}  {:>10.2}  {:>+8.1}%  {:>7.1}%  {:>+10.4}  {:>+10.4}  {:>10.4}  {:>7.1}%  {:>+10.4}  {:>14}  {:>+10.4}",
+                "{:>22}  {:>+10.4}  {:>10.2}  {:>+8.1}%  {:>7.1}%  {:>+10.4}  {:>+10.4}  {:>10.4}  {:>7.1}%  {:>+10.4}  {:>7.1}%  {:>8.1}  {:>14}  {:>+10.4}",
                 name,
                 agg.total_pnl_usdc,
                 agg.last_end_equity_usdc,
@@ -3296,6 +3388,8 @@ pub fn print_summary(summary: &WalkForwardSummary) {
                 agg.stdev_pnl_usdc,
                 agg.hit_rate * 100.0,
                 agg.sharpe_ratio,
+                agg.fill_notional_ratio * 100.0,
+                agg.avg_slippage_bps,
                 agg.total_orders_filled,
                 agg.worst_market_pnl,
             );
@@ -3367,6 +3461,8 @@ mod tests {
             StrategyMarketResult {
                 orders_submitted: 10,
                 orders_filled: 6,
+                orders_filled_taker: 4,
+                orders_filled_maker: 2,
                 orders_rejected_model_gate: 0,
                 orders_rejected_model_gate_confidence: 0,
                 orders_rejected_model_gate_risk: 0,
@@ -3377,6 +3473,11 @@ mod tests {
                 max_drawdown_pct: 0.12,
                 fills: 6,
                 maker_rebates_usdc: 0.1,
+                requested_shares: 12.0,
+                requested_notional_usdc: 60.0,
+                filled_notional_usdc: 54.0,
+                fill_notional_ratio: 0.9,
+                avg_slippage_bps: 12.0,
                 clip_used_usdc: 2.0,
                 yes_resolved: true,
                 fills_detail: vec![],
@@ -3391,6 +3492,8 @@ mod tests {
             StrategyMarketResult {
                 orders_submitted: 3,
                 orders_filled: 1,
+                orders_filled_taker: 1,
+                orders_filled_maker: 0,
                 orders_rejected_model_gate: 0,
                 orders_rejected_model_gate_confidence: 0,
                 orders_rejected_model_gate_risk: 0,
@@ -3401,6 +3504,11 @@ mod tests {
                 max_drawdown_pct: 0.05,
                 fills: 1,
                 maker_rebates_usdc: 0.0,
+                requested_shares: 2.0,
+                requested_notional_usdc: 10.0,
+                filled_notional_usdc: 10.0,
+                fill_notional_ratio: 1.0,
+                avg_slippage_bps: 15.0,
                 clip_used_usdc: 1.5,
                 yes_resolved: false,
                 fills_detail: vec![],
@@ -3415,6 +3523,8 @@ mod tests {
             StrategyMarketResult {
                 orders_submitted: 0,
                 orders_filled: 0,
+                orders_filled_taker: 0,
+                orders_filled_maker: 0,
                 orders_rejected_model_gate: 0,
                 orders_rejected_model_gate_confidence: 0,
                 orders_rejected_model_gate_risk: 0,
@@ -3425,6 +3535,11 @@ mod tests {
                 max_drawdown_pct: 0.0,
                 fills: 0,
                 maker_rebates_usdc: 0.0,
+                requested_shares: 0.0,
+                requested_notional_usdc: 0.0,
+                filled_notional_usdc: 0.0,
+                fill_notional_ratio: 0.0,
+                avg_slippage_bps: 0.0,
                 clip_used_usdc: 3.0,
                 yes_resolved: true,
                 fills_detail: vec![],
@@ -3480,6 +3595,10 @@ mod tests {
             .expect("reactive missing");
         assert_eq!(reactive.markets_with_orders, 1);
         assert_eq!(reactive.total_orders_filled, 6);
+        assert_eq!(reactive.total_orders_filled_taker, 4);
+        assert_eq!(reactive.total_orders_filled_maker, 2);
+        assert!((reactive.fill_notional_ratio - 0.9).abs() < f64::EPSILON);
+        assert!((reactive.avg_slippage_bps - 12.0).abs() < f64::EPSILON);
         assert_eq!(reactive.best_market_pnl, 4.0);
         assert_eq!(reactive.worst_market_pnl, 4.0);
         assert!((reactive.hit_rate - 1.0).abs() < f64::EPSILON);

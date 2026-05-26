@@ -23,6 +23,13 @@ pub struct ResultSummary {
     pub path_max_drawdown_pct: f64,
     pub orders_submitted: usize,
     pub orders_filled: usize,
+    pub orders_filled_taker: usize,
+    pub orders_filled_maker: usize,
+    pub maker_fill_rate: f64,
+    pub requested_notional_usdc: f64,
+    pub filled_notional_usdc: f64,
+    pub fill_notional_ratio: f64,
+    pub avg_slippage_bps: f64,
     pub markets_with_fills: usize,
     pub winning_markets: usize,
     pub losing_markets: usize,
@@ -56,8 +63,12 @@ pub struct DailyResultSummary {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FillTagSummary {
     pub fills: usize,
+    pub maker_fills: usize,
+    pub taker_fills: usize,
+    pub maker_fill_rate: f64,
     pub total_notional_usdc: f64,
     pub avg_fill_price: f64,
+    pub avg_slippage_bps: f64,
     pub avg_side_edge_vs_fill: f64,
     pub avg_market_yes_range_so_far: f64,
     pub avg_regime_whipsaw_score: f64,
@@ -70,8 +81,11 @@ pub struct FillTagSummary {
 #[derive(Debug, Default)]
 struct FillTagAccumulator {
     fills: usize,
+    maker_fills: usize,
+    taker_fills: usize,
     total_notional_usdc: f64,
     sum_fill_price: f64,
+    slippage_notional: f64,
     sum_side_edge_vs_fill: f64,
     side_edge_samples: usize,
     sum_market_yes_range_so_far: f64,
@@ -87,8 +101,14 @@ struct FillTagAccumulator {
 impl FillTagAccumulator {
     fn push(&mut self, fill: &FillRow) {
         self.fills += 1;
+        if fill.maker {
+            self.maker_fills += 1;
+        } else {
+            self.taker_fills += 1;
+        }
         self.total_notional_usdc += fill.notional;
         self.sum_fill_price += fill.price;
+        self.slippage_notional += fill.slippage_bps * fill.notional;
         if let Some(edge) = fill.side_edge_vs_fill {
             self.sum_side_edge_vs_fill += edge;
             self.side_edge_samples += 1;
@@ -122,9 +142,21 @@ impl FillTagAccumulator {
     fn into_summary(self) -> FillTagSummary {
         FillTagSummary {
             fills: self.fills,
+            maker_fills: self.maker_fills,
+            taker_fills: self.taker_fills,
+            maker_fill_rate: if self.fills > 0 {
+                self.maker_fills as f64 / self.fills as f64
+            } else {
+                0.0
+            },
             total_notional_usdc: self.total_notional_usdc,
             avg_fill_price: if self.fills > 0 {
                 self.sum_fill_price / self.fills as f64
+            } else {
+                0.0
+            },
+            avg_slippage_bps: if self.total_notional_usdc > 0.0 {
+                self.slippage_notional / self.total_notional_usdc
             } else {
                 0.0
             },
@@ -182,6 +214,16 @@ struct StrategyResultRow {
     #[serde(default)]
     orders_filled: usize,
     #[serde(default)]
+    orders_filled_taker: usize,
+    #[serde(default)]
+    orders_filled_maker: usize,
+    #[serde(default)]
+    requested_notional_usdc: f64,
+    #[serde(default)]
+    filled_notional_usdc: f64,
+    #[serde(default)]
+    avg_slippage_bps: f64,
+    #[serde(default)]
     pnl_usdc: f64,
     #[serde(default)]
     start_equity_usdc: f64,
@@ -199,6 +241,10 @@ struct FillRow {
     price: f64,
     #[serde(default)]
     notional: f64,
+    #[serde(default)]
+    maker: bool,
+    #[serde(default)]
+    slippage_bps: f64,
     #[serde(default)]
     tag: String,
     #[serde(default)]
@@ -305,6 +351,11 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
     let mut total_pnl = 0.0f64;
     let mut orders_submitted = 0usize;
     let mut orders_filled = 0usize;
+    let mut orders_filled_taker = 0usize;
+    let mut orders_filled_maker = 0usize;
+    let mut requested_notional = 0.0f64;
+    let mut filled_notional = 0.0f64;
+    let mut slippage_notional = 0.0f64;
     let mut markets_with_fills = 0usize;
     let mut winning_markets = 0usize;
     let mut losing_markets = 0usize;
@@ -344,6 +395,51 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
         total_pnl += strategy_row.pnl_usdc;
         orders_submitted += strategy_row.orders_submitted;
         orders_filled += strategy_row.orders_filled;
+        let row_maker_fills =
+            if strategy_row.orders_filled_maker > 0 || strategy_row.orders_filled_taker > 0 {
+                strategy_row.orders_filled_maker
+            } else {
+                strategy_row
+                    .fills_detail
+                    .iter()
+                    .filter(|fill| fill.maker)
+                    .count()
+            };
+        let row_taker_fills =
+            if strategy_row.orders_filled_maker > 0 || strategy_row.orders_filled_taker > 0 {
+                strategy_row.orders_filled_taker
+            } else {
+                strategy_row
+                    .fills_detail
+                    .len()
+                    .saturating_sub(row_maker_fills)
+            };
+        orders_filled_taker += row_taker_fills;
+        orders_filled_maker += row_maker_fills;
+        requested_notional += strategy_row.requested_notional_usdc;
+        let row_filled_notional = if strategy_row.filled_notional_usdc > 0.0 {
+            strategy_row.filled_notional_usdc
+        } else {
+            strategy_row
+                .fills_detail
+                .iter()
+                .map(|fill| fill.notional)
+                .sum()
+        };
+        filled_notional += row_filled_notional;
+        let row_avg_slippage = if strategy_row.avg_slippage_bps > 0.0 {
+            strategy_row.avg_slippage_bps
+        } else if row_filled_notional > 0.0 {
+            strategy_row
+                .fills_detail
+                .iter()
+                .map(|fill| fill.slippage_bps * fill.notional)
+                .sum::<f64>()
+                / row_filled_notional
+        } else {
+            0.0
+        };
+        slippage_notional += row_avg_slippage * row_filled_notional;
         if strategy_row.orders_filled > 0 {
             markets_with_fills += 1;
         }
@@ -414,6 +510,25 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
         path_max_drawdown_pct: path_max_drawdown * 100.0,
         orders_submitted,
         orders_filled,
+        orders_filled_taker,
+        orders_filled_maker,
+        maker_fill_rate: if orders_filled > 0 {
+            orders_filled_maker as f64 / orders_filled as f64
+        } else {
+            0.0
+        },
+        requested_notional_usdc: requested_notional,
+        filled_notional_usdc: filled_notional,
+        fill_notional_ratio: if requested_notional > 0.0 {
+            filled_notional / requested_notional
+        } else {
+            0.0
+        },
+        avg_slippage_bps: if filled_notional > 0.0 {
+            slippage_notional / filled_notional
+        } else {
+            0.0
+        },
         markets_with_fills,
         winning_markets,
         losing_markets,
@@ -461,6 +576,14 @@ pub fn print_result_summary(summary: &ResultSummary) {
         summary.orders_submitted, summary.orders_filled
     );
     println!(
+        "fill quality          : requested={:.2} filled={:.2} ratio={:.1}% maker={:.1}% slip={:.1}bps",
+        summary.requested_notional_usdc,
+        summary.filled_notional_usdc,
+        summary.fill_notional_ratio * 100.0,
+        summary.maker_fill_rate * 100.0,
+        summary.avg_slippage_bps
+    );
+    println!(
         "fill markets W/L      : {} / {} / {} ({:.1}% hit)",
         summary.markets_with_fills,
         summary.winning_markets,
@@ -483,11 +606,13 @@ pub fn print_result_summary(summary: &ResultSummary) {
         tags.sort_by(|a, b| a.0.cmp(b.0));
         for (tag, agg) in tags {
             println!(
-                "  {:28} fills={:<6} notional={:.2} avg_px={:.4} edge_fill={:+.4} range={:.3} whip={:.3} path={:.3} rev={:.3}",
+                "  {:28} fills={:<6} notional={:.2} avg_px={:.4} maker={:.1}% slip={:.1}bps edge_fill={:+.4} range={:.3} whip={:.3} path={:.3} rev={:.3}",
                 tag,
                 agg.fills,
                 agg.total_notional_usdc,
                 agg.avg_fill_price,
+                agg.maker_fill_rate * 100.0,
+                agg.avg_slippage_bps,
                 agg.avg_side_edge_vs_fill,
                 agg.avg_market_yes_range_so_far,
                 agg.avg_regime_whipsaw_score,
@@ -558,12 +683,12 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         writeln!(
             file,
-            r#"{{"slug":"m1","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"pnl_usdc":10.0,"start_equity_usdc":1000.0,"end_equity_usdc":1010.0,"fills_detail":[{{"price":0.8,"notional":8.0,"tag":"fav"}}],"bonereaper_v2_gate_stats":{{"late_favourite_checks":10,"late_favourite_emits":1,"late_favourite_whipsaw_fail":2}}}}}}}}"#
+            r#"{{"slug":"m1","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"orders_filled_taker":1,"orders_filled_maker":0,"requested_notional_usdc":10.0,"filled_notional_usdc":8.0,"avg_slippage_bps":20.0,"pnl_usdc":10.0,"start_equity_usdc":1000.0,"end_equity_usdc":1010.0,"fills_detail":[{{"price":0.8,"notional":8.0,"tag":"fav","maker":false,"slippage_bps":20.0}}],"bonereaper_v2_gate_stats":{{"late_favourite_checks":10,"late_favourite_emits":1,"late_favourite_whipsaw_fail":2}}}}}}}}"#
         )
         .unwrap();
         writeln!(
             file,
-            r#"{{"slug":"m2","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"pnl_usdc":-20.0,"start_equity_usdc":1010.0,"end_equity_usdc":990.0,"fills_detail":[{{"price":0.9,"notional":9.0,"tag":"fav"}}],"bonereaper_v2_gate_stats":{{"late_favourite_checks":5,"late_favourite_emits":2,"late_favourite_reversal_pressure_fail":3}}}}}}}}"#
+            r#"{{"slug":"m2","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"orders_filled_taker":0,"orders_filled_maker":1,"requested_notional_usdc":9.0,"filled_notional_usdc":9.0,"avg_slippage_bps":0.0,"pnl_usdc":-20.0,"start_equity_usdc":1010.0,"end_equity_usdc":990.0,"fills_detail":[{{"price":0.9,"notional":9.0,"tag":"fav","maker":true,"slippage_bps":0.0}}],"bonereaper_v2_gate_stats":{{"late_favourite_checks":5,"late_favourite_emits":2,"late_favourite_reversal_pressure_fail":3}}}}}}}}"#
         )
         .unwrap();
         drop(file);
@@ -572,6 +697,13 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         assert_eq!(summary.markets, 2);
         assert_eq!(summary.orders_filled, 2);
+        assert_eq!(summary.orders_filled_taker, 1);
+        assert_eq!(summary.orders_filled_maker, 1);
+        assert!((summary.maker_fill_rate - 0.5).abs() < 1e-9);
+        assert!((summary.requested_notional_usdc - 19.0).abs() < 1e-9);
+        assert!((summary.filled_notional_usdc - 17.0).abs() < 1e-9);
+        assert!((summary.fill_notional_ratio - 17.0 / 19.0).abs() < 1e-9);
+        assert!((summary.avg_slippage_bps - (160.0 / 17.0)).abs() < 1e-9);
         assert_eq!(summary.markets_with_fills, 2);
         assert_eq!(summary.winning_markets, 1);
         assert_eq!(summary.losing_markets, 1);
@@ -579,8 +711,11 @@ mod tests {
         assert!((summary.path_max_drawdown_pct - 1.9801980198019802).abs() < 1e-9);
         let fav = summary.by_fill_tag.get("fav").unwrap();
         assert_eq!(fav.fills, 2);
+        assert_eq!(fav.taker_fills, 1);
+        assert_eq!(fav.maker_fills, 1);
         assert!((fav.total_notional_usdc - 17.0).abs() < 1e-9);
         assert!((fav.avg_fill_price - 0.85).abs() < 1e-9);
+        assert!((fav.avg_slippage_bps - (160.0 / 17.0)).abs() < 1e-9);
         let gates = summary.bonereaper_v2_gate_stats.unwrap();
         assert_eq!(gates.late_favourite_checks, 15);
         assert_eq!(gates.late_favourite_emits, 3);

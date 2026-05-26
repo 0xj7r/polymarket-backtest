@@ -178,6 +178,9 @@ pub struct BacktestReport {
     pub final_yes_shares: f64,
     pub final_no_shares: f64,
     pub final_cash_usdc: f64,
+    pub requested_shares: f64,
+    pub requested_notional_usdc: f64,
+    pub filled_notional_usdc: f64,
     pub yes_resolved: bool,
     pub last_yes_mid: f32,
     pub fills: Vec<Fill>,
@@ -366,6 +369,8 @@ pub fn run_backtest<S: Strategy>(
     let mut fills: Vec<Fill> = Vec::new();
     let mut last_mid = 0.0f32;
     let mut total_rebates = 0.0f64;
+    let mut total_requested_shares = 0.0f64;
+    let mut total_requested_notional = 0.0f64;
     let mut resting: Vec<RestingOrder> = Vec::new();
     let mut trade_cursor = 0usize;
     let mut events_processed = 0usize;
@@ -553,7 +558,10 @@ pub fn run_backtest<S: Strategy>(
             }
             counters.orders_submitted += 1;
             requested_shares += req.shares;
-            requested_notional += order_request_notional_usdc(req, event).unwrap_or(0.0);
+            let req_notional = order_request_notional_usdc(req, event).unwrap_or(0.0);
+            requested_notional += req_notional;
+            total_requested_shares += req.shares;
+            total_requested_notional += req_notional;
             let fill_context = Some(FillModelContext::from_event(
                 event,
                 &model_output,
@@ -821,6 +829,7 @@ pub fn run_backtest<S: Strategy>(
     let yes_resolved = cfg.resolved_yes.unwrap_or(last_mid >= 0.5);
     let settlement_cash = if yes_resolved { yes_shares } else { no_shares };
     let end_cash = cash + settlement_cash;
+    let filled_notional_usdc = fills.iter().map(|f| f.notional).sum::<f64>();
     portfolio.mark(end_cash);
 
     let final_ts_ns = if last_window_idx >= 0 {
@@ -886,6 +895,9 @@ pub fn run_backtest<S: Strategy>(
         final_yes_shares: yes_shares,
         final_no_shares: no_shares,
         final_cash_usdc: cash,
+        requested_shares: total_requested_shares,
+        requested_notional_usdc: total_requested_notional,
+        filled_notional_usdc,
         yes_resolved,
         last_yes_mid: last_mid,
         fills,
@@ -1884,6 +1896,17 @@ pub fn pretty_print(rep: &BacktestReport) {
         rep.peak_equity_usdc,
         rep.max_drawdown_pct * 100.0
     );
+    let fill_notional_ratio = if rep.requested_notional_usdc > 0.0 {
+        rep.filled_notional_usdc / rep.requested_notional_usdc
+    } else {
+        0.0
+    };
+    println!(
+        "fill notional     : requested={:.4} filled={:.4} ratio={:.1}%",
+        rep.requested_notional_usdc,
+        rep.filled_notional_usdc,
+        fill_notional_ratio * 100.0
+    );
     println!(
         "final position    : yes={:.4}  no={:.4}  cash={:.4}",
         rep.final_yes_shares, rep.final_no_shares, rep.final_cash_usdc
@@ -2201,6 +2224,9 @@ mod tests {
         .unwrap();
         assert_eq!(rep.counters.orders_filled_taker, 1);
         assert_eq!(rep.fills.len(), 1);
+        assert!((rep.requested_shares - 10.0).abs() < 1e-9);
+        assert!((rep.requested_notional_usdc - 5.1).abs() < 1e-6);
+        assert!((rep.filled_notional_usdc - 5.1).abs() < 1e-6);
         assert!(
             (rep.pnl_usdc - -5.1).abs() < 1e-6,
             "pnl was {}",
