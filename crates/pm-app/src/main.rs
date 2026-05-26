@@ -367,16 +367,16 @@ enum Cmd {
         #[arg(long, default_value = "0.00")]
         br2_late_favourite_high_cert_full_clip_edge: f32,
         /// Ask threshold for fragile high-cert late-favourite size taper; disabled at 1.0.
-        #[arg(long, default_value = "1.0")]
+        #[arg(long, default_value = "0.923")]
         br2_late_favourite_fragile_high_cert_ask: f32,
         /// Maximum model edge for fragile high-cert late-favourite size taper.
-        #[arg(long, default_value = "0.0")]
+        #[arg(long, default_value = "0.005")]
         br2_late_favourite_fragile_high_cert_max_edge: f32,
         /// Maximum BTC path efficiency for fragile high-cert late-favourite size taper.
-        #[arg(long, default_value = "0.0")]
+        #[arg(long, default_value = "0.50")]
         br2_late_favourite_fragile_high_cert_max_path_efficiency: f32,
         /// Size multiplier applied to fragile high-cert late-favourite loads.
-        #[arg(long, default_value = "1.0")]
+        #[arg(long, default_value = "0.50")]
         br2_late_favourite_fragile_high_cert_size_frac: f32,
         /// Bonereaper v2 maximum late-favourite load clips.
         #[arg(long, default_value = "12")]
