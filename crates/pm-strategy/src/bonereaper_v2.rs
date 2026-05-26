@@ -252,8 +252,8 @@ pub struct BonereaperV2Config {
     pub tail_min_ask: f32,
     pub tail_max_ask: f32,
     /// Minimum seconds remaining in the 5m window before opening a new
-    /// convex-tail rung. Default 0 preserves legacy behaviour; setting this
-    /// avoids paying for tails with almost no time left to reverse.
+    /// convex-tail rung. Avoids paying for tails with almost no time left to
+    /// reverse.
     pub tail_min_seconds_to_close: f32,
     /// Minimum live-observed YES-mid range required before buying convex tail.
     /// Useful for avoiding steady favourite markets where tail bleed is most
@@ -364,7 +364,7 @@ impl Default for BonereaperV2Config {
             tail_refresh_secs: 5.0,
             tail_min_ask: 0.01,
             tail_max_ask: 0.10,
-            tail_min_seconds_to_close: 0.0,
+            tail_min_seconds_to_close: 10.0,
             tail_min_observed_range: 0.0,
             tail_target_favourite_loss_coverage_frac: 0.0,
             tail_budget_favourite_spend_frac: 0.05,

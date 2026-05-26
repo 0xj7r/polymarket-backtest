@@ -317,7 +317,7 @@ impl Default for WalkForwardConfig {
             br2_tail_max_clips: 3,
             br2_tail_min_ask: 0.01,
             br2_tail_max_ask: 0.10,
-            br2_tail_min_seconds_to_close: 0.0,
+            br2_tail_min_seconds_to_close: 10.0,
             br2_tail_min_observed_range: 0.0,
             br2_tail_target_favourite_loss_coverage_frac: 0.00,
             br2_tail_extreme_threshold: 0.30,

@@ -442,7 +442,7 @@ enum Cmd {
         #[arg(long, default_value = "0.10")]
         br2_tail_max_ask: f32,
         /// Bonereaper v2 minimum seconds remaining before opening a convex-tail entry.
-        #[arg(long, default_value = "0.0")]
+        #[arg(long, default_value = "10.0")]
         br2_tail_min_seconds_to_close: f32,
         /// Bonereaper v2 minimum live-observed YES-mid range before convex-tail entries.
         #[arg(long, default_value = "0.0")]
