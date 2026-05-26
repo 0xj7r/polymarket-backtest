@@ -546,10 +546,13 @@ fn late_favourite_high_cert_edge_taper(edge: f32, min_edge: f32, full_clip_edge:
         .into()
 }
 
-fn late_favourite_fragile_high_cert_edge(side_probability: f32, favourite_ask: f64) -> f32 {
+fn late_favourite_fragile_high_cert_effective_price(favourite_ask: f64) -> f32 {
     let sweep_premium = if favourite_ask >= 0.90 { 0.025 } else { 0.0 };
-    let effective_price = (favourite_ask as f32 + sweep_premium).clamp(0.0, 0.999);
-    side_probability - effective_price
+    (favourite_ask as f32 + sweep_premium).clamp(0.0, 0.999)
+}
+
+fn late_favourite_fragile_high_cert_edge(side_probability: f32, favourite_ask: f64) -> f32 {
+    side_probability - late_favourite_fragile_high_cert_effective_price(favourite_ask)
 }
 
 fn late_favourite_fragile_high_cert_taper(
@@ -1248,8 +1251,10 @@ impl Strategy for BonereaperV2 {
                             let fragile_edge = model_side_probability(ctx, side)
                                 .map(|side_p| late_favourite_fragile_high_cert_edge(side_p, px))
                                 .unwrap_or(0.0);
+                            let fragile_effective_price =
+                                late_favourite_fragile_high_cert_effective_price(px);
                             let fragile_taper = late_favourite_fragile_high_cert_taper(
-                                px,
+                                fragile_effective_price as f64,
                                 fragile_edge,
                                 whipsaw.path_efficiency,
                                 self.cfg.late_favourite_fragile_high_cert_ask,
@@ -1470,8 +1475,21 @@ mod tests {
 
     #[test]
     fn fragile_high_cert_edge_accounts_for_expected_sweep_cost() {
+        assert!((late_favourite_fragile_high_cert_effective_price(0.900) - 0.925).abs() < 1e-6);
         assert!((late_favourite_fragile_high_cert_edge(0.929, 0.900) - 0.004).abs() < 1e-6);
         assert!((late_favourite_fragile_high_cert_edge(0.929, 0.880) - 0.049).abs() < 1e-6);
+        assert_eq!(
+            late_favourite_fragile_high_cert_taper(
+                late_favourite_fragile_high_cert_effective_price(0.900) as f64,
+                late_favourite_fragile_high_cert_edge(0.929, 0.900),
+                0.40,
+                0.923,
+                0.005,
+                0.50,
+                0.5,
+            ),
+            0.5
+        );
     }
 
     #[test]
