@@ -547,7 +547,7 @@ fn late_favourite_high_cert_edge_taper(edge: f32, min_edge: f32, full_clip_edge:
 }
 
 fn late_favourite_fragile_high_cert_effective_price(favourite_ask: f64) -> f32 {
-    let sweep_premium = if favourite_ask >= 0.90 { 0.025 } else { 0.0 };
+    let sweep_premium = if favourite_ask >= 0.895 { 0.025 } else { 0.0 };
     (favourite_ask as f32 + sweep_premium).clamp(0.0, 0.999)
 }
 
@@ -1475,6 +1475,7 @@ mod tests {
 
     #[test]
     fn fragile_high_cert_edge_accounts_for_expected_sweep_cost() {
+        assert!((late_favourite_fragile_high_cert_effective_price(0.8999) - 0.9249).abs() < 1e-6);
         assert!((late_favourite_fragile_high_cert_effective_price(0.900) - 0.925).abs() < 1e-6);
         assert!((late_favourite_fragile_high_cert_edge(0.929, 0.900) - 0.004).abs() < 1e-6);
         assert!((late_favourite_fragile_high_cert_edge(0.929, 0.880) - 0.049).abs() < 1e-6);
