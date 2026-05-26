@@ -202,6 +202,9 @@ pub struct WalkForwardConfig {
     pub model_gate_min_confidence: f32,
     pub model_gate_max_risk: f32,
     pub model_gate_min_edge: f32,
+    pub model_btc_whipsaw_risk_weight: f32,
+    pub model_btc_path_inefficiency_risk_weight: f32,
+    pub model_btc_reversal_pressure_risk_weight: f32,
     /// Split aggregate reporting by per-market price range in YES mid: high
     /// volatility if `range > threshold`.
     pub volatility_regime_threshold: f64,
@@ -346,6 +349,9 @@ impl Default for WalkForwardConfig {
             model_gate_min_confidence: 0.68,
             model_gate_max_risk: 0.72,
             model_gate_min_edge: 0.00,
+            model_btc_whipsaw_risk_weight: 0.16,
+            model_btc_path_inefficiency_risk_weight: 0.10,
+            model_btc_reversal_pressure_risk_weight: 0.12,
             volatility_regime_threshold: 0.08,
             walk_forward_folds: None,
             fold_size: None,
@@ -519,6 +525,9 @@ pub struct SummaryRunConfig {
     pub model_gate_min_confidence: f32,
     pub model_gate_max_risk: f32,
     pub model_gate_min_edge: f32,
+    pub model_btc_whipsaw_risk_weight: f32,
+    pub model_btc_path_inefficiency_risk_weight: f32,
+    pub model_btc_reversal_pressure_risk_weight: f32,
     pub min_train_markets: usize,
     pub meta_epochs: usize,
     pub meta_learning_rate: f32,
@@ -2185,6 +2194,9 @@ async fn collect_training_samples_for_market(
         update_model_state_on_resolution: true,
         meta_calibrator_snapshot: None,
         enable_meta_calibration: true,
+        model_btc_whipsaw_risk_weight: 0.16,
+        model_btc_path_inefficiency_risk_weight: 0.10,
+        model_btc_reversal_pressure_risk_weight: 0.12,
         decision_log_every_n: 1_000_000,
         max_inventory_imbalance_shares: 1.5,
         taker_slippage_bps: 0.0,
@@ -2322,6 +2334,11 @@ async fn run_markets(
                 update_model_state_on_resolution: meta_calibrator_snapshot.is_none(),
                 meta_calibrator_snapshot,
                 enable_meta_calibration: cfg_arc.enable_meta_calibration,
+                model_btc_whipsaw_risk_weight: cfg_arc.model_btc_whipsaw_risk_weight,
+                model_btc_path_inefficiency_risk_weight: cfg_arc
+                    .model_btc_path_inefficiency_risk_weight,
+                model_btc_reversal_pressure_risk_weight: cfg_arc
+                    .model_btc_reversal_pressure_risk_weight,
                 decision_log_every_n: 1_000_000,
                 // Hard inventory cap: never let |yes - no| exceed 1.5 shares
                 // per market (paired-MM safety net).
@@ -2820,6 +2837,11 @@ async fn run_portfolio(
                 update_model_state_on_resolution: meta_calibrator_snapshot.is_none(),
                 meta_calibrator_snapshot: meta_calibrator_snapshot.clone(),
                 enable_meta_calibration: cfg.enable_meta_calibration,
+                model_btc_whipsaw_risk_weight: cfg.model_btc_whipsaw_risk_weight,
+                model_btc_path_inefficiency_risk_weight: cfg
+                    .model_btc_path_inefficiency_risk_weight,
+                model_btc_reversal_pressure_risk_weight: cfg
+                    .model_btc_reversal_pressure_risk_weight,
                 decision_log_every_n: 1_000_000,
                 max_inventory_imbalance_shares: 1.5,
                 taker_slippage_bps: 15.0,
@@ -3355,6 +3377,9 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         model_gate_min_confidence: cfg.model_gate_min_confidence,
         model_gate_max_risk: cfg.model_gate_max_risk,
         model_gate_min_edge: cfg.model_gate_min_edge,
+        model_btc_whipsaw_risk_weight: cfg.model_btc_whipsaw_risk_weight,
+        model_btc_path_inefficiency_risk_weight: cfg.model_btc_path_inefficiency_risk_weight,
+        model_btc_reversal_pressure_risk_weight: cfg.model_btc_reversal_pressure_risk_weight,
         min_train_markets: cfg.min_train_markets,
         meta_epochs: cfg.meta_training_config.epochs,
         meta_learning_rate: cfg.meta_training_config.learning_rate,

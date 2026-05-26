@@ -529,6 +529,15 @@ enum Cmd {
         /// Runner-level model gate minimum explicit side edge.
         #[arg(long, default_value = "0.00")]
         model_gate_min_edge: f32,
+        /// Canonical model risk weight for BTC spot whipsaw regimes.
+        #[arg(long, default_value = "0.16")]
+        model_btc_whipsaw_risk_weight: f32,
+        /// Canonical model risk weight for BTC path inefficiency.
+        #[arg(long, default_value = "0.10")]
+        model_btc_path_inefficiency_risk_weight: f32,
+        /// Canonical model risk weight for short-term BTC reversal pressure.
+        #[arg(long, default_value = "0.12")]
+        model_btc_reversal_pressure_risk_weight: f32,
         /// Local directory mirroring the S3 prefix structure. When set, the
         /// loader reads parquets from local disk instead of S3 (use after
         /// `pm-app prep-cache`).
@@ -1028,6 +1037,9 @@ async fn main() -> Result<()> {
             model_gate_min_confidence,
             model_gate_max_risk,
             model_gate_min_edge,
+            model_btc_whipsaw_risk_weight,
+            model_btc_path_inefficiency_risk_weight,
+            model_btc_reversal_pressure_risk_weight,
             walk_forward_folds,
             fold_size,
             purge_markets,
@@ -1139,6 +1151,9 @@ async fn main() -> Result<()> {
                 model_gate_min_confidence,
                 model_gate_max_risk,
                 model_gate_min_edge,
+                model_btc_whipsaw_risk_weight,
+                model_btc_path_inefficiency_risk_weight,
+                model_btc_reversal_pressure_risk_weight,
                 walk_forward_folds,
                 fold_size,
                 purge_markets,
@@ -1750,6 +1765,9 @@ async fn walk_forward(
     model_gate_min_confidence: f32,
     model_gate_max_risk: f32,
     model_gate_min_edge: f32,
+    model_btc_whipsaw_risk_weight: f32,
+    model_btc_path_inefficiency_risk_weight: f32,
+    model_btc_reversal_pressure_risk_weight: f32,
     walk_forward_folds: Option<usize>,
     fold_size: Option<usize>,
     purge_markets: usize,
@@ -1900,6 +1918,9 @@ async fn walk_forward(
         model_gate_min_confidence,
         model_gate_max_risk,
         model_gate_min_edge,
+        model_btc_whipsaw_risk_weight,
+        model_btc_path_inefficiency_risk_weight,
+        model_btc_reversal_pressure_risk_weight,
         volatility_regime_threshold,
         walk_forward_folds,
         fold_size,
@@ -2221,6 +2242,9 @@ async fn run_market_backtest(
         update_model_state_on_resolution: true,
         meta_calibrator_snapshot: None,
         enable_meta_calibration: true,
+        model_btc_whipsaw_risk_weight: 0.16,
+        model_btc_path_inefficiency_risk_weight: 0.10,
+        model_btc_reversal_pressure_risk_weight: 0.12,
         decision_log_every_n,
         enforce_model_gate: true,
         model_gate_min_confidence: 0.68,

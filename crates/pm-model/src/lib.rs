@@ -27,6 +27,9 @@ const META_TREE_VALUE_CLIP: f32 = 0.65;
 const VOLATILITY_WINDOW_MARKETS: usize = 3;
 const VOLATILITY_REGIME_WEIGHT: f32 = 0.22;
 const TIME_OF_DAY_REGIME_WEIGHT: f32 = 0.18;
+const BTC_WHIPSAW_RISK_WEIGHT: f32 = 0.16;
+const BTC_PATH_INEFFICIENCY_RISK_WEIGHT: f32 = 0.10;
+const BTC_REVERSAL_PRESSURE_RISK_WEIGHT: f32 = 0.12;
 const BETA_CALIBRATOR_MIN_SAMPLES: usize = 256;
 const BETA_CALIBRATOR_EPOCHS: usize = 96;
 const BETA_CALIBRATOR_LR: f32 = 0.03;
@@ -1781,6 +1784,12 @@ pub struct ModelConfig {
     pub time_of_day_weight: f32,
     /// Blend strength for cross-market volatility regime in confidence/risk.
     pub volatility_weight: f32,
+    /// Blend strength for BTC spot whipsaw risk in `risk_score`.
+    pub btc_whipsaw_risk_weight: f32,
+    /// Blend strength for BTC path inefficiency in `risk_score`.
+    pub btc_path_inefficiency_risk_weight: f32,
+    /// Blend strength for short-term BTC reversal pressure in `risk_score`.
+    pub btc_reversal_pressure_risk_weight: f32,
 }
 
 impl Default for ModelConfig {
@@ -1799,6 +1808,9 @@ impl Default for ModelConfig {
             enable_meta_calibration: true,
             time_of_day_weight: TIME_OF_DAY_REGIME_WEIGHT,
             volatility_weight: VOLATILITY_REGIME_WEIGHT,
+            btc_whipsaw_risk_weight: BTC_WHIPSAW_RISK_WEIGHT,
+            btc_path_inefficiency_risk_weight: BTC_PATH_INEFFICIENCY_RISK_WEIGHT,
+            btc_reversal_pressure_risk_weight: BTC_REVERSAL_PRESSURE_RISK_WEIGHT,
         }
     }
 }
@@ -1973,7 +1985,7 @@ impl ModelState {
             markov_persistence,
         );
         let time_of_day_penalty = (0.5 - predicted_side_edge).max(0.0) * 2.0;
-        let risk = risk_score(
+        let risk = risk_score_with_btc_weights(
             event,
             &self.recent_dir,
             &self.top3_imbalance,
@@ -1986,6 +1998,9 @@ impl ModelState {
             time_of_day_penalty,
             cfg.time_of_day_weight,
             cfg.volatility_weight,
+            cfg.btc_whipsaw_risk_weight,
+            cfg.btc_path_inefficiency_risk_weight,
+            cfg.btc_reversal_pressure_risk_weight,
             1.0 - markov_persistence,
             spot_regime,
         );
@@ -2286,6 +2301,44 @@ pub fn risk_score(
     markov_reversal_risk: f32,
     spot_regime: SpotRegimeFeatures,
 ) -> RiskScore {
+    risk_score_with_btc_weights(
+        event,
+        recent_dir_scores,
+        top3_imbalance,
+        depth_full_at_shares,
+        direction_side_is_yes,
+        observed_yes_range_so_far,
+        skew_penalty,
+        volatility_penalty,
+        time_of_day_penalty,
+        time_of_day_weight,
+        volatility_weight,
+        BTC_WHIPSAW_RISK_WEIGHT,
+        BTC_PATH_INEFFICIENCY_RISK_WEIGHT,
+        BTC_REVERSAL_PRESSURE_RISK_WEIGHT,
+        markov_reversal_risk,
+        spot_regime,
+    )
+}
+
+fn risk_score_with_btc_weights(
+    event: &ReplayEvent,
+    recent_dir_scores: &Ring,
+    top3_imbalance: &TimedRing,
+    depth_full_at_shares: f32,
+    direction_side_is_yes: bool,
+    observed_yes_range_so_far: f32,
+    skew_penalty: f32,
+    volatility_penalty: f32,
+    time_of_day_penalty: f32,
+    time_of_day_weight: f32,
+    volatility_weight: f32,
+    btc_whipsaw_risk_weight: f32,
+    btc_path_inefficiency_risk_weight: f32,
+    btc_reversal_pressure_risk_weight: f32,
+    markov_reversal_risk: f32,
+    spot_regime: SpotRegimeFeatures,
+) -> RiskScore {
     let flips = recent_dir_scores.sign_flips() as f32;
     let denom = (recent_dir_scores.len().saturating_sub(1).max(1)) as f32;
     let whipsaw = (flips / denom).clamp(0.0, 1.0);
@@ -2319,8 +2372,12 @@ pub fn risk_score(
         + 0.10 * skew_penalty
         + OBSERVED_RANGE_HIGH_CERT_RISK_WEIGHT * range_high_cert_risk
         + volatility_weight * volatility_penalty
-        + time_of_day_weight * 0.5 * time_of_day_penalty)
-        .clamp(0.0, 1.0);
+        + time_of_day_weight * 0.5 * time_of_day_penalty
+        + btc_whipsaw_risk_weight.clamp(0.0, 1.0) * btc_whipsaw_risk
+        + btc_path_inefficiency_risk_weight.clamp(0.0, 1.0) * btc_path_inefficiency_risk
+        + btc_reversal_pressure_risk_weight.clamp(0.0, 1.0)
+            * spot_regime.reversal_pressure.clamp(0.0, 1.0))
+    .clamp(0.0, 1.0);
 
     RiskScore {
         whipsaw,
@@ -3048,6 +3105,64 @@ mod tests {
 
         assert!(extreme.observed_range_high_cert_risk > 0.5);
         assert!(extreme.composite > calm.composite);
+    }
+
+    #[test]
+    fn risk_score_penalizes_btc_whipsaw_regime() {
+        let event = evt(0.78, 0.79, 1000.0, 1000.0, 2_000_000_000);
+        let mut dir = Ring::new(4);
+        dir.push(1.0);
+        dir.push(1.0);
+        let mut imbalance = TimedRing::new(4);
+        imbalance.push(2_000_000_000, 0.0);
+
+        let calm = risk_score(
+            &event,
+            &dir,
+            &imbalance,
+            2000.0,
+            true,
+            0.20,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            SpotRegimeFeatures::default(),
+        );
+        let choppy = risk_score(
+            &event,
+            &dir,
+            &imbalance,
+            2000.0,
+            true,
+            0.20,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            SpotRegimeFeatures {
+                whipsaw_score: 0.90,
+                path_efficiency: 0.15,
+                path_inefficiency: 0.85,
+                sign_flip_rate: 0.80,
+                realized_vol_180s_bps: 9.0,
+                reversal_pressure: 0.95,
+            },
+        );
+
+        assert!(choppy.btc_whipsaw_risk > calm.btc_whipsaw_risk);
+        assert!(choppy.btc_path_inefficiency_risk > calm.btc_path_inefficiency_risk);
+        assert!(choppy.btc_reversal_pressure > calm.btc_reversal_pressure);
+        assert!(
+            choppy.composite > calm.composite + 0.25,
+            "calm={:?} choppy={:?}",
+            calm,
+            choppy
+        );
     }
 
     #[test]

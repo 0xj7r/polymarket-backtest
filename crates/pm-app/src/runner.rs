@@ -303,6 +303,12 @@ pub struct RunnerConfig {
     /// Enable the online meta-calibrator adjustment in the canonical model.
     /// Disable this for strategy-only A/B runs against the hand-crafted score.
     pub enable_meta_calibration: bool,
+    /// Weight for BTC spot whipsaw risk in the canonical model risk score.
+    pub model_btc_whipsaw_risk_weight: f32,
+    /// Weight for BTC spot path inefficiency in the canonical model risk score.
+    pub model_btc_path_inefficiency_risk_weight: f32,
+    /// Weight for short-term BTC reversal pressure in the canonical model risk score.
+    pub model_btc_reversal_pressure_risk_weight: f32,
     /// Log every Nth decision event to avoid enormous files.
     pub decision_log_every_n: usize,
     /// Gate per-tick orders by model-derived entry constraints.
@@ -335,6 +341,11 @@ impl Default for RunnerConfig {
             update_model_state_on_resolution: true,
             meta_calibrator_snapshot: None,
             enable_meta_calibration: true,
+            model_btc_whipsaw_risk_weight: ModelConfig::default().btc_whipsaw_risk_weight,
+            model_btc_path_inefficiency_risk_weight: ModelConfig::default()
+                .btc_path_inefficiency_risk_weight,
+            model_btc_reversal_pressure_risk_weight: ModelConfig::default()
+                .btc_reversal_pressure_risk_weight,
             decision_log_every_n: 1,
             enforce_model_gate: false,
             model_gate_min_confidence: 0.68,
@@ -383,6 +394,9 @@ pub fn run_backtest<S: Strategy>(
     }
     let model_cfg = ModelConfig {
         enable_meta_calibration: cfg.enable_meta_calibration,
+        btc_whipsaw_risk_weight: cfg.model_btc_whipsaw_risk_weight,
+        btc_path_inefficiency_risk_weight: cfg.model_btc_path_inefficiency_risk_weight,
+        btc_reversal_pressure_risk_weight: cfg.model_btc_reversal_pressure_risk_weight,
         ..ModelConfig::default()
     };
     let market_open_ts_ns = if cfg.market_open_ns > 0 {
