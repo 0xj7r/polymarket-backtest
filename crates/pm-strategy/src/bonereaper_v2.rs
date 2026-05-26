@@ -1116,6 +1116,98 @@ impl Strategy for BonereaperV2 {
                         || px as f32 > self.cfg.late_favourite_max_ask
                         || (px as f32) < self.cfg.late_favourite_min_ask
                     {
+                        if px as f32 > self.cfg.late_favourite_max_ask
+                            && self.late_favourite_notional_emitted <= 0.0
+                        {
+                            let min_model_edge = if high_cert_favourite {
+                                self.cfg.late_favourite_high_cert_min_model_edge
+                            } else {
+                                self.cfg.late_favourite_min_model_edge
+                            };
+                            let range_throttle = range_throttle(
+                                ctx.market_yes_range_so_far,
+                                self.cfg.late_favourite_range_soft_throttle,
+                                self.cfg.late_favourite_range_hard_throttle,
+                            );
+                            let throttled_min_confidence = self
+                                .cfg
+                                .late_favourite_min_model_confidence
+                                + self.cfg.late_favourite_range_extra_confidence * range_throttle;
+                            let throttled_min_edge = min_model_edge
+                                + self.cfg.late_favourite_range_extra_edge * range_throttle;
+                            let model_support = self.model_support_for_side(
+                                ctx,
+                                side,
+                                throttled_min_confidence,
+                                self.cfg.late_favourite_max_model_risk,
+                                self.cfg.late_favourite_min_model_side_p,
+                                self.cfg.late_favourite_max_ask,
+                                throttled_min_edge,
+                            );
+                            let seconds_to_close = BETTING_WINDOW_SECS as f32 - secs_in;
+                            let starting_fresh = self.tail_clips == 0;
+                            let advanced =
+                                skew_mag - self.last_tail_skew_mag >= self.cfg.tail_min_skew_step;
+                            if model_support.is_supported()
+                                && self.tail_clips < self.cfg.tail_max_clips
+                                && (event.ts_ns - self.last_tail_ns) as f64 / 1e9
+                                    > self.cfg.tail_refresh_secs as f64
+                                && skew_mag >= self.cfg.tail_extreme_threshold
+                                && (starting_fresh || advanced)
+                                && tail_observed_range_allowed(
+                                    ctx.market_yes_range_so_far,
+                                    self.cfg.tail_min_observed_range,
+                                )
+                                && tail_seconds_to_close_allowed(
+                                    seconds_to_close,
+                                    self.cfg.tail_min_seconds_to_close,
+                                )
+                                && let Some(tail_side) = opposite_buy_side(side)
+                            {
+                                let tail_px = buy_px(event, tail_side);
+                                let px32 = tail_px as f32;
+                                if px32 >= self.cfg.tail_min_ask && px32 <= self.cfg.tail_max_ask {
+                                    let base_levels = late_favourite_ladder_levels(px, secs_in);
+                                    let levels =
+                                        late_favourite_high_cert_max_levels(px, base_levels)
+                                            .min(self.cfg.late_favourite_sweep_depth.max(1));
+                                    let candidate_favourite_notional = self.cfg.max_clip_usdc
+                                        * self.cfg.late_favourite_high_cert_clip_frac as f64
+                                        * levels as f64
+                                        * late_favourite_high_cert_price_taper(px)
+                                        * (1.0 - range_throttle as f64).clamp(0.0, 1.0);
+                                    let remaining_tail_budget = candidate_favourite_notional
+                                        * self.cfg.tail_budget_favourite_spend_frac as f64;
+                                    let clip = tail_clip_notional(
+                                        self.cfg.max_clip_usdc,
+                                        self.cfg.tail_clip_frac,
+                                        candidate_favourite_notional,
+                                        0.0,
+                                        tail_px,
+                                        self.cfg.tail_target_favourite_loss_coverage_frac,
+                                        remaining_tail_budget,
+                                    );
+                                    let shares = if clip > 0.0 {
+                                        shares_capped(clip, tail_px)
+                                    } else {
+                                        0.0
+                                    };
+                                    if shares > 0.0 {
+                                        orders.push(OrderRequest {
+                                            side: tail_side,
+                                            shares,
+                                            max_depth: 2,
+                                            limit_price: Some(self.cfg.tail_max_ask),
+                                            tag: "br2_convex_tail",
+                                        });
+                                        self.tail_clips += 1;
+                                        self.tail_notional_emitted += shares * tail_px;
+                                        self.last_tail_skew_mag = skew_mag;
+                                        self.last_tail_ns = event.ts_ns;
+                                    }
+                                }
+                            }
+                        }
                         self.gate_stats.late_favourite_price_fail += 1;
                     } else if adverse_fast_momentum {
                         self.gate_stats.late_favourite_adverse_momentum_fail += 1;
