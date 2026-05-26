@@ -233,7 +233,7 @@ async fn resolve_market_handles(
             .build()
             .context("build reqwest client")?;
 
-        let fetched = futures::stream::iter(missing.into_iter().map(|asset_id| {
+        let mut fetched = futures::stream::iter(missing.into_iter().map(|asset_id| {
             let client = client.clone();
             let date = date.to_string();
             async move {
@@ -246,13 +246,28 @@ async fn resolve_market_handles(
                 }
             }
         }))
-        .buffer_unordered(max_concurrent.max(1))
-        .collect::<Vec<_>>()
-        .await;
+        .buffer_unordered(max_concurrent.max(1));
 
-        for (asset_id, slug, outcome, date) in fetched.into_iter().flatten() {
+        let mut new_cache_entries = 0usize;
+        while let Some(row) = fetched.next().await {
+            let Some((asset_id, slug, outcome, row_date)) = row else {
+                continue;
+            };
             cache.insert(asset_id.clone(), (slug.clone(), outcome.clone()));
-            resolved.push((asset_id, slug, outcome, date));
+            resolved.push((asset_id, slug, outcome, row_date));
+            new_cache_entries += 1;
+            if new_cache_entries % 100 == 0 {
+                if let Some(path) = availability_cache {
+                    write_availability_cache(path, &cache)?;
+                    tracing::info!(
+                        date,
+                        cached_entries = cache.len(),
+                        new_cache_entries,
+                        cache_path = ?path,
+                        "availability cache checkpointed"
+                    );
+                }
+            }
         }
     }
 
