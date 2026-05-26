@@ -298,7 +298,7 @@ impl Default for WalkForwardConfig {
             br2_late_favourite_high_cert_clip_frac: 1.00,
             br2_late_favourite_high_cert_full_clip_edge: 0.00,
             br2_late_favourite_fragile_high_cert_ask: 0.923,
-            br2_late_favourite_fragile_high_cert_max_edge: 0.020,
+            br2_late_favourite_fragile_high_cert_max_edge: 0.005,
             br2_late_favourite_fragile_high_cert_max_path_efficiency: 0.50,
             br2_late_favourite_fragile_high_cert_size_frac: 0.50,
             br2_late_favourite_max_clips: 12,
