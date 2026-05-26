@@ -268,6 +268,12 @@ pub struct BonereaperV2Config {
     /// likely and reserving spend for reversal-prone expanded-range regimes.
     pub tail_min_observed_range: f32,
     pub tail_target_favourite_loss_coverage_frac: f32,
+    /// Optional higher tail coverage target for late high-cert BuyNo favourite
+    /// loads in the 10-35s quick-reversal danger zone.
+    pub tail_buy_no_reversal_coverage_frac: f32,
+    pub tail_buy_no_reversal_min_seconds_to_close: f32,
+    pub tail_buy_no_reversal_max_seconds_to_close: f32,
+    pub tail_buy_no_reversal_min_favourite_ask: f32,
     pub tail_budget_favourite_spend_frac: f32,
     pub tail_budget_favourite_upside_frac: f32,
 }
@@ -385,6 +391,10 @@ impl Default for BonereaperV2Config {
             tail_min_seconds_to_close: 10.0,
             tail_min_observed_range: 0.0,
             tail_target_favourite_loss_coverage_frac: 0.0,
+            tail_buy_no_reversal_coverage_frac: 0.0,
+            tail_buy_no_reversal_min_seconds_to_close: 10.0,
+            tail_buy_no_reversal_max_seconds_to_close: 35.0,
+            tail_buy_no_reversal_min_favourite_ask: 0.895,
             tail_budget_favourite_spend_frac: 0.05,
             tail_budget_favourite_upside_frac: 0.25,
         }
@@ -778,6 +788,29 @@ fn tail_clip_notional(
     }
 
     (base_clip * tail_clip_frac as f64).min(remaining_tail_budget)
+}
+
+fn tail_coverage_for_regime(
+    base_coverage_frac: f32,
+    favourite_side: Side,
+    avg_favourite_px: f64,
+    seconds_to_close: f32,
+    buy_no_reversal_coverage_frac: f32,
+    buy_no_reversal_min_seconds_to_close: f32,
+    buy_no_reversal_max_seconds_to_close: f32,
+    buy_no_reversal_min_favourite_ask: f32,
+) -> f32 {
+    let in_buy_no_reversal_window = matches!(favourite_side, Side::BuyNo)
+        && buy_no_reversal_coverage_frac > base_coverage_frac
+        && avg_favourite_px as f32 >= buy_no_reversal_min_favourite_ask
+        && seconds_to_close >= buy_no_reversal_min_seconds_to_close
+        && seconds_to_close <= buy_no_reversal_max_seconds_to_close;
+
+    if in_buy_no_reversal_window {
+        buy_no_reversal_coverage_frac
+    } else {
+        base_coverage_frac
+    }
 }
 
 impl Strategy for BonereaperV2 {
@@ -1365,13 +1398,23 @@ impl Strategy for BonereaperV2 {
                         favourite_win_upside * self.cfg.tail_budget_favourite_upside_frac as f64;
                     let remaining_tail_budget =
                         cap_by_fav_spend.min(cap_by_win_upside) - self.tail_notional_emitted;
+                    let coverage_frac = tail_coverage_for_regime(
+                        self.cfg.tail_target_favourite_loss_coverage_frac,
+                        favourite_side,
+                        avg_favourite_px,
+                        seconds_to_close,
+                        self.cfg.tail_buy_no_reversal_coverage_frac,
+                        self.cfg.tail_buy_no_reversal_min_seconds_to_close,
+                        self.cfg.tail_buy_no_reversal_max_seconds_to_close,
+                        self.cfg.tail_buy_no_reversal_min_favourite_ask,
+                    );
                     let clip = tail_clip_notional(
                         self.cfg.max_clip_usdc,
                         self.cfg.tail_clip_frac,
                         self.late_favourite_notional_emitted,
                         self.tail_notional_emitted,
                         tail_px,
-                        self.cfg.tail_target_favourite_loss_coverage_frac,
+                        coverage_frac,
                         remaining_tail_budget,
                     );
                     let shares = if clip > 0.0 {
@@ -1582,6 +1625,26 @@ mod tests {
     fn tail_clip_respects_budget_under_coverage_target() {
         let clip = tail_clip_notional(40.0, 0.15, 240.0, 0.0, 0.08, 0.80, 5.0);
         assert!((clip - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tail_coverage_boost_targets_buy_no_reversal_window() {
+        assert_eq!(
+            tail_coverage_for_regime(0.50, Side::BuyNo, 0.92, 20.0, 1.00, 10.0, 35.0, 0.895),
+            1.00
+        );
+        assert_eq!(
+            tail_coverage_for_regime(0.50, Side::BuyYes, 0.92, 20.0, 1.00, 10.0, 35.0, 0.895),
+            0.50
+        );
+        assert_eq!(
+            tail_coverage_for_regime(0.50, Side::BuyNo, 0.92, 5.0, 1.00, 10.0, 35.0, 0.895),
+            0.50
+        );
+        assert_eq!(
+            tail_coverage_for_regime(0.50, Side::BuyNo, 0.88, 20.0, 1.00, 10.0, 35.0, 0.895),
+            0.50
+        );
     }
 
     #[test]

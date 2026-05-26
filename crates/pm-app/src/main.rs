@@ -465,6 +465,18 @@ enum Cmd {
         /// Bonereaper v2 tail target coverage of favourite loss, disabled at 0.
         #[arg(long, default_value = "0.00")]
         br2_tail_target_favourite_loss_coverage_frac: f32,
+        /// Bonereaper v2 higher tail coverage target for high-cert BuyNo favourite reversal windows.
+        #[arg(long, default_value = "0.00")]
+        br2_tail_buy_no_reversal_coverage_frac: f32,
+        /// Bonereaper v2 lower bound of seconds remaining for BuyNo reversal tail boost.
+        #[arg(long, default_value = "10.0")]
+        br2_tail_buy_no_reversal_min_seconds_to_close: f32,
+        /// Bonereaper v2 upper bound of seconds remaining for BuyNo reversal tail boost.
+        #[arg(long, default_value = "35.0")]
+        br2_tail_buy_no_reversal_max_seconds_to_close: f32,
+        /// Bonereaper v2 minimum favourite ask for BuyNo reversal tail boost.
+        #[arg(long, default_value = "0.895")]
+        br2_tail_buy_no_reversal_min_favourite_ask: f32,
         /// Bonereaper v2 minimum absolute skew from 0.5 before tail laddering.
         #[arg(long, default_value = "0.30")]
         br2_tail_extreme_threshold: f32,
@@ -946,6 +958,10 @@ async fn main() -> Result<()> {
             br2_tail_min_seconds_to_close,
             br2_tail_min_observed_range,
             br2_tail_target_favourite_loss_coverage_frac,
+            br2_tail_buy_no_reversal_coverage_frac,
+            br2_tail_buy_no_reversal_min_seconds_to_close,
+            br2_tail_buy_no_reversal_max_seconds_to_close,
+            br2_tail_buy_no_reversal_min_favourite_ask,
             br2_tail_extreme_threshold,
             br2_tail_min_skew_step,
             br2_tail_budget_favourite_spend_frac,
@@ -1054,6 +1070,10 @@ async fn main() -> Result<()> {
                 br2_tail_min_seconds_to_close,
                 br2_tail_min_observed_range,
                 br2_tail_target_favourite_loss_coverage_frac,
+                br2_tail_buy_no_reversal_coverage_frac,
+                br2_tail_buy_no_reversal_min_seconds_to_close,
+                br2_tail_buy_no_reversal_max_seconds_to_close,
+                br2_tail_buy_no_reversal_min_favourite_ask,
                 br2_tail_extreme_threshold,
                 br2_tail_min_skew_step,
                 br2_tail_budget_favourite_spend_frac,
@@ -1608,6 +1628,10 @@ async fn walk_forward(
     br2_tail_min_seconds_to_close: f32,
     br2_tail_min_observed_range: f32,
     br2_tail_target_favourite_loss_coverage_frac: f32,
+    br2_tail_buy_no_reversal_coverage_frac: f32,
+    br2_tail_buy_no_reversal_min_seconds_to_close: f32,
+    br2_tail_buy_no_reversal_max_seconds_to_close: f32,
+    br2_tail_buy_no_reversal_min_favourite_ask: f32,
     br2_tail_extreme_threshold: f32,
     br2_tail_min_skew_step: f32,
     br2_tail_budget_favourite_spend_frac: f32,
@@ -1754,6 +1778,10 @@ async fn walk_forward(
         br2_tail_min_seconds_to_close,
         br2_tail_min_observed_range,
         br2_tail_target_favourite_loss_coverage_frac,
+        br2_tail_buy_no_reversal_coverage_frac,
+        br2_tail_buy_no_reversal_min_seconds_to_close,
+        br2_tail_buy_no_reversal_max_seconds_to_close,
+        br2_tail_buy_no_reversal_min_favourite_ask,
         br2_tail_extreme_threshold,
         br2_tail_min_skew_step,
         br2_tail_budget_favourite_spend_frac,
