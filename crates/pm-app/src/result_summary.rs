@@ -26,6 +26,9 @@ pub struct ResultSummary {
     pub orders_filled_taker: usize,
     pub orders_filled_maker: usize,
     pub maker_fill_rate: f64,
+    pub requested_shares: f64,
+    pub filled_shares: f64,
+    pub fill_shares_ratio: f64,
     pub requested_notional_usdc: f64,
     pub filled_notional_usdc: f64,
     pub fill_notional_ratio: f64,
@@ -218,6 +221,10 @@ struct StrategyResultRow {
     #[serde(default)]
     orders_filled_maker: usize,
     #[serde(default)]
+    requested_shares: f64,
+    #[serde(default)]
+    filled_shares: f64,
+    #[serde(default)]
     requested_notional_usdc: f64,
     #[serde(default)]
     filled_notional_usdc: f64,
@@ -237,6 +244,8 @@ struct StrategyResultRow {
 
 #[derive(Debug, Deserialize)]
 struct FillRow {
+    #[serde(default)]
+    shares: f64,
     #[serde(default)]
     price: f64,
     #[serde(default)]
@@ -355,6 +364,8 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
     let mut orders_filled_maker = 0usize;
     let mut requested_notional = 0.0f64;
     let mut filled_notional = 0.0f64;
+    let mut requested_shares = 0.0f64;
+    let mut filled_shares = 0.0f64;
     let mut slippage_notional = 0.0f64;
     let mut markets_with_fills = 0usize;
     let mut winning_markets = 0usize;
@@ -416,6 +427,17 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
             };
         orders_filled_taker += row_taker_fills;
         orders_filled_maker += row_maker_fills;
+        requested_shares += strategy_row.requested_shares;
+        let row_filled_shares = if strategy_row.filled_shares > 0.0 {
+            strategy_row.filled_shares
+        } else {
+            strategy_row
+                .fills_detail
+                .iter()
+                .map(|fill| fill.shares)
+                .sum()
+        };
+        filled_shares += row_filled_shares;
         requested_notional += strategy_row.requested_notional_usdc;
         let row_filled_notional = if strategy_row.filled_notional_usdc > 0.0 {
             strategy_row.filled_notional_usdc
@@ -517,6 +539,13 @@ pub fn summarize_markets_jsonl(path: &Path, strategy: &str) -> Result<ResultSumm
         } else {
             0.0
         },
+        requested_shares,
+        filled_shares,
+        fill_shares_ratio: if requested_shares > 0.0 {
+            filled_shares / requested_shares
+        } else {
+            0.0
+        },
         requested_notional_usdc: requested_notional,
         filled_notional_usdc: filled_notional,
         fill_notional_ratio: if requested_notional > 0.0 {
@@ -576,12 +605,13 @@ pub fn print_result_summary(summary: &ResultSummary) {
         summary.orders_submitted, summary.orders_filled
     );
     println!(
-        "fill quality          : requested={:.2} filled={:.2} ratio={:.1}% maker={:.1}% slip={:.1}bps",
-        summary.requested_notional_usdc,
-        summary.filled_notional_usdc,
+        "fill quality          : shares={:.1}% notional={:.1}% maker={:.1}% slip={:.1}bps requested={:.2} filled={:.2}",
+        summary.fill_shares_ratio * 100.0,
         summary.fill_notional_ratio * 100.0,
         summary.maker_fill_rate * 100.0,
-        summary.avg_slippage_bps
+        summary.avg_slippage_bps,
+        summary.requested_notional_usdc,
+        summary.filled_notional_usdc
     );
     println!(
         "fill markets W/L      : {} / {} / {} ({:.1}% hit)",
@@ -683,12 +713,12 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         writeln!(
             file,
-            r#"{{"slug":"m1","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"orders_filled_taker":1,"orders_filled_maker":0,"requested_notional_usdc":10.0,"filled_notional_usdc":8.0,"avg_slippage_bps":20.0,"pnl_usdc":10.0,"start_equity_usdc":1000.0,"end_equity_usdc":1010.0,"fills_detail":[{{"price":0.8,"notional":8.0,"tag":"fav","maker":false,"slippage_bps":20.0}}],"bonereaper_v2_gate_stats":{{"late_favourite_checks":10,"late_favourite_emits":1,"late_favourite_whipsaw_fail":2}}}}}}}}"#
+            r#"{{"slug":"m1","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"orders_filled_taker":1,"orders_filled_maker":0,"requested_shares":10.0,"filled_shares":10.0,"requested_notional_usdc":10.0,"filled_notional_usdc":8.0,"avg_slippage_bps":20.0,"pnl_usdc":10.0,"start_equity_usdc":1000.0,"end_equity_usdc":1010.0,"fills_detail":[{{"shares":10.0,"price":0.8,"notional":8.0,"tag":"fav","maker":false,"slippage_bps":20.0}}],"bonereaper_v2_gate_stats":{{"late_favourite_checks":10,"late_favourite_emits":1,"late_favourite_whipsaw_fail":2}}}}}}}}"#
         )
         .unwrap();
         writeln!(
             file,
-            r#"{{"slug":"m2","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"orders_filled_taker":0,"orders_filled_maker":1,"requested_notional_usdc":9.0,"filled_notional_usdc":9.0,"avg_slippage_bps":0.0,"pnl_usdc":-20.0,"start_equity_usdc":1010.0,"end_equity_usdc":990.0,"fills_detail":[{{"price":0.9,"notional":9.0,"tag":"fav","maker":true,"slippage_bps":0.0}}],"bonereaper_v2_gate_stats":{{"late_favourite_checks":5,"late_favourite_emits":2,"late_favourite_reversal_pressure_fail":3}}}}}}}}"#
+            r#"{{"slug":"m2","per_strategy":{{"bonereaper_v2":{{"orders_submitted":1,"orders_filled":1,"orders_filled_taker":0,"orders_filled_maker":1,"requested_shares":10.0,"filled_shares":10.0,"requested_notional_usdc":9.0,"filled_notional_usdc":9.0,"avg_slippage_bps":0.0,"pnl_usdc":-20.0,"start_equity_usdc":1010.0,"end_equity_usdc":990.0,"fills_detail":[{{"shares":10.0,"price":0.9,"notional":9.0,"tag":"fav","maker":true,"slippage_bps":0.0}}],"bonereaper_v2_gate_stats":{{"late_favourite_checks":5,"late_favourite_emits":2,"late_favourite_reversal_pressure_fail":3}}}}}}}}"#
         )
         .unwrap();
         drop(file);
@@ -700,6 +730,9 @@ mod tests {
         assert_eq!(summary.orders_filled_taker, 1);
         assert_eq!(summary.orders_filled_maker, 1);
         assert!((summary.maker_fill_rate - 0.5).abs() < 1e-9);
+        assert!((summary.requested_shares - 20.0).abs() < 1e-9);
+        assert!((summary.filled_shares - 20.0).abs() < 1e-9);
+        assert!((summary.fill_shares_ratio - 1.0).abs() < 1e-9);
         assert!((summary.requested_notional_usdc - 19.0).abs() < 1e-9);
         assert!((summary.filled_notional_usdc - 17.0).abs() < 1e-9);
         assert!((summary.fill_notional_ratio - 17.0 / 19.0).abs() < 1e-9);

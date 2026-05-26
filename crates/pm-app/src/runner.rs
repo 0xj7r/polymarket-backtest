@@ -179,6 +179,7 @@ pub struct BacktestReport {
     pub final_no_shares: f64,
     pub final_cash_usdc: f64,
     pub requested_shares: f64,
+    pub filled_shares: f64,
     pub requested_notional_usdc: f64,
     pub filled_notional_usdc: f64,
     pub yes_resolved: bool,
@@ -829,6 +830,7 @@ pub fn run_backtest<S: Strategy>(
     let yes_resolved = cfg.resolved_yes.unwrap_or(last_mid >= 0.5);
     let settlement_cash = if yes_resolved { yes_shares } else { no_shares };
     let end_cash = cash + settlement_cash;
+    let filled_shares = fills.iter().map(|f| f.shares).sum::<f64>();
     let filled_notional_usdc = fills.iter().map(|f| f.notional).sum::<f64>();
     portfolio.mark(end_cash);
 
@@ -896,6 +898,7 @@ pub fn run_backtest<S: Strategy>(
         final_no_shares: no_shares,
         final_cash_usdc: cash,
         requested_shares: total_requested_shares,
+        filled_shares,
         requested_notional_usdc: total_requested_notional,
         filled_notional_usdc,
         yes_resolved,
@@ -1901,11 +1904,17 @@ pub fn pretty_print(rep: &BacktestReport) {
     } else {
         0.0
     };
+    let fill_shares_ratio = if rep.requested_shares > 0.0 {
+        rep.filled_shares / rep.requested_shares
+    } else {
+        0.0
+    };
     println!(
-        "fill notional     : requested={:.4} filled={:.4} ratio={:.1}%",
+        "fill quality      : shares={:.1}% notional={:.1}% requested={:.4} filled={:.4}",
+        fill_shares_ratio * 100.0,
+        fill_notional_ratio * 100.0,
         rep.requested_notional_usdc,
-        rep.filled_notional_usdc,
-        fill_notional_ratio * 100.0
+        rep.filled_notional_usdc
     );
     println!(
         "final position    : yes={:.4}  no={:.4}  cash={:.4}",
@@ -2225,6 +2234,7 @@ mod tests {
         assert_eq!(rep.counters.orders_filled_taker, 1);
         assert_eq!(rep.fills.len(), 1);
         assert!((rep.requested_shares - 10.0).abs() < 1e-9);
+        assert!((rep.filled_shares - 10.0).abs() < 1e-9);
         assert!((rep.requested_notional_usdc - 5.1).abs() < 1e-6);
         assert!((rep.filled_notional_usdc - 5.1).abs() < 1e-6);
         assert!(

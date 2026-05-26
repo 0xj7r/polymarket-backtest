@@ -398,6 +398,8 @@ pub struct StrategyMarketResult {
     pub fills: usize,
     pub maker_rebates_usdc: f64,
     pub requested_shares: f64,
+    pub filled_shares: f64,
+    pub fill_shares_ratio: f64,
     pub requested_notional_usdc: f64,
     pub filled_notional_usdc: f64,
     pub fill_notional_ratio: f64,
@@ -769,6 +771,9 @@ pub struct StrategyAggregate {
     pub total_requested_notional_usdc: f64,
     pub total_filled_notional_usdc: f64,
     pub fill_notional_ratio: f64,
+    pub total_requested_shares: f64,
+    pub total_filled_shares: f64,
+    pub fill_shares_ratio: f64,
     pub avg_slippage_bps: f64,
     pub total_orders_rejected_model_gate: usize,
     pub total_orders_rejected_model_gate_confidence: usize,
@@ -2647,6 +2652,12 @@ fn run_one_strategy(
         fills: report.fills.len(),
         maker_rebates_usdc: report.maker_rebates_usdc,
         requested_shares: report.requested_shares,
+        filled_shares: report.filled_shares,
+        fill_shares_ratio: if report.requested_shares > 0.0 {
+            report.filled_shares / report.requested_shares
+        } else {
+            0.0
+        },
         requested_notional_usdc: report.requested_notional_usdc,
         filled_notional_usdc,
         fill_notional_ratio: if report.requested_notional_usdc > 0.0 {
@@ -3032,6 +3043,8 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
     let mut total_orders_filled_maker = 0usize;
     let mut total_requested_notional = 0.0f64;
     let mut total_filled_notional = 0.0f64;
+    let mut total_requested_shares = 0.0f64;
+    let mut total_filled_shares = 0.0f64;
     let mut total_slippage_notional = 0.0f64;
     let mut total_orders_rejected_model_gate = 0usize;
     let mut total_orders_rejected_model_gate_confidence = 0usize;
@@ -3063,6 +3076,8 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
         total_orders_filled_maker += r.orders_filled_maker;
         total_requested_notional += r.requested_notional_usdc;
         total_filled_notional += r.filled_notional_usdc;
+        total_requested_shares += r.requested_shares;
+        total_filled_shares += r.filled_shares;
         total_slippage_notional += r.avg_slippage_bps * r.filled_notional_usdc;
         total_orders_rejected_model_gate += r.orders_rejected_model_gate;
         total_orders_rejected_model_gate_confidence += r.orders_rejected_model_gate_confidence;
@@ -3154,6 +3169,13 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
         total_filled_notional_usdc: total_filled_notional,
         fill_notional_ratio: if total_requested_notional > 0.0 {
             total_filled_notional / total_requested_notional
+        } else {
+            0.0
+        },
+        total_requested_shares,
+        total_filled_shares,
+        fill_shares_ratio: if total_requested_shares > 0.0 {
+            total_filled_shares / total_requested_shares
         } else {
             0.0
         },
@@ -3353,7 +3375,7 @@ pub fn print_summary(summary: &WalkForwardSummary) {
     fn print_table(title: &str, per_strategy: &HashMap<&'static str, StrategyAggregate>) {
         println!("{title}");
         println!(
-            "{:>22}  {:>10}  {:>10}  {:>9}  {:>8}  {:>10}  {:>10}  {:>10}  {:>8}  {:>9}  {:>8}  {:>8}  {:>14}  {:>10}",
+            "{:>22}  {:>10}  {:>10}  {:>9}  {:>8}  {:>10}  {:>10}  {:>10}  {:>8}  {:>9}  {:>8}  {:>8}  {:>8}  {:>14}  {:>10}",
             "strategy",
             "total_pnl",
             "end_eq",
@@ -3364,7 +3386,8 @@ pub fn print_summary(summary: &WalkForwardSummary) {
             "stdev",
             "hit",
             "sharpe",
-            "fill%",
+            "sh_fill",
+            "nt_fill",
             "slip",
             "fills",
             "worst",
@@ -3377,7 +3400,7 @@ pub fn print_summary(summary: &WalkForwardSummary) {
         });
         for (name, agg) in rows {
             println!(
-                "{:>22}  {:>+10.4}  {:>10.2}  {:>+8.1}%  {:>7.1}%  {:>+10.4}  {:>+10.4}  {:>10.4}  {:>7.1}%  {:>+10.4}  {:>7.1}%  {:>8.1}  {:>14}  {:>+10.4}",
+                "{:>22}  {:>+10.4}  {:>10.2}  {:>+8.1}%  {:>7.1}%  {:>+10.4}  {:>+10.4}  {:>10.4}  {:>7.1}%  {:>+10.4}  {:>7.1}%  {:>7.1}%  {:>8.1}  {:>14}  {:>+10.4}",
                 name,
                 agg.total_pnl_usdc,
                 agg.last_end_equity_usdc,
@@ -3388,6 +3411,7 @@ pub fn print_summary(summary: &WalkForwardSummary) {
                 agg.stdev_pnl_usdc,
                 agg.hit_rate * 100.0,
                 agg.sharpe_ratio,
+                agg.fill_shares_ratio * 100.0,
                 agg.fill_notional_ratio * 100.0,
                 agg.avg_slippage_bps,
                 agg.total_orders_filled,
@@ -3474,6 +3498,8 @@ mod tests {
                 fills: 6,
                 maker_rebates_usdc: 0.1,
                 requested_shares: 12.0,
+                filled_shares: 10.0,
+                fill_shares_ratio: 10.0 / 12.0,
                 requested_notional_usdc: 60.0,
                 filled_notional_usdc: 54.0,
                 fill_notional_ratio: 0.9,
@@ -3505,6 +3531,8 @@ mod tests {
                 fills: 1,
                 maker_rebates_usdc: 0.0,
                 requested_shares: 2.0,
+                filled_shares: 2.0,
+                fill_shares_ratio: 1.0,
                 requested_notional_usdc: 10.0,
                 filled_notional_usdc: 10.0,
                 fill_notional_ratio: 1.0,
@@ -3536,6 +3564,8 @@ mod tests {
                 fills: 0,
                 maker_rebates_usdc: 0.0,
                 requested_shares: 0.0,
+                filled_shares: 0.0,
+                fill_shares_ratio: 0.0,
                 requested_notional_usdc: 0.0,
                 filled_notional_usdc: 0.0,
                 fill_notional_ratio: 0.0,
@@ -3597,6 +3627,7 @@ mod tests {
         assert_eq!(reactive.total_orders_filled, 6);
         assert_eq!(reactive.total_orders_filled_taker, 4);
         assert_eq!(reactive.total_orders_filled_maker, 2);
+        assert!((reactive.fill_shares_ratio - 10.0 / 12.0).abs() < f64::EPSILON);
         assert!((reactive.fill_notional_ratio - 0.9).abs() < f64::EPSILON);
         assert!((reactive.avg_slippage_bps - 12.0).abs() < f64::EPSILON);
         assert_eq!(reactive.best_market_pnl, 4.0);
