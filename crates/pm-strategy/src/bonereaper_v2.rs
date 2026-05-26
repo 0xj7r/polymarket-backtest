@@ -546,6 +546,12 @@ fn late_favourite_high_cert_edge_taper(edge: f32, min_edge: f32, full_clip_edge:
         .into()
 }
 
+fn late_favourite_fragile_high_cert_edge(side_probability: f32, favourite_ask: f64) -> f32 {
+    let sweep_premium = if favourite_ask >= 0.90 { 0.025 } else { 0.0 };
+    let effective_price = (favourite_ask as f32 + sweep_premium).clamp(0.0, 0.999);
+    side_probability - effective_price
+}
+
 fn late_favourite_fragile_high_cert_taper(
     favourite_ask: f64,
     edge: f32,
@@ -1213,7 +1219,7 @@ impl Strategy for BonereaperV2 {
                                 .late_favourite_max_clips
                                 .saturating_sub(self.late_favourite_clips);
                             let base_levels = late_favourite_ladder_levels(px, secs_in);
-                            let levels = late_favourite_high_cert_max_levels(px, base_levels)
+                            let mut levels = late_favourite_high_cert_max_levels(px, base_levels)
                                 .min(self.cfg.late_favourite_sweep_depth.max(1))
                                 .min(remaining_clips.max(1));
                             let price_taper = late_favourite_high_cert_price_taper(px);
@@ -1239,12 +1245,12 @@ impl Strategy for BonereaperV2 {
                             } else {
                                 1.0
                             };
-                            let model_edge = model_side_probability(ctx, side)
-                                .map(|side_p| side_p - px as f32)
+                            let fragile_edge = model_side_probability(ctx, side)
+                                .map(|side_p| late_favourite_fragile_high_cert_edge(side_p, px))
                                 .unwrap_or(0.0);
                             let fragile_taper = late_favourite_fragile_high_cert_taper(
                                 px,
-                                model_edge,
+                                fragile_edge,
                                 whipsaw.path_efficiency,
                                 self.cfg.late_favourite_fragile_high_cert_ask,
                                 self.cfg.late_favourite_fragile_high_cert_max_edge,
@@ -1252,6 +1258,9 @@ impl Strategy for BonereaperV2 {
                                     .late_favourite_fragile_high_cert_max_path_efficiency,
                                 self.cfg.late_favourite_fragile_high_cert_size_frac,
                             );
+                            if fragile_taper < 1.0 {
+                                levels = levels.min(1);
+                            }
                             let clip = self.cfg.max_clip_usdc * clip_frac as f64;
                             let range_size_taper = (1.0 - range_throttle as f64).clamp(0.0, 1.0);
                             let desired_notional = clip
@@ -1457,6 +1466,12 @@ mod tests {
             late_favourite_fragile_high_cert_taper(0.924, 0.004, 0.40, 1.0, 0.005, 0.50, 0.5),
             1.0
         );
+    }
+
+    #[test]
+    fn fragile_high_cert_edge_accounts_for_expected_sweep_cost() {
+        assert!((late_favourite_fragile_high_cert_edge(0.929, 0.900) - 0.004).abs() < 1e-6);
+        assert!((late_favourite_fragile_high_cert_edge(0.929, 0.880) - 0.049).abs() < 1e-6);
     }
 
     #[test]
