@@ -332,13 +332,15 @@ impl Default for BonereaperV2Config {
             late_favourite_max_whipsaw_score: 0.75,
             late_favourite_max_reversal_pressure: 1.0,
             late_favourite_min_path_efficiency: 0.0,
-            // Disabled by default. Set below 1.0 to reject late favourite
-            // loads in markets that already traversed too much YES-mid range.
+            // Full-history slices showed the largest drawdowns came from
+            // oversized favourite loads after the market had already traversed
+            // a wide YES-mid range. Scale size and require more model support
+            // in that regime instead of applying a blunt whipsaw clamp.
             late_favourite_max_observed_range: 1.0,
-            late_favourite_range_soft_throttle: 1.0,
-            late_favourite_range_hard_throttle: 1.0,
-            late_favourite_range_extra_edge: 0.0,
-            late_favourite_range_extra_confidence: 0.0,
+            late_favourite_range_soft_throttle: 0.78,
+            late_favourite_range_hard_throttle: 0.98,
+            late_favourite_range_extra_edge: 0.03,
+            late_favourite_range_extra_confidence: 0.08,
             // Disabled by default for backward-compatible sweeps. Set to a
             // small positive value (e.g. 0.04) to reject favourite loads when
             // the fast BTC impulse is actively moving against the favourite.

@@ -409,16 +409,16 @@ enum Cmd {
         #[arg(long, default_value = "1.0")]
         br2_late_favourite_max_observed_range: f32,
         /// Bonereaper v2 live-observed YES-mid range where late-favourite size starts throttling.
-        #[arg(long, default_value = "1.0")]
+        #[arg(long, default_value = "0.78")]
         br2_late_favourite_range_soft_throttle: f32,
         /// Bonereaper v2 live-observed YES-mid range where late-favourite size reaches zero.
-        #[arg(long, default_value = "1.0")]
+        #[arg(long, default_value = "0.98")]
         br2_late_favourite_range_hard_throttle: f32,
         /// Extra model edge required at the hard observed-range throttle.
-        #[arg(long, default_value = "0.0")]
+        #[arg(long, default_value = "0.03")]
         br2_late_favourite_range_extra_edge: f32,
         /// Extra model confidence required at the hard observed-range throttle.
-        #[arg(long, default_value = "0.0")]
+        #[arg(long, default_value = "0.08")]
         br2_late_favourite_range_extra_confidence: f32,
         /// Bonereaper v2 maximum fast BTC momentum allowed against the late favourite direction.
         #[arg(long, default_value = "1.0")]
