@@ -191,6 +191,9 @@ enum Cmd {
         slug_prefix: String,
         #[arg(long, default_value = "32")]
         max_concurrent: usize,
+        /// JSONL cache for Telonex asset_id -> slug/outcome availability lookups.
+        #[arg(long)]
+        availability_cache: Option<PathBuf>,
         #[arg(long)]
         out: PathBuf,
     },
@@ -207,6 +210,9 @@ enum Cmd {
         /// Limit availability lookups for smoke/local iteration. 0 means all cached assets.
         #[arg(long, default_value = "0")]
         max_assets: usize,
+        /// JSONL cache for Telonex asset_id -> slug/outcome availability lookups.
+        #[arg(long)]
+        availability_cache: Option<PathBuf>,
         #[arg(long)]
         out: PathBuf,
     },
@@ -220,6 +226,9 @@ enum Cmd {
         slug_prefix: String,
         #[arg(long, default_value = "32")]
         max_concurrent: usize,
+        /// JSONL cache for Telonex asset_id -> slug/outcome availability lookups.
+        #[arg(long)]
+        availability_cache: Option<PathBuf>,
         #[arg(long)]
         out: PathBuf,
     },
@@ -856,14 +865,16 @@ async fn main() -> Result<()> {
             date,
             slug_prefix,
             max_concurrent,
+            availability_cache,
             out,
-        } => discover_day(date, slug_prefix, max_concurrent, out).await,
+        } => discover_day(date, slug_prefix, max_concurrent, availability_cache, out).await,
         Cmd::DiscoverLocalCacheDay {
             cache_dir,
             date,
             slug_prefix,
             max_concurrent,
             max_assets,
+            availability_cache,
             out,
         } => {
             discover_local_cache_day(
@@ -872,6 +883,7 @@ async fn main() -> Result<()> {
                 slug_prefix,
                 max_concurrent,
                 max_assets,
+                availability_cache,
                 out,
             )
             .await
@@ -881,8 +893,19 @@ async fn main() -> Result<()> {
             end_date,
             slug_prefix,
             max_concurrent,
+            availability_cache,
             out,
-        } => discover_range(start_date, end_date, slug_prefix, max_concurrent, out).await,
+        } => {
+            discover_range(
+                start_date,
+                end_date,
+                slug_prefix,
+                max_concurrent,
+                availability_cache,
+                out,
+            )
+            .await
+        }
         Cmd::DiscoverMarketsParquet {
             markets_parquet,
             start_date,
@@ -1290,11 +1313,19 @@ async fn discover_day(
     date: String,
     slug_prefix: String,
     max_concurrent: usize,
+    availability_cache: Option<PathBuf>,
     out: PathBuf,
 ) -> Result<()> {
     let cfg = TelonexStoreConfig::from_env()?;
     let store = TelonexStore::try_new(&cfg)?;
-    let markets = discovery::discover_markets(&store, &date, &slug_prefix, max_concurrent).await?;
+    let markets = discovery::discover_markets(
+        &store,
+        &date,
+        &slug_prefix,
+        max_concurrent,
+        availability_cache.as_deref(),
+    )
+    .await?;
     let mut f = std::fs::File::create(&out)?;
     for m in &markets {
         writeln!(f, "{}", serde_json::to_string(m)?)?;
@@ -1320,6 +1351,7 @@ async fn discover_local_cache_day(
     slug_prefix: String,
     max_concurrent: usize,
     max_assets: usize,
+    availability_cache: Option<PathBuf>,
     out: PathBuf,
 ) -> Result<()> {
     let markets = discovery::discover_markets_from_local_cache(
@@ -1328,6 +1360,7 @@ async fn discover_local_cache_day(
         &slug_prefix,
         max_concurrent,
         max_assets,
+        availability_cache.as_deref(),
     )
     .await?;
     let mut f = std::fs::File::create(&out)?;
@@ -1355,6 +1388,7 @@ async fn discover_range(
     end_date: String,
     slug_prefix: String,
     max_concurrent: usize,
+    availability_cache: Option<PathBuf>,
     out: PathBuf,
 ) -> Result<()> {
     let start = NaiveDate::parse_from_str(&start_date, "%Y-%m-%d")
@@ -1371,9 +1405,15 @@ async fn discover_range(
     let mut day = start;
     while day <= end {
         let date = day.format("%Y-%m-%d").to_string();
-        let markets = discovery::discover_markets(&store, &date, &slug_prefix, max_concurrent)
-            .await
-            .with_context(|| format!("discover markets for {date}"))?;
+        let markets = discovery::discover_markets(
+            &store,
+            &date,
+            &slug_prefix,
+            max_concurrent,
+            availability_cache.as_deref(),
+        )
+        .await
+        .with_context(|| format!("discover markets for {date}"))?;
         tracing::info!(
             date,
             markets = markets.len(),
