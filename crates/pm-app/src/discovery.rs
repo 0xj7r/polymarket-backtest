@@ -8,6 +8,7 @@ use futures::StreamExt;
 use object_store::path::Path as ObjectPath;
 use pm_telonex_loader::TelonexStore;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketHandle {
@@ -50,6 +51,33 @@ pub async fn list_asset_ids_for_day(store: &TelonexStore, date: &str) -> Result<
             last.strip_prefix("asset_id=").map(|s| s.to_string())
         })
         .collect();
+    Ok(asset_ids)
+}
+
+/// List `asset_id=...` directories from a local cache mirror produced by
+/// `prep-cache`.
+pub fn list_asset_ids_for_local_cache_day(cache_dir: &Path, date: &str) -> Result<Vec<String>> {
+    let dir = cache_dir
+        .join("raw/telonex/exchange=polymarket/channel=book_snapshot_25")
+        .join(format!("date={date}"));
+    let entries = std::fs::read_dir(&dir)
+        .with_context(|| format!("read local cache day directory {}", dir.display()))?;
+    let mut asset_ids = Vec::new();
+    for entry in entries {
+        let entry = entry.with_context(|| format!("read entry under {}", dir.display()))?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("read file type for {}", entry.path().display()))?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if let Some(asset_id) = name.strip_prefix("asset_id=") {
+            asset_ids.push(asset_id.to_string());
+        }
+    }
+    asset_ids.sort();
     Ok(asset_ids)
 }
 
@@ -154,4 +182,93 @@ pub async fn discover_markets(
     }
     out.sort_by_key(|m| m.close_ts);
     Ok(out)
+}
+
+/// Discover markets from local cached book partitions, resolving slug/outcome
+/// through the Telonex availability API.
+pub async fn discover_markets_from_local_cache(
+    cache_dir: &Path,
+    date: &str,
+    slug_prefix: &str,
+    max_concurrent: usize,
+    max_assets: usize,
+) -> Result<Vec<MarketHandle>> {
+    let mut asset_ids = list_asset_ids_for_local_cache_day(cache_dir, date)?;
+    if max_assets > 0 {
+        asset_ids.truncate(max_assets);
+    }
+    tracing::info!(
+        date,
+        total_assets = asset_ids.len(),
+        max_assets,
+        cache_dir = ?cache_dir,
+        "local cache listing done"
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .context("build reqwest client")?;
+
+    let results = futures::stream::iter(asset_ids.into_iter().map(|asset_id| {
+        let client = client.clone();
+        let date = date.to_string();
+        async move {
+            match fetch_availability(&client, &asset_id).await {
+                Ok((slug, outcome)) => Some((asset_id, slug, outcome, date)),
+                Err(e) => {
+                    tracing::warn!(asset = %asset_id, error = %e, "availability failed");
+                    None
+                }
+            }
+        }
+    }))
+    .buffer_unordered(max_concurrent.max(1))
+    .collect::<Vec<_>>()
+    .await;
+
+    let mut out = Vec::new();
+    for r in results.into_iter().flatten() {
+        let (asset_id, slug, outcome, date) = r;
+        if !slug.starts_with(slug_prefix) {
+            continue;
+        }
+        let Some(close_ts) = parse_close_ts(&slug) else {
+            continue;
+        };
+        out.push(MarketHandle {
+            asset_id,
+            slug,
+            close_ts,
+            outcome,
+            date,
+        });
+    }
+    out.sort_by_key(|m| m.close_ts);
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn lists_asset_ids_from_local_cache_day() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("pm-discovery-cache-test-{unique}"));
+        let day_dir =
+            root.join("raw/telonex/exchange=polymarket/channel=book_snapshot_25/date=2026-05-05");
+        std::fs::create_dir_all(day_dir.join("asset_id=b")).expect("create asset b");
+        std::fs::create_dir_all(day_dir.join("asset_id=a")).expect("create asset a");
+        std::fs::write(day_dir.join("ignore.txt"), "").expect("write non-dir marker");
+
+        let assets = list_asset_ids_for_local_cache_day(&root, "2026-05-05").expect("list assets");
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(assets, vec!["a".to_string(), "b".to_string()]);
+    }
 }

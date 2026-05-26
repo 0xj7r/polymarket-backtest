@@ -194,6 +194,22 @@ enum Cmd {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Discover markets from a local cache mirror without listing S3.
+    DiscoverLocalCacheDay {
+        #[arg(long)]
+        cache_dir: PathBuf,
+        #[arg(long)]
+        date: String,
+        #[arg(long, default_value = "btc-updown-5m-")]
+        slug_prefix: String,
+        #[arg(long, default_value = "32")]
+        max_concurrent: usize,
+        /// Limit availability lookups for smoke/local iteration. 0 means all cached assets.
+        #[arg(long, default_value = "0")]
+        max_assets: usize,
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Discover Polymarket BTC-updown-5m markets for a date range.
     DiscoverRange {
         #[arg(long)]
@@ -842,6 +858,24 @@ async fn main() -> Result<()> {
             max_concurrent,
             out,
         } => discover_day(date, slug_prefix, max_concurrent, out).await,
+        Cmd::DiscoverLocalCacheDay {
+            cache_dir,
+            date,
+            slug_prefix,
+            max_concurrent,
+            max_assets,
+            out,
+        } => {
+            discover_local_cache_day(
+                cache_dir,
+                date,
+                slug_prefix,
+                max_concurrent,
+                max_assets,
+                out,
+            )
+            .await
+        }
         Cmd::DiscoverRange {
             start_date,
             end_date,
@@ -1273,6 +1307,42 @@ async fn discover_day(
     );
     println!(
         "discovered {} markets for {} -> {}",
+        markets.len(),
+        date,
+        out.display()
+    );
+    Ok(())
+}
+
+async fn discover_local_cache_day(
+    cache_dir: PathBuf,
+    date: String,
+    slug_prefix: String,
+    max_concurrent: usize,
+    max_assets: usize,
+    out: PathBuf,
+) -> Result<()> {
+    let markets = discovery::discover_markets_from_local_cache(
+        &cache_dir,
+        &date,
+        &slug_prefix,
+        max_concurrent,
+        max_assets,
+    )
+    .await?;
+    let mut f = std::fs::File::create(&out)?;
+    for m in &markets {
+        writeln!(f, "{}", serde_json::to_string(m)?)?;
+    }
+    tracing::info!(
+        date = %date,
+        cache_dir = ?cache_dir,
+        markets = markets.len(),
+        out = ?out,
+        "local cache discovery complete"
+    );
+    println!(
+        "discovered {} cached markets for {} -> {}",
         markets.len(),
         date,
         out.display()
