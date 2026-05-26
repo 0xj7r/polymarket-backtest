@@ -435,6 +435,9 @@ enum Cmd {
         /// Bonereaper v2 maximum fast BTC momentum allowed against the late favourite direction.
         #[arg(long, default_value = "1.0")]
         br2_late_favourite_max_adverse_fast_momentum: f32,
+        /// Bonereaper v2 maximum broad BTC momentum allowed against the late favourite direction.
+        #[arg(long, default_value = "1.0")]
+        br2_late_favourite_max_adverse_broad_momentum: f32,
         /// Bonereaper v2 maximum same-side late-favourite entry pullback from best prior entry price.
         #[arg(long, default_value = "1.0")]
         br2_late_favourite_max_entry_pullback: f32,
@@ -933,6 +936,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_range_extra_edge,
             br2_late_favourite_range_extra_confidence,
             br2_late_favourite_max_adverse_fast_momentum,
+            br2_late_favourite_max_adverse_broad_momentum,
             br2_late_favourite_max_entry_pullback,
             br2_late_favourite_max_avg_entry_drawdown,
             br2_tail_clip_frac,
@@ -1040,6 +1044,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_range_extra_edge,
                 br2_late_favourite_range_extra_confidence,
                 br2_late_favourite_max_adverse_fast_momentum,
+                br2_late_favourite_max_adverse_broad_momentum,
                 br2_late_favourite_max_entry_pullback,
                 br2_late_favourite_max_avg_entry_drawdown,
                 br2_tail_clip_frac,
@@ -1593,6 +1598,7 @@ async fn walk_forward(
     br2_late_favourite_range_extra_edge: f32,
     br2_late_favourite_range_extra_confidence: f32,
     br2_late_favourite_max_adverse_fast_momentum: f32,
+    br2_late_favourite_max_adverse_broad_momentum: f32,
     br2_late_favourite_max_entry_pullback: f32,
     br2_late_favourite_max_avg_entry_drawdown: f32,
     br2_tail_clip_frac: f32,
@@ -1738,6 +1744,7 @@ async fn walk_forward(
         br2_late_favourite_range_extra_edge,
         br2_late_favourite_range_extra_confidence,
         br2_late_favourite_max_adverse_fast_momentum,
+        br2_late_favourite_max_adverse_broad_momentum,
         br2_late_favourite_max_entry_pullback,
         br2_late_favourite_max_avg_entry_drawdown,
         br2_tail_clip_frac,

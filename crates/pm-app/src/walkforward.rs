@@ -180,6 +180,7 @@ pub struct WalkForwardConfig {
     pub br2_late_favourite_range_extra_edge: f32,
     pub br2_late_favourite_range_extra_confidence: f32,
     pub br2_late_favourite_max_adverse_fast_momentum: f32,
+    pub br2_late_favourite_max_adverse_broad_momentum: f32,
     pub br2_late_favourite_max_entry_pullback: f32,
     pub br2_late_favourite_max_avg_entry_drawdown: f32,
     pub br2_tail_clip_frac: f32,
@@ -319,6 +320,7 @@ impl Default for WalkForwardConfig {
             br2_late_favourite_range_extra_edge: 0.03,
             br2_late_favourite_range_extra_confidence: 0.08,
             br2_late_favourite_max_adverse_fast_momentum: 1.0,
+            br2_late_favourite_max_adverse_broad_momentum: 1.0,
             br2_late_favourite_max_entry_pullback: 1.0,
             br2_late_favourite_max_avg_entry_drawdown: 1.0,
             br2_tail_clip_frac: 0.10,
@@ -478,6 +480,7 @@ pub struct SummaryRunConfig {
     pub br2_late_favourite_range_extra_edge: f32,
     pub br2_late_favourite_range_extra_confidence: f32,
     pub br2_late_favourite_max_adverse_fast_momentum: f32,
+    pub br2_late_favourite_max_adverse_broad_momentum: f32,
     pub br2_late_favourite_max_entry_pullback: f32,
     pub br2_late_favourite_max_avg_entry_drawdown: f32,
     pub br2_tail_clip_frac: f32,
@@ -2515,6 +2518,8 @@ fn run_one_strategy(
                     .br2_late_favourite_range_extra_confidence,
                 late_favourite_max_adverse_fast_momentum: cfg
                     .br2_late_favourite_max_adverse_fast_momentum,
+                late_favourite_max_adverse_broad_momentum: cfg
+                    .br2_late_favourite_max_adverse_broad_momentum,
                 late_favourite_max_entry_pullback: cfg.br2_late_favourite_max_entry_pullback,
                 late_favourite_max_avg_entry_drawdown: cfg
                     .br2_late_favourite_max_avg_entry_drawdown,
@@ -3198,6 +3203,8 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_late_favourite_range_extra_confidence: cfg.br2_late_favourite_range_extra_confidence,
         br2_late_favourite_max_adverse_fast_momentum: cfg
             .br2_late_favourite_max_adverse_fast_momentum,
+        br2_late_favourite_max_adverse_broad_momentum: cfg
+            .br2_late_favourite_max_adverse_broad_momentum,
         br2_late_favourite_max_entry_pullback: cfg.br2_late_favourite_max_entry_pullback,
         br2_late_favourite_max_avg_entry_drawdown: cfg.br2_late_favourite_max_avg_entry_drawdown,
         br2_tail_clip_frac: cfg.br2_tail_clip_frac,

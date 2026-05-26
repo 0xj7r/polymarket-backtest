@@ -241,6 +241,7 @@ pub struct BonereaperV2Config {
     /// the soft range.
     pub late_favourite_range_extra_confidence: f32,
     pub late_favourite_max_adverse_fast_momentum: f32,
+    pub late_favourite_max_adverse_broad_momentum: f32,
     pub late_favourite_max_entry_pullback: f32,
     pub late_favourite_max_avg_entry_drawdown: f32,
 
@@ -356,6 +357,10 @@ impl Default for BonereaperV2Config {
             // small positive value (e.g. 0.04) to reject favourite loads when
             // the fast BTC impulse is actively moving against the favourite.
             late_favourite_max_adverse_fast_momentum: 1.0,
+            // Disabled by default. Set to a small positive value (e.g. 0.02)
+            // to reject favourite loads when the broader BTC trend stack is
+            // moving against the favourite.
+            late_favourite_max_adverse_broad_momentum: 1.0,
             // Disabled by default. Set to a small price distance (e.g. 0.015)
             // to stop adding to the same favourite after it rolls over from
             // the best prior entry price.
@@ -776,11 +781,11 @@ impl Strategy for BonereaperV2 {
     ) -> StrategyOutput {
         self.recent_mids.push(event.yes_mid);
         let book_dir = direction_score(event, &self.recent_mids, MICRO_DEV_SCALE);
-        let (spot_mom, spot_fast_mom) = if !spot.is_empty() {
+        let (spot_mom, spot_fast_mom, spot_broad_mom) = if !spot.is_empty() {
             let stack = spot_momentum_stack(event.ts_ns, spot);
-            (stack.blended_score, stack.fast_score)
+            (stack.blended_score, stack.fast_score, stack.broad_score)
         } else {
-            (0.0, 0.0)
+            (0.0, 0.0, 0.0)
         };
         let whipsaw = if !spot.is_empty() {
             WhipsawRiskSnapshot::from_history(event.ts_ns, spot)
@@ -1122,6 +1127,8 @@ impl Strategy for BonereaperV2 {
                     };
                     let adverse_fast_momentum = buy_side_sign(side) * spot_fast_mom
                         < -self.cfg.late_favourite_max_adverse_fast_momentum;
+                    let adverse_broad_momentum = buy_side_sign(side) * spot_broad_mom
+                        < -self.cfg.late_favourite_max_adverse_broad_momentum;
                     let px = buy_px(event, side);
                     let entry_pullback = if self.cfg.late_favourite_max_entry_pullback < 1.0
                         && self.late_favourite_side == Some(side)
@@ -1147,7 +1154,7 @@ impl Strategy for BonereaperV2 {
                         || (px as f32) < self.cfg.late_favourite_min_ask
                     {
                         self.gate_stats.late_favourite_price_fail += 1;
-                    } else if adverse_fast_momentum {
+                    } else if adverse_fast_momentum || adverse_broad_momentum {
                         self.gate_stats.late_favourite_adverse_momentum_fail += 1;
                     } else if entry_pullback > self.cfg.late_favourite_max_entry_pullback as f64 {
                         self.gate_stats.late_favourite_entry_pullback_fail += 1;
