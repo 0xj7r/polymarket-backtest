@@ -370,7 +370,7 @@ enum Cmd {
         #[arg(long, default_value = "0.923")]
         br2_late_favourite_fragile_high_cert_ask: f32,
         /// Maximum model edge for fragile high-cert late-favourite size taper.
-        #[arg(long, default_value = "0.005")]
+        #[arg(long, default_value = "0.020")]
         br2_late_favourite_fragile_high_cert_max_edge: f32,
         /// Maximum BTC path efficiency for fragile high-cert late-favourite size taper.
         #[arg(long, default_value = "0.50")]
