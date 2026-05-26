@@ -309,11 +309,7 @@ impl Default for BonereaperV2Config {
             late_favourite_threshold: 0.22, // yes_mid >= 0.72 or <= 0.28
             late_favourite_min_ask: 0.70,
             late_favourite_high_cert_ask: 0.90,
-            // Keep late favourite loading heavy, but do not sweep depth into
-            // the weak 92c+ high-cert band unless an experiment explicitly
-            // overrides this. Historical attribution showed 90-92c favourite
-            // fills positive while 92-92.5c fills carried the large drawdowns.
-            late_favourite_max_ask: 0.92,
+            late_favourite_max_ask: 0.97,
             late_favourite_clip_frac: 1.00,
             late_favourite_high_cert_clip_frac: 1.00,
             late_favourite_high_cert_full_clip_edge: 0.00,

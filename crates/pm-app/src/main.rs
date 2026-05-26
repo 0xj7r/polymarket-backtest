@@ -355,7 +355,7 @@ enum Cmd {
         #[arg(long, default_value = "0.70")]
         br2_late_favourite_min_ask: f32,
         /// Bonereaper v2 maximum ask price for late-favourite loads.
-        #[arg(long, default_value = "0.92")]
+        #[arg(long, default_value = "0.97")]
         br2_late_favourite_max_ask: f32,
         /// Bonereaper v2 late-favourite clip multiplier.
         #[arg(long, default_value = "1.00")]
