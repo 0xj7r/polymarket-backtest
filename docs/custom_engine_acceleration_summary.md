@@ -6,7 +6,7 @@ Date: 2026-05-27
 
 Make the high-fidelity custom backtesting path (`runner.rs` + `walkforward.rs`) fast enough for large historical grids while preserving research fidelity: the same strategy logic, model gates, fill accounting, attribution, and portfolio-mode compounding.
 
-The current direction is to keep the custom engine as the authoritative research path. Nautilus prototypes may remain useful for future scale experiments, but the custom path is the one used for current strategy iteration and PnL validation.
+The current direction is to keep the custom engine as the authoritative research path. Strategy iteration and PnL validation use the custom walk-forward runner, not Nautilus BacktestEngine prototypes.
 
 ## Delivered
 

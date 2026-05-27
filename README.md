@@ -1,18 +1,20 @@
 # polymarket-backtest
 
-Pure-Rust backtesting + paper + live framework for Polymarket BTC-5m markets, built on the NautilusTrader Rust crates.
+Pure-Rust custom backtesting + paper/live framework for Polymarket BTC-5m markets.
+The authoritative research path is the in-repo custom engine (`pm-app walk-forward`
+→ `walkforward.rs` → `runner.rs` → `pm-strategy`), not Nautilus BacktestEngine.
 
 ## Workspace
 
 ```
 crates/
 ├── pm-types/              # ReplayEvent, SpotTick/SpotHistory, TradeTick/TradeHistory, MarketId, BookLevel, PortfolioLimits
-├── pm-telonex-loader/     # S3 streaming loaders + Nautilus QuoteTick conversion
+├── pm-telonex-loader/     # S3/local-cache streaming loaders
 │   ├── book_snapshot       (Polymarket book_snapshot_25)
 │   ├── polymarket_trades   (Polymarket trades channel — aggressor flow)
 │   ├── polymarket_onchain  (Polymarket onchain_fills — whale_net_flow)
 │   ├── binance_trades      (Binance agg_trades — BTC spot)
-│   ├── nautilus_conv       (ReplayEvent → nautilus_model::QuoteTick)
+│   ├── nautilus_conv       (optional ReplayEvent → QuoteTick conversion)
 │   └── s3                  (object_store-based S3 client)
 ├── pm-model/              # canonical 4-score model + online meta-calibrator
 ├── pm-strategy/           # strategy candidates + execution lanes
@@ -40,18 +42,14 @@ cargo build --release -p pm-app
 eval "$(AWS_PROFILE=visumlabs aws configure export-credentials --format env)"
 export PM_TELONEX_REGION=us-east-1
 
-# Discover markets for a day (one-off — the markets.parquet predicate-filter
-# helper in scripts/ is faster; this hits the Telonex API).
+# Discover markets for a day from S3/availability API.
 ./target/release/pm-app discover-day --date 2026-05-12 --out /tmp/markets.jsonl
 
-# OR generate the markets list from the master parquet (recommended):
-python3 -c "
-import pyarrow.parquet as pq, json, datetime as dt
-t = pq.ParquetFile('/tmp/markets-full.parquet').read(columns=['slug','outcome_0','outcome_1','asset_id_0','asset_id_1','status','result_id'])
-df = t.to_pandas()
-btc5 = df[df['slug'].str.startswith('btc-updown-5m-', na=False) & (df['status'] == 'resolved')].copy()
-# ... see scripts/generate_markets_jsonl.py
-"
+# OR discover from a local cached book partition without availability calls.
+# This emits one canonical UP-token row per BTC 5m market and sets
+# outcome=Unknown, so do not pass --use-outcome-label for these files.
+./target/release/pm-app discover-local-cache-book-metadata \
+    --cache-dir data/cache --date 2026-05-12 --out /tmp/markets.jsonl
 
 # Run walk-forward across all 7 strategies
 ./target/release/pm-app walk-forward \\
@@ -107,7 +105,7 @@ complete yet:
 - ✅ Markets-dataset discovery (138 days, 39k+ resolved markets)
 - ✅ 4-score model + walk-forward online meta-calibrator
 - ✅ Strategy candidates, including BonereaperV2 late/favourite lanes
-- ✅ Nautilus QuoteTick conversion (linked, validated)
+- ✅ Optional QuoteTick conversion in loader crate
 - ✅ AWS portfolio-grid launcher with checkpointed result uploads
 
 Remaining for true production:

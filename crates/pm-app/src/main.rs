@@ -216,6 +216,21 @@ enum Cmd {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Discover BTC-updown-5m markets directly from local cached book parquet
+    /// metadata. This avoids Telonex availability lookups.
+    DiscoverLocalCacheBookMetadata {
+        #[arg(long)]
+        cache_dir: PathBuf,
+        #[arg(long)]
+        date: String,
+        #[arg(long, default_value = "btc-updown-5m-")]
+        slug_prefix: String,
+        /// Canonical token side to backtest. Use `Up` for BTC up/down YES.
+        #[arg(long, default_value = "Up")]
+        token_outcome: String,
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Discover Polymarket BTC-updown-5m markets for a date range.
     DiscoverRange {
         #[arg(long)]
@@ -905,6 +920,13 @@ async fn main() -> Result<()> {
             )
             .await
         }
+        Cmd::DiscoverLocalCacheBookMetadata {
+            cache_dir,
+            date,
+            slug_prefix,
+            token_outcome,
+            out,
+        } => discover_local_cache_book_metadata(cache_dir, date, slug_prefix, token_outcome, out),
         Cmd::DiscoverRange {
             start_date,
             end_date,
@@ -1407,6 +1429,41 @@ async fn discover_local_cache_day(
         date,
         out.display()
     );
+    Ok(())
+}
+
+fn discover_local_cache_book_metadata(
+    cache_dir: PathBuf,
+    date: String,
+    slug_prefix: String,
+    token_outcome: String,
+    out: PathBuf,
+) -> Result<()> {
+    let markets = discovery::discover_markets_from_local_book_metadata(
+        &cache_dir,
+        &date,
+        &slug_prefix,
+        &token_outcome,
+    )?;
+    let mut f = std::fs::File::create(&out).with_context(|| format!("create {}", out.display()))?;
+    for m in &markets {
+        writeln!(f, "{}", serde_json::to_string(m)?)?;
+    }
+    tracing::info!(
+        date = %date,
+        cache_dir = ?cache_dir,
+        token_outcome = %token_outcome,
+        markets = markets.len(),
+        out = ?out,
+        "local cache book metadata discovery complete"
+    );
+    println!(
+        "discovered {} cached book-metadata markets for {} -> {}",
+        markets.len(),
+        date,
+        out.display()
+    );
+    println!("note: output has outcome=Unknown; run walk-forward without --use-outcome-label");
     Ok(())
 }
 

@@ -4,13 +4,18 @@
 //! Output is JSONL of `MarketHandle` rows that `walk-forward` reads.
 
 use anyhow::{Context, Result, anyhow};
+use chrono::{DateTime, NaiveDate};
 use futures::StreamExt;
 use object_store::path::Path as ObjectPath;
+use parquet::file::reader::{FileReader, SerializedFileReader};
+use parquet::file::statistics::Statistics;
 use pm_telonex_loader::TelonexStore;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketHandle {
@@ -40,6 +45,12 @@ struct AvailabilityCacheEntry {
 }
 
 type AvailabilityCache = HashMap<String, (String, String)>;
+
+struct LocalBookMetadataScan {
+    market: Option<MarketHandle>,
+    missing_parquet: usize,
+    metadata_failures: usize,
+}
 
 /// List all `asset_id=...` sub-prefixes under
 /// `raw/telonex/exchange=polymarket/channel=book_snapshot_25/date=DATE/`.
@@ -90,6 +101,218 @@ pub fn list_asset_ids_for_local_cache_day(cache_dir: &Path, date: &str) -> Resul
     }
     asset_ids.sort();
     Ok(asset_ids)
+}
+
+fn local_cache_book_day_dir(cache_dir: &Path, date: &str) -> PathBuf {
+    cache_dir
+        .join("raw/telonex/exchange=polymarket/channel=book_snapshot_25")
+        .join(format!("date={date}"))
+}
+
+fn local_cache_asset_dir(cache_dir: &Path, date: &str, asset_id: &str) -> PathBuf {
+    local_cache_book_day_dir(cache_dir, date).join(format!("asset_id={asset_id}"))
+}
+
+fn first_parquet_under(dir: &Path) -> Result<Option<PathBuf>> {
+    let entries = std::fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))?;
+    let mut parquets = Vec::new();
+    for entry in entries {
+        let entry = entry.with_context(|| format!("read entry under {}", dir.display()))?;
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "parquet") {
+            parquets.push(path);
+        }
+    }
+    parquets.sort();
+    Ok(parquets.into_iter().next())
+}
+
+fn constant_utf8_stat(stats: Option<&Statistics>) -> Option<String> {
+    let stats = stats?;
+    let min = stats.min_bytes_opt()?;
+    let max = stats.max_bytes_opt()?;
+    if min != max {
+        return None;
+    }
+    std::str::from_utf8(min).ok().map(ToString::to_string)
+}
+
+fn read_book_metadata_row(path: &Path) -> Result<Option<(String, String, String)>> {
+    let file = File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let reader = SerializedFileReader::new(file)
+        .with_context(|| format!("read parquet metadata {}", path.display()))?;
+    let metadata = reader.metadata();
+    if metadata.num_row_groups() == 0 {
+        return Ok(None);
+    }
+    let columns = metadata.file_metadata().schema_descr().columns();
+    let find_idx = |name: &str| columns.iter().position(|column| column.name() == name);
+    let Some(slug_idx) = find_idx("slug") else {
+        return Ok(None);
+    };
+    let Some(asset_idx) = find_idx("asset_id") else {
+        return Ok(None);
+    };
+    let Some(outcome_idx) = find_idx("outcome") else {
+        return Ok(None);
+    };
+    let row_group = metadata.row_group(0);
+    let Some(slug) = constant_utf8_stat(row_group.column(slug_idx).statistics()) else {
+        return Ok(None);
+    };
+    let Some(asset_id) = constant_utf8_stat(row_group.column(asset_idx).statistics()) else {
+        return Ok(None);
+    };
+    let Some(outcome) = constant_utf8_stat(row_group.column(outcome_idx).statistics()) else {
+        return Ok(None);
+    };
+    Ok(Some((slug, asset_id, outcome)))
+}
+
+fn close_date_from_slug(slug: &str) -> Option<String> {
+    let close_ts = parse_close_ts(slug)?;
+    let dt = DateTime::from_timestamp(close_ts, 0)?;
+    Some(dt.date_naive().to_string())
+}
+
+fn scan_local_book_asset(
+    cache_dir: &Path,
+    date: &str,
+    asset_id: &str,
+    requested_date: &str,
+    slug_prefix: &str,
+    token_outcome: &str,
+) -> LocalBookMetadataScan {
+    let asset_dir = local_cache_asset_dir(cache_dir, date, asset_id);
+    let path = match first_parquet_under(&asset_dir) {
+        Ok(Some(path)) => path,
+        Ok(None) => {
+            return LocalBookMetadataScan {
+                market: None,
+                missing_parquet: 1,
+                metadata_failures: 0,
+            };
+        }
+        Err(err) => {
+            tracing::warn!(path = %asset_dir.display(), error = %err, "book metadata directory read failed");
+            return LocalBookMetadataScan {
+                market: None,
+                missing_parquet: 0,
+                metadata_failures: 1,
+            };
+        }
+    };
+    let row = match read_book_metadata_row(&path) {
+        Ok(row) => row,
+        Err(err) => {
+            tracing::warn!(path = %path.display(), error = %err, "book metadata read failed");
+            return LocalBookMetadataScan {
+                market: None,
+                missing_parquet: 0,
+                metadata_failures: 1,
+            };
+        }
+    };
+    let Some((slug, parquet_asset_id, outcome)) = row else {
+        return LocalBookMetadataScan {
+            market: None,
+            missing_parquet: 0,
+            metadata_failures: 0,
+        };
+    };
+    if !slug.starts_with(slug_prefix) || outcome != token_outcome {
+        return LocalBookMetadataScan {
+            market: None,
+            missing_parquet: 0,
+            metadata_failures: 0,
+        };
+    }
+    let Some(close_ts) = parse_close_ts(&slug) else {
+        return LocalBookMetadataScan {
+            market: None,
+            missing_parquet: 0,
+            metadata_failures: 0,
+        };
+    };
+    let Some(close_date) = close_date_from_slug(&slug) else {
+        return LocalBookMetadataScan {
+            market: None,
+            missing_parquet: 0,
+            metadata_failures: 0,
+        };
+    };
+    if close_date != requested_date {
+        return LocalBookMetadataScan {
+            market: None,
+            missing_parquet: 0,
+            metadata_failures: 0,
+        };
+    }
+    LocalBookMetadataScan {
+        market: Some(MarketHandle {
+            asset_id: parquet_asset_id,
+            slug,
+            close_ts,
+            outcome: "Unknown".to_string(),
+            date: requested_date.to_string(),
+        }),
+        missing_parquet: 0,
+        metadata_failures: 0,
+    }
+}
+
+/// Fast local discovery from cached book parquets.
+///
+/// This does not call Telonex availability. The `outcome` column in book
+/// snapshot files is the token side ("Up"/"Down"), not the resolved market
+/// winner, so emitted `MarketHandle.outcome` is intentionally `Unknown`.
+/// Run walk-forward without `--use-outcome-label` for these files so settlement
+/// is inferred from the final token price.
+pub fn discover_markets_from_local_book_metadata(
+    cache_dir: &Path,
+    date: &str,
+    slug_prefix: &str,
+    token_outcome: &str,
+) -> Result<Vec<MarketHandle>> {
+    let requested_date = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .with_context(|| format!("parse date {date}"))?;
+    let asset_ids = list_asset_ids_for_local_cache_day(cache_dir, date)?;
+    let requested_date_str = requested_date.to_string();
+    let scans = asset_ids
+        .into_par_iter()
+        .map(|asset_id| {
+            scan_local_book_asset(
+                cache_dir,
+                date,
+                &asset_id,
+                &requested_date_str,
+                slug_prefix,
+                token_outcome,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let mut out = Vec::new();
+    let mut missing_parquet = 0usize;
+    let mut metadata_failures = 0usize;
+    for scan in scans {
+        missing_parquet += scan.missing_parquet;
+        metadata_failures += scan.metadata_failures;
+        if let Some(market) = scan.market {
+            out.push(market);
+        }
+    }
+    out.sort_by_key(|m| (m.close_ts, m.asset_id.clone()));
+    out.dedup_by(|a, b| a.slug == b.slug);
+    tracing::info!(
+        date,
+        markets = out.len(),
+        token_outcome,
+        missing_parquet,
+        metadata_failures,
+        "local book metadata discovery complete"
+    );
+    Ok(out)
 }
 
 /// Hit the public `/v1/availability/polymarket?asset_id=X` endpoint; extract
