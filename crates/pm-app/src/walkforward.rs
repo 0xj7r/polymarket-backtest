@@ -635,10 +635,25 @@ pub struct StrategyMarketResult {
     pub model_training_samples: Vec<MetaTrainingSample>,
 }
 
+fn market_open_ts(m: &MarketHandle) -> i64 {
+    parse_close_ts(&m.slug).unwrap_or_else(|| m.close_ts.saturating_sub(300))
+}
+
+fn market_close_ts(m: &MarketHandle) -> i64 {
+    let open_ts = market_open_ts(m);
+    if m.close_ts <= open_ts {
+        open_ts.saturating_add(300)
+    } else {
+        m.close_ts
+    }
+}
+
 fn market_open_ns(m: &MarketHandle) -> i64 {
-    parse_close_ts(&m.slug)
-        .unwrap_or_else(|| m.close_ts.saturating_sub(300))
-        .saturating_mul(1_000_000_000)
+    market_open_ts(m).saturating_mul(1_000_000_000)
+}
+
+fn market_close_ns(m: &MarketHandle) -> i64 {
+    market_close_ts(m).saturating_mul(1_000_000_000)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1365,10 +1380,11 @@ pub async fn run_walkforward(
     markets: &[MarketHandle],
     cfg: &WalkForwardConfig,
 ) -> Result<(Vec<MarketResult>, WalkForwardSummary)> {
-    // Always sort by close_ts so portfolio mode is well-defined and parallel
-    // mode logs read sensibly. Single source of truth.
+    // Always sort by normalized close so portfolio mode is well-defined and
+    // parallel mode logs read sensibly. Some older local market lists stored
+    // the slug/open timestamp in `close_ts`; normalize those to open + 300s.
     let mut markets_sorted: Vec<MarketHandle> = markets.to_vec();
-    markets_sorted.sort_by_key(|m| m.close_ts);
+    markets_sorted.sort_by_key(market_close_ts);
     let markets = &markets_sorted[..];
 
     let mut spot_cache = SpotCache::default();
@@ -2506,7 +2522,7 @@ async fn collect_training_samples_for_market(
     let runner_cfg = RunnerConfig {
         starting_cash_usdc,
         market_open_ns: market_open_ns(m),
-        market_close_ns: m.close_ts.saturating_mul(1_000_000_000),
+        market_close_ns: market_close_ns(m),
         resolved_yes,
         portfolio_limits: PortfolioLimits::default(),
         equity_curve_jsonl: None,
@@ -2635,7 +2651,7 @@ async fn run_markets(
             let runner_cfg = RunnerConfig {
                 starting_cash_usdc: cfg_arc.starting_cash_usdc,
                 market_open_ns: market_open_ns(&m),
-                market_close_ns: m.close_ts.saturating_mul(1_000_000_000),
+                market_close_ns: market_close_ns(&m),
                 resolved_yes,
                 portfolio_limits: PortfolioLimits {
                     max_clip_usdc: cfg_arc.max_clip_usdc * cfg_arc.max_order_clip_multiplier,
@@ -2716,11 +2732,12 @@ async fn run_markets(
             let volatility_range = market_volatility_range(&events_for_run);
             let volatility_band =
                 volatility_band(volatility_range, cfg.volatility_regime_threshold);
+            let close_ts = market_close_ts(&m);
 
             results.push(MarketResult {
                 asset_id: m.asset_id,
                 slug: m.slug,
-                close_ts: m.close_ts,
+                close_ts,
                 outcome_label: m.outcome,
                 volatility_range,
                 volatility_band,
@@ -2761,12 +2778,14 @@ async fn run_markets(
                     }
                 }
                 let volatility_range = market_volatility_range(&events_for_run);
-                let volatility_band = volatility_band(volatility_range, cfg.volatility_regime_threshold);
+                let volatility_band =
+                    volatility_band(volatility_range, cfg.volatility_regime_threshold);
+                let close_ts = market_close_ts(&m);
 
                 MarketResult {
                     asset_id: m.asset_id,
                     slug: m.slug,
-                    close_ts: m.close_ts,
+                    close_ts,
                     outcome_label: m.outcome,
                     volatility_range,
                     volatility_band,
@@ -3175,7 +3194,7 @@ async fn run_portfolio(
             let runner_cfg = RunnerConfig {
                 starting_cash_usdc: bankroll,
                 market_open_ns: market_open_ns(&m),
-                market_close_ns: m.close_ts.saturating_mul(1_000_000_000),
+                market_close_ns: market_close_ns(&m),
                 resolved_yes,
                 portfolio_limits: PortfolioLimits {
                     max_clip_usdc: clip * cfg.max_order_clip_multiplier,
@@ -3269,7 +3288,7 @@ async fn run_portfolio(
         results.push(MarketResult {
             asset_id: m.asset_id.clone(),
             slug: m.slug.clone(),
-            close_ts: m.close_ts,
+            close_ts: market_close_ts(&m),
             outcome_label: m.outcome.clone(),
             volatility_range,
             volatility_band,
@@ -3874,6 +3893,23 @@ mod tests {
             .expect("system clock before epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("{prefix}-{nanos}"))
+    }
+
+    #[test]
+    fn market_close_ts_normalizes_legacy_open_timestamp_rows() {
+        let mut market = MarketHandle {
+            asset_id: "asset".to_string(),
+            slug: "btc-updown-5m-1778763000".to_string(),
+            close_ts: 1_778_763_000,
+            outcome: "Up".to_string(),
+            date: "2026-05-14".to_string(),
+        };
+
+        assert_eq!(market_open_ts(&market), 1_778_763_000);
+        assert_eq!(market_close_ts(&market), 1_778_763_300);
+
+        market.close_ts = 1_778_763_300;
+        assert_eq!(market_close_ts(&market), 1_778_763_300);
     }
 
     #[test]
