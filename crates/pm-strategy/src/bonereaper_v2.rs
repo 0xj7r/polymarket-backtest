@@ -614,6 +614,46 @@ fn range_throttle(range: f32, soft: f32, hard: f32) -> f32 {
     ((range - soft) / (hard - soft)).clamp(0.0, 1.0)
 }
 
+fn late_favourite_effective_skew_threshold(
+    ctx: &Ctx,
+    side: Side,
+    base_threshold: f32,
+    floor_threshold: f32,
+    min_confidence: f32,
+    max_risk: f32,
+    min_side_p: f32,
+    disable_model_gates: bool,
+) -> f32 {
+    let base = base_threshold.clamp(0.0, 1.0);
+    let floor = floor_threshold.clamp(0.0, base);
+    if disable_model_gates || floor >= base {
+        return base;
+    }
+    let Some(model) = ctx.model_output else {
+        return base;
+    };
+    let model_side_is_yes = model.direction_score >= 0.0;
+    let target_side_is_yes = matches!(side, Side::BuyYes);
+    if model_side_is_yes != target_side_is_yes || model.risk_score > max_risk {
+        return base;
+    }
+
+    let side_p = if target_side_is_yes == model_side_is_yes {
+        model.calibrated_p
+    } else {
+        1.0 - model.calibrated_p
+    };
+    if side_p < min_side_p || model.confidence_score < min_confidence {
+        return base;
+    }
+
+    let side_p_strength = ((side_p - min_side_p) / 0.12).clamp(0.0, 1.0);
+    let confidence_strength = ((model.confidence_score - min_confidence) / 0.12).clamp(0.0, 1.0);
+    let risk_strength = ((max_risk - model.risk_score) / 0.20).clamp(0.0, 1.0);
+    let strength = side_p_strength.min(confidence_strength).min(risk_strength);
+    (base - (base - floor) * strength).clamp(floor, base)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModelSupport {
     Supported,
@@ -1132,6 +1172,21 @@ impl Strategy for BonereaperV2 {
                 self.gate_stats.late_favourite_checks += 1;
                 let skew_signed = event.yes_mid - 0.5;
                 let skew_mag = skew_signed.abs();
+                let side = if skew_signed > 0.0 {
+                    Side::BuyYes
+                } else {
+                    Side::BuyNo
+                };
+                let effective_skew_threshold = late_favourite_effective_skew_threshold(
+                    ctx,
+                    side,
+                    self.cfg.late_favourite_threshold,
+                    self.cfg.high_skew_threshold,
+                    self.cfg.late_favourite_min_model_confidence,
+                    self.cfg.late_favourite_max_model_risk,
+                    self.cfg.late_favourite_min_model_side_p,
+                    self.cfg.disable_internal_model_gates,
+                );
                 let composite_aligned = composite_dir.signum() == skew_signed.signum()
                     && composite_dir.abs() >= self.cfg.late_favourite_min_composite_alignment;
                 let spot_aligned = spot_fast_mom.signum() == skew_signed.signum()
@@ -1152,7 +1207,7 @@ impl Strategy for BonereaperV2 {
                     true
                 };
 
-                if skew_mag < self.cfg.late_favourite_threshold {
+                if skew_mag < effective_skew_threshold {
                     self.gate_stats.late_favourite_skew_fail += 1;
                 } else if !favourite_sustained {
                     self.gate_stats.late_favourite_sustain_fail += 1;
@@ -1166,11 +1221,6 @@ impl Strategy for BonereaperV2 {
                 } else if ctx.market_yes_range_so_far > self.cfg.late_favourite_max_observed_range {
                     self.gate_stats.late_favourite_market_range_fail += 1;
                 } else {
-                    let side = if skew_signed > 0.0 {
-                        Side::BuyYes
-                    } else {
-                        Side::BuyNo
-                    };
                     let adverse_fast_momentum = buy_side_sign(side) * spot_fast_mom
                         < -self.cfg.late_favourite_max_adverse_fast_momentum;
                     let adverse_broad_momentum = buy_side_sign(side) * spot_broad_mom
@@ -1555,6 +1605,81 @@ mod tests {
         assert!((range_throttle(0.94, 0.90, 0.98) - 0.5).abs() < 1e-6);
         assert_eq!(range_throttle(0.99, 0.90, 0.98), 1.0);
         assert_eq!(range_throttle(0.99, 1.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn model_support_can_relax_late_favourite_skew_to_high_skew_floor() {
+        let ctx = Ctx {
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            market_yes_range_so_far: 0.0,
+            model_output: Some(ModelOutput {
+                direction_score: 0.8,
+                confidence_score: 0.82,
+                calibrated_p: 0.76,
+                risk_score: 0.20,
+            }),
+            market_close_ns: 0,
+        };
+
+        let threshold = late_favourite_effective_skew_threshold(
+            &ctx,
+            Side::BuyYes,
+            0.22,
+            0.16,
+            0.68,
+            0.72,
+            0.62,
+            false,
+        );
+        assert!((threshold - 0.16).abs() < 1e-6);
+    }
+
+    #[test]
+    fn model_skew_relief_requires_matching_side_and_active_model_gates() {
+        let ctx = Ctx {
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 100.0,
+            market_yes_range_so_far: 0.0,
+            model_output: Some(ModelOutput {
+                direction_score: -0.8,
+                confidence_score: 0.82,
+                calibrated_p: 0.76,
+                risk_score: 0.20,
+            }),
+            market_close_ns: 0,
+        };
+
+        assert_eq!(
+            late_favourite_effective_skew_threshold(
+                &ctx,
+                Side::BuyYes,
+                0.22,
+                0.16,
+                0.68,
+                0.72,
+                0.62,
+                false,
+            ),
+            0.22
+        );
+        assert_eq!(
+            late_favourite_effective_skew_threshold(
+                &ctx,
+                Side::BuyNo,
+                0.22,
+                0.16,
+                0.68,
+                0.72,
+                0.62,
+                true,
+            ),
+            0.22
+        );
     }
 
     #[test]
