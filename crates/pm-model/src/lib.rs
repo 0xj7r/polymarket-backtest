@@ -13,7 +13,7 @@ const MOMENTUM_WINDOWS_SECONDS: [i64; 5] = [10, 30, 60, 120, 300];
 const MOMENTUM_WEIGHTS: [f32; 5] = [0.45, 0.25, 0.15, 0.10, 0.05];
 const SKEW_BINS: usize = 10;
 const HOUR_BINS: usize = 24;
-const META_FEATURES: usize = 70;
+const META_FEATURES: usize = 75;
 const META_CALIBRATOR_LR: f32 = 0.08;
 const META_CALIBRATOR_MIN_UPDATES: u32 = 12;
 const META_CALIBRATOR_WEIGHT_DECAY: f32 = 1.0e-3;
@@ -110,6 +110,11 @@ pub const META_FEATURE_NAMES: [&str; META_FEATURES] = [
     "btc_reversal_pressure",
     "side_high_cert_path_inefficiency",
     "side_high_cert_reversal_pressure",
+    "spot_momentum_7200s_side",
+    "spot_momentum_14400s_side",
+    "spot_1h_4h_alignment",
+    "spot_ultra_trend_consistency",
+    "spot_ultra_acceleration_side",
 ];
 
 /// Output contract expected by the 4-score engine.
@@ -398,6 +403,11 @@ pub struct DirectionScore {
     pub spot_momentum_900s: f32,
     pub spot_momentum_1800s: f32,
     pub spot_momentum_3600s: f32,
+    pub spot_momentum_7200s: f32,
+    pub spot_momentum_14400s: f32,
+    pub spot_1h_4h_alignment: f32,
+    pub spot_ultra_trend_consistency: f32,
+    pub spot_ultra_acceleration: f32,
     pub spot_fast_broad_alignment: f32,
     pub spot_fast_long_alignment: f32,
     pub spot_broad_trend_consistency: f32,
@@ -797,6 +807,16 @@ impl MetaFeatures {
         values[idx] = (high_cert * spot_regime.path_inefficiency).clamp(0.0, 1.0);
         idx += 1;
         values[idx] = (high_cert * spot_regime.reversal_pressure).clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = direction.spot_momentum_7200s * side;
+        idx += 1;
+        values[idx] = direction.spot_momentum_14400s * side;
+        idx += 1;
+        values[idx] = direction.spot_1h_4h_alignment;
+        idx += 1;
+        values[idx] = direction.spot_ultra_trend_consistency;
+        idx += 1;
+        values[idx] = direction.spot_ultra_acceleration * side;
         idx += 1;
         debug_assert_eq!(idx, META_FEATURES);
         Self { values }
@@ -2151,6 +2171,11 @@ pub fn direction_score(
         spot_momentum_900s: spot_stack.momentum_900s,
         spot_momentum_1800s: spot_stack.momentum_1800s,
         spot_momentum_3600s: spot_stack.momentum_3600s,
+        spot_momentum_7200s: spot_stack.momentum_7200s,
+        spot_momentum_14400s: spot_stack.momentum_14400s,
+        spot_1h_4h_alignment: spot_stack.one_hour_four_hour_alignment,
+        spot_ultra_trend_consistency: spot_stack.ultra_trend_consistency,
+        spot_ultra_acceleration: spot_stack.ultra_acceleration,
         spot_fast_broad_alignment: spot_stack.alignment,
         spot_fast_long_alignment: spot_stack.fast_long_alignment,
         spot_broad_trend_consistency: spot_stack.broad_trend_consistency,
@@ -2468,12 +2493,17 @@ struct SpotScoreStack {
     momentum_900s: f32,
     momentum_1800s: f32,
     momentum_3600s: f32,
+    momentum_7200s: f32,
+    momentum_14400s: f32,
     blended: f32,
     alignment: f32,
     fast_long_alignment: f32,
+    one_hour_four_hour_alignment: f32,
     broad_trend_consistency: f32,
+    ultra_trend_consistency: f32,
     acceleration: f32,
     broad_acceleration: f32,
+    ultra_acceleration: f32,
 }
 
 fn spot_score_stack(ts_ns: i64, spot: &SpotHistory) -> SpotScoreStack {
@@ -2485,6 +2515,8 @@ fn spot_score_stack(ts_ns: i64, spot: &SpotHistory) -> SpotScoreStack {
     let momentum_900s = score_spot_return(spot.simple_return(ts_ns, 900 * NS_PER_SECOND), 100.0);
     let momentum_1800s = score_spot_return(spot.simple_return(ts_ns, 1800 * NS_PER_SECOND), 70.0);
     let momentum_3600s = score_spot_return(spot.simple_return(ts_ns, 3600 * NS_PER_SECOND), 50.0);
+    let momentum_7200s = score_spot_return(spot.simple_return(ts_ns, 7200 * NS_PER_SECOND), 35.0);
+    let momentum_14400s = score_spot_return(spot.simple_return(ts_ns, 14400 * NS_PER_SECOND), 25.0);
     let alignment = if fast_score.abs() < 0.02 || broad_score.abs() < 0.02 {
         0.0
     } else if fast_score.signum() == broad_score.signum() {
@@ -2493,7 +2525,9 @@ fn spot_score_stack(ts_ns: i64, spot: &SpotHistory) -> SpotScoreStack {
         -1.0
     };
     let fast_long_alignment = directional_alignment(fast_score, momentum_3600s);
+    let one_hour_four_hour_alignment = directional_alignment(momentum_3600s, momentum_14400s);
     let broad_scores = [momentum_600s, momentum_900s, momentum_1800s, momentum_3600s];
+    let ultra_scores = [momentum_3600s, momentum_7200s, momentum_14400s];
     let non_zero = broad_scores
         .iter()
         .filter(|score| score.abs() >= 0.02)
@@ -2505,13 +2539,32 @@ fn spot_score_stack(ts_ns: i64, spot: &SpotHistory) -> SpotScoreStack {
     } else {
         (positive.max(negative) as f32 / non_zero as f32).clamp(0.0, 1.0)
     };
+    let ultra_non_zero = ultra_scores
+        .iter()
+        .filter(|score| score.abs() >= 0.02)
+        .count();
+    let ultra_positive = ultra_scores.iter().filter(|score| **score >= 0.02).count();
+    let ultra_negative = ultra_scores.iter().filter(|score| **score <= -0.02).count();
+    let ultra_trend_consistency = if ultra_non_zero == 0 {
+        0.0
+    } else {
+        (ultra_positive.max(ultra_negative) as f32 / ultra_non_zero as f32).clamp(0.0, 1.0)
+    };
     let broad_acceleration = (momentum_600s - momentum_3600s).clamp(-1.0, 1.0);
+    let ultra_score =
+        (0.50 * momentum_3600s + 0.30 * momentum_7200s + 0.20 * momentum_14400s).clamp(-1.0, 1.0);
+    let ultra_acceleration = (momentum_3600s - momentum_14400s).clamp(-1.0, 1.0);
     let blended = if alignment == 0.0 {
         fast_score
     } else if alignment > 0.0 {
-        (0.80 * fast_score + 0.20 * broad_score).clamp(-1.0, 1.0)
+        (0.74 * fast_score + 0.18 * broad_score + 0.08 * ultra_score).clamp(-1.0, 1.0)
+    } else if directional_alignment(fast_score, ultra_score) < 0.0
+        && ultra_trend_consistency >= 0.67
+    {
+        // Short impulses fighting a coherent 1h-4h regime are fragile in late favourites.
+        (0.55 * fast_score + 0.30 * broad_score + 0.15 * ultra_score).clamp(-1.0, 1.0)
     } else {
-        (0.65 * fast_score + 0.35 * broad_score).clamp(-1.0, 1.0)
+        (0.62 * fast_score + 0.30 * broad_score + 0.08 * ultra_score).clamp(-1.0, 1.0)
     };
     SpotScoreStack {
         fast: fast_score,
@@ -2520,12 +2573,17 @@ fn spot_score_stack(ts_ns: i64, spot: &SpotHistory) -> SpotScoreStack {
         momentum_900s,
         momentum_1800s,
         momentum_3600s,
+        momentum_7200s,
+        momentum_14400s,
         blended,
         alignment,
         fast_long_alignment,
+        one_hour_four_hour_alignment,
         broad_trend_consistency,
+        ultra_trend_consistency,
         acceleration: (fast_score - broad_score).clamp(-1.0, 1.0),
         broad_acceleration,
+        ultra_acceleration,
     }
 }
 
@@ -3521,6 +3579,49 @@ mod tests {
         assert!((features.values[regime_idx + 2] - 0.60).abs() < 1.0e-6);
         assert!((features.values[regime_idx + 4] - 0.50).abs() < 1.0e-6);
         assert_eq!(features.values[regime_idx + 6], 0.0);
+    }
+
+    #[test]
+    fn spot_stack_includes_ultra_context() {
+        let ns = |secs: i64| secs * NS_PER_SECOND;
+        let spot = SpotHistory::new(vec![
+            SpotTick {
+                ts_ns: ns(0),
+                price: 100.0,
+                quantity: 0.0,
+                is_buyer_maker: false,
+            },
+            SpotTick {
+                ts_ns: ns(3600),
+                price: 101.0,
+                quantity: 0.0,
+                is_buyer_maker: false,
+            },
+            SpotTick {
+                ts_ns: ns(7200),
+                price: 102.0,
+                quantity: 0.0,
+                is_buyer_maker: false,
+            },
+            SpotTick {
+                ts_ns: ns(10800),
+                price: 106.0,
+                quantity: 0.0,
+                is_buyer_maker: false,
+            },
+            SpotTick {
+                ts_ns: ns(14400),
+                price: 110.0,
+                quantity: 0.0,
+                is_buyer_maker: false,
+            },
+        ]);
+
+        let stack = spot_score_stack(ns(14400), &spot);
+        assert!(stack.momentum_7200s > 0.0);
+        assert!(stack.momentum_14400s > 0.0);
+        assert_eq!(stack.one_hour_four_hour_alignment, 1.0);
+        assert_eq!(stack.ultra_trend_consistency, 1.0);
     }
 
     #[test]

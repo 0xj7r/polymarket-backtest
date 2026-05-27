@@ -225,6 +225,11 @@ pub struct DecisionLogRow {
     pub feature_spot_momentum_900s: f32,
     pub feature_spot_momentum_1800s: f32,
     pub feature_spot_momentum_3600s: f32,
+    pub feature_spot_momentum_7200s: f32,
+    pub feature_spot_momentum_14400s: f32,
+    pub feature_spot_1h_4h_alignment: f32,
+    pub feature_spot_ultra_trend_consistency: f32,
+    pub feature_spot_ultra_acceleration: f32,
     pub feature_spot_fast_long_alignment: f32,
     pub feature_spot_broad_trend_consistency: f32,
     pub feature_spot_broad_acceleration: f32,
@@ -755,6 +760,15 @@ pub fn run_backtest<S: Strategy>(
                     feature_spot_momentum_900s: model_attribution.direction.spot_momentum_900s,
                     feature_spot_momentum_1800s: model_attribution.direction.spot_momentum_1800s,
                     feature_spot_momentum_3600s: model_attribution.direction.spot_momentum_3600s,
+                    feature_spot_momentum_7200s: model_attribution.direction.spot_momentum_7200s,
+                    feature_spot_momentum_14400s: model_attribution.direction.spot_momentum_14400s,
+                    feature_spot_1h_4h_alignment: model_attribution.direction.spot_1h_4h_alignment,
+                    feature_spot_ultra_trend_consistency: model_attribution
+                        .direction
+                        .spot_ultra_trend_consistency,
+                    feature_spot_ultra_acceleration: model_attribution
+                        .direction
+                        .spot_ultra_acceleration,
                     feature_spot_fast_long_alignment: model_attribution
                         .direction
                         .spot_fast_long_alignment,
@@ -843,6 +857,15 @@ pub fn run_backtest<S: Strategy>(
                     feature_spot_momentum_900s: model_attribution.direction.spot_momentum_900s,
                     feature_spot_momentum_1800s: model_attribution.direction.spot_momentum_1800s,
                     feature_spot_momentum_3600s: model_attribution.direction.spot_momentum_3600s,
+                    feature_spot_momentum_7200s: model_attribution.direction.spot_momentum_7200s,
+                    feature_spot_momentum_14400s: model_attribution.direction.spot_momentum_14400s,
+                    feature_spot_1h_4h_alignment: model_attribution.direction.spot_1h_4h_alignment,
+                    feature_spot_ultra_trend_consistency: model_attribution
+                        .direction
+                        .spot_ultra_trend_consistency,
+                    feature_spot_ultra_acceleration: model_attribution
+                        .direction
+                        .spot_ultra_acceleration,
                     feature_spot_fast_long_alignment: model_attribution
                         .direction
                         .spot_fast_long_alignment,
@@ -1029,6 +1052,15 @@ fn write_decision_rows_parquet(path: &Path, rows: &[DecisionLogRow]) -> Result<(
         Field::new("feature_spot_momentum_900s", DataType::Float32, false),
         Field::new("feature_spot_momentum_1800s", DataType::Float32, false),
         Field::new("feature_spot_momentum_3600s", DataType::Float32, false),
+        Field::new("feature_spot_momentum_7200s", DataType::Float32, false),
+        Field::new("feature_spot_momentum_14400s", DataType::Float32, false),
+        Field::new("feature_spot_1h_4h_alignment", DataType::Float32, false),
+        Field::new(
+            "feature_spot_ultra_trend_consistency",
+            DataType::Float32,
+            false,
+        ),
+        Field::new("feature_spot_ultra_acceleration", DataType::Float32, false),
         Field::new("feature_spot_fast_long_alignment", DataType::Float32, false),
         Field::new(
             "feature_spot_broad_trend_consistency",
@@ -1168,6 +1200,21 @@ fn write_decision_rows_parquet(path: &Path, rows: &[DecisionLogRow]) -> Result<(
         )),
         Arc::new(Float32Array::from_iter_values(
             rows.iter().map(|r| r.feature_spot_momentum_3600s),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_momentum_7200s),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_momentum_14400s),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_1h_4h_alignment),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_ultra_trend_consistency),
+        )),
+        Arc::new(Float32Array::from_iter_values(
+            rows.iter().map(|r| r.feature_spot_ultra_acceleration),
         )),
         Arc::new(Float32Array::from_iter_values(
             rows.iter().map(|r| r.feature_spot_fast_long_alignment),
