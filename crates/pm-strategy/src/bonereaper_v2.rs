@@ -154,7 +154,8 @@ impl BonereaperV2GateStats {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BonereaperV2Config {
     pub bankroll_usdc: f64,
     pub max_clip_usdc: f64,
@@ -1091,7 +1092,12 @@ impl Strategy for BonereaperV2 {
                             );
                         } else {
                             let clip = self.cfg.max_clip_usdc * self.cfg.high_skew_clip_frac as f64;
-                            let shares = shares_capped(clip, px);
+                            // Dynamic risk sizing (same as late favourite lane)
+                            let risk_size_mult = ctx
+                                .model_output
+                                .map(|m| (1.0 - m.risk_score as f64).clamp(0.25, 1.0))
+                                .unwrap_or(1.0);
+                            let shares = shares_capped(clip * risk_size_mult, px);
                             if shares > 0.0 {
                                 orders.push(OrderRequest {
                                     side,
@@ -1305,6 +1311,16 @@ impl Strategy for BonereaperV2 {
                                 * edge_taper
                                 * range_size_taper
                                 * fragile_taper;
+
+                            // Dynamic risk-based sizing: higher model risk_score (now includes BTC regime risk)
+                            // reduces clip size. This turns the new regime features into proportional sizing
+                            // instead of only hard gates.
+                            let risk_size_mult = ctx
+                                .model_output
+                                .map(|m| (1.0 - m.risk_score as f64).clamp(0.25, 1.0))
+                                .unwrap_or(1.0);
+
+                            let desired_notional = desired_notional * risk_size_mult;
                             let shares = shares_capped(desired_notional, px);
                             if shares > 0.0 {
                                 orders.push(OrderRequest {

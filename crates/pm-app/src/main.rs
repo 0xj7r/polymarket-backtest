@@ -267,6 +267,10 @@ enum Cmd {
         /// JSONL of `MarketHandle` rows from `discover-day`.
         #[arg(long)]
         markets: PathBuf,
+        /// Optional strategy profile (TOML). Profile values override CLI/default
+        /// values for the fields present in the profile.
+        #[arg(long)]
+        profile: Option<PathBuf>,
         /// Chronological cap for smoke/diagnostic runs. 0 means use all markets.
         #[arg(long, default_value_t = 0)]
         max_markets: usize,
@@ -291,11 +295,15 @@ enum Cmd {
         /// Comma-separated strategy IDs: buy_yes_at_open, reactive_directional, paired_mm, unlawful_recycler
         #[arg(long, default_value = "reactive_directional,paired_mm")]
         strategies: String,
-        #[arg(long, default_value = "16")]
+        #[arg(long, default_value = "64")]
         max_concurrent_fetches: usize,
         /// Research-speed replay thinning in milliseconds. 0 keeps every raw event.
         #[arg(long, default_value = "0")]
         replay_sample_ms: u64,
+        /// Directory for on-disk cache of raw ReplayEvents (JSONL). Huge win on AWS
+        /// for repeated runs on the same dates — avoids re-downloading parquets from S3.
+        #[arg(long)]
+        replay_event_cache_dir: Option<PathBuf>,
         /// Skip loading Polymarket trade prints and run with empty trade-flow history.
         #[arg(long, default_value_t = false)]
         disable_pm_trades: bool,
@@ -951,6 +959,7 @@ async fn main() -> Result<()> {
         }
         Cmd::WalkForward {
             markets,
+            profile,
             max_markets,
             starting_cash,
             kelly_fraction,
@@ -962,6 +971,7 @@ async fn main() -> Result<()> {
             strategies,
             max_concurrent_fetches,
             replay_sample_ms,
+            replay_event_cache_dir,
             disable_pm_trades,
             use_outcome_label,
             portfolio_mode,
@@ -1066,6 +1076,7 @@ async fn main() -> Result<()> {
         } => {
             walk_forward(
                 markets,
+                profile,
                 max_markets,
                 starting_cash,
                 kelly_fraction,
@@ -1077,6 +1088,7 @@ async fn main() -> Result<()> {
                 strategies,
                 max_concurrent_fetches,
                 replay_sample_ms,
+                replay_event_cache_dir,
                 !disable_pm_trades,
                 use_outcome_label,
                 portfolio_mode,
@@ -1680,6 +1692,7 @@ fn string_value(array: &StringArray, row: usize) -> Option<&str> {
 #[allow(clippy::too_many_arguments)]
 async fn walk_forward(
     markets_path: PathBuf,
+    profile: Option<PathBuf>,
     max_markets: usize,
     starting_cash: f64,
     kelly_fraction: f64,
@@ -1691,6 +1704,7 @@ async fn walk_forward(
     strategies_csv: String,
     max_concurrent_fetches: usize,
     replay_sample_ms: u64,
+    replay_event_cache_dir: Option<PathBuf>,
     load_pm_trades: bool,
     use_outcome_label: bool,
     portfolio_mode: bool,
@@ -1824,15 +1838,31 @@ async fn walk_forward(
 
     let strategies = parse_strategies(&strategies_csv)?;
 
-    let store = if let Some(dir) = local_cache_dir {
+    // Load optional BonereaperV2 profile (makes --profile the main way to run variants)
+    let bonereaper_profile = if let Some(p) = &profile {
+        match crate::walkforward::BonereaperV2Profile::load(p) {
+            Ok(prof) => {
+                tracing::info!(path = %p.display(), "loaded BonereaperV2 profile");
+                Some(prof)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load profile, continuing without it");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let store = if let Some(ref dir) = local_cache_dir {
         tracing::info!(?dir, "using local cache");
-        TelonexStore::try_new_local(dir)?
+        TelonexStore::try_new_local(dir.clone())?
     } else {
         let cfg = TelonexStoreConfig::from_env()?;
         TelonexStore::try_new(&cfg)?
     };
 
-    let wf_cfg = WalkForwardConfig {
+    let mut wf_cfg = WalkForwardConfig {
         starting_cash_usdc: starting_cash,
         kelly_fraction,
         max_clip_usdc,
@@ -1843,6 +1873,7 @@ async fn walk_forward(
         strategies,
         max_concurrent_fetches,
         replay_sample_ms,
+        replay_event_cache_dir,
         load_pm_trades,
         use_outcome_label,
         maker_rebate_bps: 10.0,
@@ -1949,6 +1980,12 @@ async fn walk_forward(
         checkpoint_summary_out: out_summary.clone(),
     };
 
+    // Apply profile values last. Profile files are the canonical way to run
+    // named variants; keep ad hoc CLI sweeps profile-free or create a profile.
+    if let Some(ref prof) = bonereaper_profile {
+        prof.apply_to_walkforward_config(&mut wf_cfg);
+    }
+
     tracing::info!(markets = markets.len(), "starting walk-forward");
     let started = Instant::now();
     let (results, summary) = run_walkforward(&store, &markets, &wf_cfg).await?;
@@ -1964,6 +2001,25 @@ async fn walk_forward(
     if let Some(p) = out_summary {
         write_summary_json_atomic(&p, &summary)?;
         tracing::info!(?p, "wrote summary");
+
+        // Write a basic run manifest for reproducibility (especially useful with --profile)
+        if profile.is_some() || bonereaper_profile.is_some() {
+            let manifest_path = p.with_file_name("run_manifest.json");
+            let manifest = serde_json::json!({
+                "profile_path": profile.as_ref().map(|p| p.to_string_lossy()),
+                "git_sha": std::process::Command::new("git").args(["rev-parse", "HEAD"]).output().ok().and_then(|o| String::from_utf8(o.stdout).ok()).map(|s| s.trim().to_string()),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "command": std::env::args().collect::<Vec<_>>(),
+            });
+            if let Ok(mut f) = std::fs::File::create(&manifest_path) {
+                let _ = writeln!(
+                    f,
+                    "{}",
+                    serde_json::to_string_pretty(&manifest).unwrap_or_default()
+                );
+                tracing::info!(?manifest_path, "wrote run_manifest.json");
+            }
+        }
     }
     Ok(())
 }

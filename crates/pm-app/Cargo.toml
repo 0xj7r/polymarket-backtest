@@ -25,9 +25,17 @@ tracing-subscriber = { workspace = true }
 chrono             = { workspace = true }
 serde              = { workspace = true }
 serde_json         = { workspace = true }
+toml               = { workspace = true }
 futures            = { workspace = true }
 reqwest            = { workspace = true }
 rayon              = { workspace = true }
 object_store       = { workspace = true }
 arrow              = { workspace = true }
 parquet            = { workspace = true }
+
+[dev-dependencies]
+nautilus-backtest  = { workspace = true }
+nautilus-model     = { workspace = true }
+nautilus-common    = { workspace = true }
+nautilus-trading   = { workspace = true }
+nautilus-core      = { workspace = true }

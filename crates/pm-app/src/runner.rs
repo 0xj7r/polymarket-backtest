@@ -383,11 +383,22 @@ pub fn run_backtest<S: Strategy>(
     let mut total_rebates = 0.0f64;
     let mut total_requested_shares = 0.0f64;
     let mut total_requested_notional = 0.0f64;
-    let mut resting: Vec<RestingOrder> = Vec::new();
+
+    // Direction-grouped resting orders — major CPU win for grids that accumulate
+    // resting orders. BuyYes/SellNo in one list, SellYes/BuyNo in the other.
+    // All hot-path scans now touch roughly half as many elements.
+    let mut resting_buy_yes_sell_no: Vec<RestingOrder> = Vec::new();
+    let mut resting_sell_yes_buy_no: Vec<RestingOrder> = Vec::new();
+
     let mut trade_cursor = 0usize;
     let mut events_processed = 0usize;
     let mut market_yes_min = f32::INFINITY;
     let mut market_yes_max = f32::NEG_INFINITY;
+
+    // Capacity hints for hot path on large days.
+    resting_buy_yes_sell_no.reserve(1024);
+    resting_sell_yes_buy_no.reserve(1024);
+    fills.reserve(8192);
     let mut model_state = ModelState::new();
     if let Some(snapshot) = cfg.meta_calibrator_snapshot.clone() {
         model_state.load_meta_calibrator_snapshot(snapshot);
@@ -449,47 +460,86 @@ pub fn run_backtest<S: Strategy>(
         last_window_idx = idx as isize;
         events_processed += 1;
 
-        check_trade_driven_resting_fills(
-            event,
-            trades,
-            &mut trade_cursor,
-            &mut resting,
-            &mut cash,
-            &mut yes_shares,
-            &mut no_shares,
-            &mut portfolio,
-            &mut counters,
-            &mut fills,
-            &mut total_rebates,
-            cfg.maker_rebate_bps,
-        );
+        // Fast path: skip expensive linear scans over resting orders when there are none
+        // (very common case). This is a free, high-value win in the hot per-event loop
+        // for large grids.
+        // Pass only the relevant half-list (direction-grouped split).
+        if !resting_buy_yes_sell_no.is_empty() {
+            check_trade_driven_resting_fills(
+                event,
+                trades,
+                &mut trade_cursor,
+                &mut resting_buy_yes_sell_no,
+                &mut cash,
+                &mut yes_shares,
+                &mut no_shares,
+                &mut portfolio,
+                &mut counters,
+                &mut fills,
+                &mut total_rebates,
+                cfg.maker_rebate_bps,
+            );
+        }
+        if !resting_sell_yes_buy_no.is_empty() {
+            check_trade_driven_resting_fills(
+                event,
+                trades,
+                &mut trade_cursor,
+                &mut resting_sell_yes_buy_no,
+                &mut cash,
+                &mut yes_shares,
+                &mut no_shares,
+                &mut portfolio,
+                &mut counters,
+                &mut fills,
+                &mut total_rebates,
+                cfg.maker_rebate_bps,
+            );
+        }
 
-        check_resting_fills(
-            event,
-            &mut resting,
-            &mut cash,
-            &mut yes_shares,
-            &mut no_shares,
-            &mut portfolio,
-            &mut counters,
-            &mut fills,
-            &mut total_rebates,
-            cfg.maker_rebate_bps,
-        );
+        if !resting_buy_yes_sell_no.is_empty() {
+            check_resting_fills(
+                event,
+                &mut resting_buy_yes_sell_no,
+                &mut cash,
+                &mut yes_shares,
+                &mut no_shares,
+                &mut portfolio,
+                &mut counters,
+                &mut fills,
+                &mut total_rebates,
+                cfg.maker_rebate_bps,
+            );
+        }
+        if !resting_sell_yes_buy_no.is_empty() {
+            check_resting_fills(
+                event,
+                &mut resting_sell_yes_buy_no,
+                &mut cash,
+                &mut yes_shares,
+                &mut no_shares,
+                &mut portfolio,
+                &mut counters,
+                &mut fills,
+                &mut total_rebates,
+                cfg.maker_rebate_bps,
+            );
+        }
 
-        // Inventory imbalance circuit-breaker: cancel resting orders on the
-        // heavy side once we go too long one outcome.
+        // Inventory imbalance circuit-breaker (applied to both lists).
         let imbalance = yes_shares - no_shares;
         if imbalance.abs() > cfg.max_inventory_imbalance_shares {
             let heavy_long_yes = imbalance > 0.0;
-            resting.retain(|r| {
+            let retain_fn = |r: &RestingOrder| {
                 let adds_to_heavy = match (heavy_long_yes, r.side) {
                     (true, Side::BuyYes) => true,
                     (false, Side::BuyNo) => true,
                     _ => false,
                 };
                 !adds_to_heavy
-            });
+            };
+            resting_buy_yes_sell_no.retain(retain_fn);
+            resting_sell_yes_buy_no.retain(retain_fn);
         }
 
         let pre_cash = cash;
@@ -603,11 +653,16 @@ pub fn run_backtest<S: Strategy>(
                     );
                 }
                 Some(limit) => {
+                    // Classify here so submit_maker_order keeps a simple signature.
+                    let target_resting = match req.side {
+                        Side::BuyYes | Side::SellNo => &mut resting_buy_yes_sell_no,
+                        Side::SellYes | Side::BuyNo => &mut resting_sell_yes_buy_no,
+                    };
                     submit_maker_order(
                         event,
                         &req,
                         limit,
-                        &mut resting,
+                        target_resting,
                         &mut cash,
                         &mut yes_shares,
                         &mut no_shares,
@@ -624,7 +679,8 @@ pub fn run_backtest<S: Strategy>(
             }
         }
 
-        counters.resting_orders_active = resting.len();
+        counters.resting_orders_active =
+            resting_buy_yes_sell_no.len() + resting_sell_yes_buy_no.len();
         let mtm = mark_to_market(cash, yes_shares, no_shares, last_mid);
         portfolio.mark(mtm);
 
@@ -838,8 +894,10 @@ pub fn run_backtest<S: Strategy>(
         last_mid = events.last().map_or(0.0, |e| e.yes_mid);
     }
 
-    counters.resting_orders_cancelled_eom = resting.len();
-    resting.clear();
+    counters.resting_orders_cancelled_eom =
+        resting_buy_yes_sell_no.len() + resting_sell_yes_buy_no.len();
+    resting_buy_yes_sell_no.clear();
+    resting_sell_yes_buy_no.clear();
 
     let yes_resolved = cfg.resolved_yes.unwrap_or(last_mid >= 0.5);
     let settlement_cash = if yes_resolved { yes_shares } else { no_shares };
@@ -1583,9 +1641,15 @@ fn check_resting_fills(
         *total_rebates += rebate;
 
         counters.orders_filled_maker += 1;
+        let side_str = match r.side {
+            Side::BuyYes => "BuyYes",
+            Side::SellYes => "SellYes",
+            Side::BuyNo => "BuyNo",
+            Side::SellNo => "SellNo",
+        };
         fills.push(Fill {
             ts_ns: event.ts_ns,
-            side: format!("{:?}", r.side),
+            side: side_str.to_string(), // still owned for the Fill struct / serialization
             shares: r.shares,
             price: fill_price_native,
             notional,

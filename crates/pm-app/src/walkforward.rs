@@ -1,10 +1,11 @@
 //! Walk-forward harness — run many markets through one or more strategies and
 //! aggregate the per-market results into a summary table.
 //!
-//! Concurrency:
-//!   * tokio for S3 fetches (bounded by `max_concurrent`).
-//!   * rayon for in-process matcher (the matcher itself is so fast that this
-//!     is largely irrelevant, but we keep the structure for when it matters).
+//! Concurrency (custom high-fidelity path):
+//!   * tokio + buffer_unordered for parallel data loading (parquets + spot + trades).
+//!   * rayon par_iter across markets/days for CPU work when !portfolio_mode.
+//!   * Portfolio mode is strictly serial (required for equity compounding).
+//!   * Per-strategy rayon inside each market for additional speedup on multi-strategy runs.
 
 use anyhow::{Context, Result, anyhow};
 use chrono::{Duration, NaiveDate};
@@ -33,15 +34,14 @@ use pm_telonex_loader::{
     Channel, TelonexStore, load_binance_agg_trades_async, load_book_snapshot_async,
     load_pm_trades_async, resolve_binance_day, resolve_pm_trades_day,
 };
-use pm_types::{MarketId, SpotHistory, SpotTick, TradeHistory};
-use serde::Serialize;
+use pm_types::{MarketId, ReplayEvent, SpotHistory, SpotTick, TradeHistory};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use crate::discovery::{MarketHandle, parse_close_ts};
 use crate::runner::{RunnerConfig, run_backtest};
@@ -50,6 +50,214 @@ const DEFAULT_META_MAX_FIT_SAMPLES: usize = 120_000;
 const DEFAULT_META_MAX_VALIDATION_SAMPLES: usize = 60_000;
 const DEFAULT_META_MAX_OOS_EVALUATION_SAMPLES: usize = 120_000;
 const DEFAULT_META_MAX_SAMPLES_PER_MARKET: usize = 64;
+
+/// Minimal profile for BonereaperV2. Loaded from TOML via --profile.
+/// Fields are optional so partial profiles can override only the knobs under test.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct BonereaperV2Profile {
+    pub disable_internal_model_gates: Option<bool>,
+    pub min_composite_direction: Option<f32>,
+    pub late_clip_frac: Option<f32>,
+    pub late_max_fires: Option<usize>,
+    pub high_skew_clip_frac: Option<f32>,
+    pub high_skew_max_clips: Option<usize>,
+    pub high_skew_max_whipsaw_score: Option<f32>,
+    pub late_favourite_start_secs: Option<f32>,
+    pub late_favourite_threshold: Option<f32>,
+    pub late_favourite_min_ask: Option<f32>,
+    pub late_favourite_max_ask: Option<f32>,
+    pub late_favourite_clip_frac: Option<f32>,
+    pub late_favourite_high_cert_clip_frac: Option<f32>,
+    pub late_favourite_max_clips: Option<usize>,
+    pub late_favourite_sweep_depth: Option<usize>,
+    pub late_favourite_min_model_confidence: Option<f32>,
+    pub late_favourite_max_model_risk: Option<f32>,
+    pub late_favourite_min_model_side_p: Option<f32>,
+    pub late_favourite_min_model_edge: Option<f32>,
+    pub late_favourite_fragile_high_cert_ask: Option<f32>,
+    pub late_favourite_fragile_high_cert_max_edge: Option<f32>,
+    pub late_favourite_fragile_high_cert_max_path_efficiency: Option<f32>,
+    pub late_favourite_fragile_high_cert_size_frac: Option<f32>,
+    pub late_favourite_range_soft_throttle: Option<f32>,
+    pub late_favourite_range_hard_throttle: Option<f32>,
+    pub late_favourite_range_extra_edge: Option<f32>,
+    pub late_favourite_range_extra_confidence: Option<f32>,
+    pub late_favourite_max_whipsaw_score: Option<f32>,
+    pub late_favourite_max_reversal_pressure: Option<f32>,
+    pub late_favourite_min_path_efficiency: Option<f32>,
+    pub tail_clip_frac: Option<f32>,
+    pub tail_max_clips: Option<usize>,
+    pub tail_min_ask: Option<f32>,
+    pub tail_max_ask: Option<f32>,
+    pub tail_min_seconds_to_close: Option<f32>,
+    pub tail_extreme_threshold: Option<f32>,
+    pub tail_min_skew_step: Option<f32>,
+    pub tail_target_favourite_loss_coverage_frac: Option<f32>,
+    pub tail_budget_favourite_spend_frac: Option<f32>,
+    pub tail_budget_favourite_upside_frac: Option<f32>,
+    pub tail_reversal_coverage_frac: Option<f32>,
+    pub tail_reversal_min_seconds_to_close: Option<f32>,
+    pub tail_reversal_max_seconds_to_close: Option<f32>,
+    pub tail_reversal_min_favourite_ask: Option<f32>,
+    pub model_btc_whipsaw_risk_weight: Option<f32>,
+    pub model_btc_path_inefficiency_risk_weight: Option<f32>,
+    pub model_btc_reversal_pressure_risk_weight: Option<f32>,
+}
+
+impl BonereaperV2Profile {
+    pub fn load(path: &Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read profile {}", path.display()))?;
+        let file: StrategyProfileFile = toml::from_str(&content)
+            .with_context(|| format!("failed to parse profile {} as TOML", path.display()))?;
+        if let Some(profile) = file.bonereaper_v2 {
+            Ok(profile)
+        } else {
+            toml::from_str(&content)
+                .with_context(|| format!("failed to parse flat profile {} as TOML", path.display()))
+        }
+    }
+
+    pub fn apply_to_walkforward_config(&self, cfg: &mut WalkForwardConfig) {
+        macro_rules! apply {
+            ($profile_field:ident, $cfg_field:ident) => {
+                if let Some(value) = self.$profile_field {
+                    cfg.$cfg_field = value;
+                }
+            };
+        }
+
+        apply!(
+            disable_internal_model_gates,
+            br2_disable_internal_model_gates
+        );
+        apply!(min_composite_direction, br2_min_composite_direction);
+        apply!(late_clip_frac, br2_late_clip_frac);
+        apply!(late_max_fires, br2_late_max_fires);
+        apply!(high_skew_clip_frac, br2_high_skew_clip_frac);
+        apply!(high_skew_max_clips, br2_high_skew_max_clips);
+        apply!(high_skew_max_whipsaw_score, br2_high_skew_max_whipsaw_score);
+        apply!(late_favourite_start_secs, br2_late_favourite_start_secs);
+        apply!(late_favourite_threshold, br2_late_favourite_threshold);
+        apply!(late_favourite_min_ask, br2_late_favourite_min_ask);
+        apply!(late_favourite_max_ask, br2_late_favourite_max_ask);
+        apply!(late_favourite_clip_frac, br2_late_favourite_clip_frac);
+        apply!(
+            late_favourite_high_cert_clip_frac,
+            br2_late_favourite_high_cert_clip_frac
+        );
+        apply!(late_favourite_max_clips, br2_late_favourite_max_clips);
+        apply!(late_favourite_sweep_depth, br2_late_favourite_sweep_depth);
+        apply!(
+            late_favourite_min_model_confidence,
+            br2_late_favourite_min_model_confidence
+        );
+        apply!(
+            late_favourite_max_model_risk,
+            br2_late_favourite_max_model_risk
+        );
+        apply!(
+            late_favourite_min_model_side_p,
+            br2_late_favourite_min_model_side_p
+        );
+        apply!(
+            late_favourite_min_model_edge,
+            br2_late_favourite_min_model_edge
+        );
+        apply!(
+            late_favourite_fragile_high_cert_ask,
+            br2_late_favourite_fragile_high_cert_ask
+        );
+        apply!(
+            late_favourite_fragile_high_cert_max_edge,
+            br2_late_favourite_fragile_high_cert_max_edge
+        );
+        apply!(
+            late_favourite_fragile_high_cert_max_path_efficiency,
+            br2_late_favourite_fragile_high_cert_max_path_efficiency
+        );
+        apply!(
+            late_favourite_fragile_high_cert_size_frac,
+            br2_late_favourite_fragile_high_cert_size_frac
+        );
+        apply!(
+            late_favourite_range_soft_throttle,
+            br2_late_favourite_range_soft_throttle
+        );
+        apply!(
+            late_favourite_range_hard_throttle,
+            br2_late_favourite_range_hard_throttle
+        );
+        apply!(
+            late_favourite_range_extra_edge,
+            br2_late_favourite_range_extra_edge
+        );
+        apply!(
+            late_favourite_range_extra_confidence,
+            br2_late_favourite_range_extra_confidence
+        );
+        apply!(
+            late_favourite_max_whipsaw_score,
+            br2_late_favourite_max_whipsaw_score
+        );
+        apply!(
+            late_favourite_max_reversal_pressure,
+            br2_late_favourite_max_reversal_pressure
+        );
+        apply!(
+            late_favourite_min_path_efficiency,
+            br2_late_favourite_min_path_efficiency
+        );
+        apply!(tail_clip_frac, br2_tail_clip_frac);
+        apply!(tail_max_clips, br2_tail_max_clips);
+        apply!(tail_min_ask, br2_tail_min_ask);
+        apply!(tail_max_ask, br2_tail_max_ask);
+        apply!(tail_min_seconds_to_close, br2_tail_min_seconds_to_close);
+        apply!(tail_extreme_threshold, br2_tail_extreme_threshold);
+        apply!(tail_min_skew_step, br2_tail_min_skew_step);
+        apply!(
+            tail_target_favourite_loss_coverage_frac,
+            br2_tail_target_favourite_loss_coverage_frac
+        );
+        apply!(
+            tail_budget_favourite_spend_frac,
+            br2_tail_budget_favourite_spend_frac
+        );
+        apply!(
+            tail_budget_favourite_upside_frac,
+            br2_tail_budget_favourite_upside_frac
+        );
+        apply!(tail_reversal_coverage_frac, br2_tail_reversal_coverage_frac);
+        apply!(
+            tail_reversal_min_seconds_to_close,
+            br2_tail_reversal_min_seconds_to_close
+        );
+        apply!(
+            tail_reversal_max_seconds_to_close,
+            br2_tail_reversal_max_seconds_to_close
+        );
+        apply!(
+            tail_reversal_min_favourite_ask,
+            br2_tail_reversal_min_favourite_ask
+        );
+        apply!(model_btc_whipsaw_risk_weight, model_btc_whipsaw_risk_weight);
+        apply!(
+            model_btc_path_inefficiency_risk_weight,
+            model_btc_path_inefficiency_risk_weight
+        );
+        apply!(
+            model_btc_reversal_pressure_risk_weight,
+            model_btc_reversal_pressure_risk_weight
+        );
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+struct StrategyProfileFile {
+    bonereaper_v2: Option<BonereaperV2Profile>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum StratId {
@@ -113,6 +321,10 @@ pub struct WalkForwardConfig {
     /// Optional research-speed replay thinning. `0` keeps every raw event.
     /// Non-zero keeps first/last plus at most one event per interval.
     pub replay_sample_ms: u64,
+    /// Directory to cache raw loaded ReplayEvents to disk (JSONL per asset).
+    /// Extremely effective on AWS when re-running the same dates (avoids repeated
+    /// S3 downloads after the first run). If None, no event cache is used.
+    pub replay_event_cache_dir: Option<PathBuf>,
     pub load_pm_trades: bool,
     pub use_outcome_label: bool,
     pub maker_rebate_bps: f64,
@@ -272,8 +484,9 @@ impl Default for WalkForwardConfig {
             max_per_market_exposure_frac: None,
             spot_symbol: "BTCUSDT".to_string(),
             strategies: vec![StratId::ReactiveDirectional, StratId::PairedMm],
-            max_concurrent_fetches: 16,
+            max_concurrent_fetches: 64,
             replay_sample_ms: 0,
+            replay_event_cache_dir: None,
             load_pm_trades: true,
             use_outcome_label: false,
             maker_rebate_bps: 0.0,
@@ -453,7 +666,9 @@ pub struct SummaryRunConfig {
     pub max_order_clip_multiplier: f64,
     pub max_per_market_exposure_usdc: f64,
     pub max_per_market_exposure_frac: Option<f64>,
+    pub max_concurrent_fetches: usize,
     pub replay_sample_ms: u64,
+    pub replay_event_cache_dir: Option<String>,
     pub load_pm_trades: bool,
     pub clip_fraction_of_equity: Option<f64>,
     pub clip_drawdown_soft_pct: f64,
@@ -717,6 +932,115 @@ fn sample_replay_events(
         sampled.push(last);
     }
     sampled
+}
+
+fn read_replay_event_cache(path: &Path) -> Result<Vec<ReplayEvent>> {
+    let file =
+        File::open(path).with_context(|| format!("open replay event cache {}", path.display()))?;
+    let reader = BufReader::new(file);
+    let mut events = Vec::new();
+    for (idx, line) in reader.lines().enumerate() {
+        let line =
+            line.with_context(|| format!("read line {} from {}", idx + 1, path.display()))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event: ReplayEvent = serde_json::from_str(&line)
+            .with_context(|| format!("decode line {} from {}", idx + 1, path.display()))?;
+        events.push(event);
+    }
+    Ok(events)
+}
+
+fn write_replay_event_cache(path: &Path, events: &[ReplayEvent]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create replay event cache dir {}", parent.display()))?;
+    }
+    let tmp = path.with_extension("tmp");
+    let file = File::create(&tmp)
+        .with_context(|| format!("create replay event cache {}", tmp.display()))?;
+    let mut writer = BufWriter::new(file);
+    for event in events {
+        writeln!(writer, "{}", serde_json::to_string(event)?)
+            .with_context(|| format!("write replay event cache {}", tmp.display()))?;
+    }
+    writer
+        .flush()
+        .with_context(|| format!("flush replay event cache {}", tmp.display()))?;
+    std::fs::rename(&tmp, path)
+        .with_context(|| format!("rename {} to {}", tmp.display(), path.display()))?;
+    Ok(())
+}
+
+fn rebind_replay_event_market_ids(events: &mut [ReplayEvent], market_id: MarketId) {
+    for event in events {
+        event.market_id = market_id;
+    }
+}
+
+fn replay_event_cache_path(cache_dir: Option<&Path>, market: &MarketHandle) -> Option<PathBuf> {
+    cache_dir.map(|dir| {
+        dir.join(&market.date)
+            .join(format!("{}.jsonl", market.asset_id))
+    })
+}
+
+async fn load_replay_events_for_market(
+    store: &TelonexStore,
+    store_inner: Arc<dyn object_store::ObjectStore>,
+    market: &MarketHandle,
+    market_id: MarketId,
+    cache_dir: Option<&Path>,
+) -> Result<Vec<ReplayEvent>> {
+    let cache_path = replay_event_cache_path(cache_dir, market);
+    if let Some(ref path) = cache_path {
+        match read_replay_event_cache(path) {
+            Ok(mut events) if !events.is_empty() => {
+                rebind_replay_event_market_ids(&mut events, market_id);
+                tracing::info!(
+                    market = %market.slug,
+                    n = events.len(),
+                    "replay events from disk cache"
+                );
+                return Ok(events);
+            }
+            Ok(_) => {}
+            Err(err) if path.exists() => {
+                tracing::warn!(
+                    market = %market.slug,
+                    cache = %path.display(),
+                    error = %err,
+                    "replay event cache read failed; falling back to source tape"
+                );
+            }
+            Err(_) => {}
+        }
+    }
+
+    let source_path = store
+        .resolve_asset_day(
+            "polymarket",
+            Channel::BookSnapshot25,
+            &market.date,
+            &market.asset_id,
+        )
+        .await
+        .with_context(|| format!("resolve tape path for {}", market.slug))?;
+    let (events, _stats) = load_book_snapshot_async(store_inner, source_path, market_id)
+        .await
+        .with_context(|| format!("load tape for {}", market.slug))?;
+    if let Some(ref path) = cache_path {
+        if let Err(err) = write_replay_event_cache(path, &events) {
+            tracing::warn!(
+                market = %market.slug,
+                cache = %path.display(),
+                error = %err,
+                "replay event cache write failed"
+            );
+        }
+    }
+    Ok(events)
 }
 
 fn compounded_clip(bankroll: f64, frac: f64) -> f64 {
@@ -1049,6 +1373,7 @@ pub async fn run_walkforward(
 
     let mut spot_cache = SpotCache::default();
     // Preload all distinct spot days up front to amortize the big download.
+    // (Few days, so serial is fine; the heavy parallelism is now in the market loading phase.)
     let unique_dates: Vec<String> = markets
         .iter()
         .map(|m| m.date.clone())
@@ -2115,6 +2440,7 @@ async fn collect_training_samples(
             };
             let use_outcome_label = cfg.use_outcome_label;
             let starting_cash_usdc = cfg.starting_cash_usdc;
+            let replay_event_cache_dir = cfg.replay_event_cache_dir.clone();
             let completed = completed.clone();
             async move {
                 let samples = collect_training_samples_for_market(
@@ -2125,6 +2451,7 @@ async fn collect_training_samples(
                     spot,
                     use_outcome_label,
                     starting_cash_usdc,
+                    replay_event_cache_dir.as_deref(),
                 )
                 .await;
                 let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
@@ -2154,25 +2481,23 @@ async fn collect_training_samples_for_market(
     spot: Arc<SpotHistory>,
     use_outcome_label: bool,
     starting_cash_usdc: f64,
+    replay_event_cache_dir: Option<&Path>,
 ) -> Vec<MetaTrainingSample> {
-    let path = match store
-        .resolve_asset_day("polymarket", Channel::BookSnapshot25, &m.date, &m.asset_id)
-        .await
+    let events = match load_replay_events_for_market(
+        store,
+        store_inner,
+        m,
+        MarketId(idx as u32 + 1),
+        replay_event_cache_dir,
+    )
+    .await
     {
-        Ok(p) => p,
+        Ok(events) => events,
         Err(e) => {
-            tracing::warn!(market = %m.slug, error = %e, "training resolve path failed");
+            tracing::warn!(market = %m.slug, error = %e, "training tape load failed");
             return Vec::new();
         }
     };
-    let (events, _stats) =
-        match load_book_snapshot_async(store_inner, path, MarketId(idx as u32 + 1)).await {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::warn!(market = %m.slug, error = %e, "training tape load failed");
-                return Vec::new();
-            }
-        };
     let resolved_yes = if use_outcome_label {
         Some(matches!(m.outcome.as_str(), "Up" | "Yes" | "yes" | "UP"))
     } else {
@@ -2239,54 +2564,47 @@ async fn run_markets(
     if markets.is_empty() {
         return Ok(Vec::new());
     }
+
     let spot_empty = Arc::new(SpotHistory::default());
     let store_inner = store.store();
     let cfg_arc = Arc::new(cfg.clone());
-    let stream = futures::stream::iter(markets.iter().enumerate().map(|(idx, m)| {
+
+    // Phase 1: bounded async I/O — only load raw data + build runner config.
+    // No strategy execution here.
+    let load_stream = futures::stream::iter(markets.iter().enumerate().map(|(idx, m)| {
         let store_inner = store_inner.clone();
         let spot_map = spot_map.clone();
         let spot_empty = spot_empty.clone();
         let cfg_arc = cfg_arc.clone();
         let meta_calibrator_snapshot = meta_calibrator_snapshot.clone();
         let store_for_resolve = store.clone();
+
         async move {
-            let started = Instant::now();
-            let path = match store_for_resolve
-                .resolve_asset_day(
-                    "polymarket",
-                    Channel::BookSnapshot25,
-                    &m.date,
-                    &m.asset_id,
-                )
-                .await
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::warn!(market = %m.slug, error = %e, "resolve path failed");
-                    return None;
-                }
-            };
-            let (events, _stats) = match load_book_snapshot_async(
+            let market_id = MarketId((idx + market_id_offset) as u32 + 1);
+            let events = match load_replay_events_for_market(
+                &store_for_resolve,
                 store_inner.clone(),
-                path,
-                MarketId((idx + market_id_offset) as u32 + 1),
+                &m,
+                market_id,
+                cfg_arc.replay_event_cache_dir.as_deref(),
             )
             .await
             {
-                Ok(t) => t,
+                Ok(events) => events,
                 Err(e) => {
                     tracing::warn!(market = %m.slug, error = %e, "tape load failed");
                     return None;
                 }
             };
+
             let sampled_events;
             let events_for_run = if cfg_arc.replay_sample_ms > 0 {
                 sampled_events = sample_replay_events(&events, cfg_arc.replay_sample_ms);
-                sampled_events.as_slice()
+                sampled_events.as_slice().to_vec()
             } else {
-                events.as_slice()
+                events.clone()
             };
-            // Per-market trades (best effort: skip if missing/erroring).
+
             let trades = if cfg_arc.load_pm_trades {
                 match resolve_pm_trades_day(&store_for_resolve, &m.date, &m.asset_id).await {
                     Ok(tp) => match load_pm_trades_async(store_inner.clone(), tp).await {
@@ -2301,16 +2619,19 @@ async fn run_markets(
             } else {
                 Arc::new(TradeHistory::default())
             };
+
             let spot = if cfg_arc.spot_symbol.is_empty() {
                 spot_empty
             } else {
                 spot_map.get(&m.date).cloned().unwrap_or(spot_empty)
             };
+
             let resolved_yes = if cfg_arc.use_outcome_label {
                 Some(matches!(m.outcome.as_str(), "Up" | "Yes" | "yes" | "UP"))
             } else {
                 None
             };
+
             let runner_cfg = RunnerConfig {
                 starting_cash_usdc: cfg_arc.starting_cash_usdc,
                 market_open_ns: market_open_ns(&m),
@@ -2340,8 +2661,6 @@ async fn run_markets(
                 model_btc_reversal_pressure_risk_weight: cfg_arc
                     .model_btc_reversal_pressure_risk_weight,
                 decision_log_every_n: 1_000_000,
-                // Hard inventory cap: never let |yes - no| exceed 1.5 shares
-                // per market (paired-MM safety net).
                 max_inventory_imbalance_shares: 1.5,
                 taker_slippage_bps: 15.0,
                 enforce_model_gate: cfg_arc.enforce_model_gate,
@@ -2350,17 +2669,36 @@ async fn run_markets(
                 model_gate_min_edge: cfg_arc.model_gate_min_edge,
             };
 
+            Some((m.clone(), events_for_run, spot, trades, runner_cfg, idx))
+        }
+    }))
+    .buffer_unordered(max_concurrent_fetches);
+
+    let mut loaded: Vec<_> = Vec::new();
+    let mut load_stream = std::pin::pin!(load_stream);
+    while let Some(item) = load_stream.next().await {
+        if let Some(x) = item {
+            loaded.push(x);
+        }
+    }
+
+    let mut results = Vec::with_capacity(loaded.len());
+
+    if cfg.portfolio_mode {
+        loaded.sort_by_key(|(_, _, _, _, _, idx)| *idx);
+        // Must stay strictly serial — each market's starting equity depends on previous.
+        for (m, events_for_run, spot, trades, runner_cfg, idx) in loaded {
             let mut per_strategy = HashMap::new();
-            for &strat in &cfg_arc.strategies {
+            for &strat in &cfg.strategies {
                 match run_one_strategy(
                     strat,
-                    &cfg_arc,
-                    events_for_run,
+                    cfg,
+                    &events_for_run,
                     &spot,
                     &trades,
                     &runner_cfg,
-                    cfg_arc.starting_cash_usdc,
-                    cfg_arc.max_clip_usdc,
+                    cfg.starting_cash_usdc,
+                    cfg.max_clip_usdc,
                     None,
                     None,
                 ) {
@@ -2375,42 +2713,69 @@ async fn run_markets(
                     }
                 }
             }
+            let volatility_range = market_volatility_range(&events_for_run);
+            let volatility_band =
+                volatility_band(volatility_range, cfg.volatility_regime_threshold);
 
-            let volatility_range = market_volatility_range(events_for_run);
-            let volatility_band = volatility_band(volatility_range, cfg_arc.volatility_regime_threshold);
-
-            tracing::debug!(
-                market = %m.slug,
-                events = events_for_run.len(),
-                raw_events = events.len(),
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "market done",
-            );
-
-            Some(MarketResult {
-                asset_id: m.asset_id.clone(),
-                slug: m.slug.clone(),
+            results.push(MarketResult {
+                asset_id: m.asset_id,
+                slug: m.slug,
                 close_ts: m.close_ts,
-                outcome_label: m.outcome.clone(),
+                outcome_label: m.outcome,
                 volatility_range,
                 volatility_band,
                 per_strategy,
-            })
+            });
         }
-    }))
-    .buffer_unordered(max_concurrent_fetches);
+    } else {
+        // Phase 2: full parallel execution across markets/days using rayon.
+        // This is the main grid-scale win for independent (non-portfolio) runs.
+        use rayon::prelude::*;
 
-    let mut results = Vec::with_capacity(markets.len());
-    let mut stream = std::pin::pin!(stream);
-    let mut completed = 0usize;
-    while let Some(maybe_result) = stream.next().await {
-        if let Some(r) = maybe_result {
-            results.push(r);
-        }
-        completed += 1;
-        if completed % 50 == 0 {
-            tracing::info!(done = completed, total = markets.len(), "progress");
-        }
+        let parallel_results: Vec<_> = loaded
+            .into_par_iter()
+            .map(|(m, events_for_run, spot, trades, runner_cfg, idx)| {
+                let mut per_strategy = HashMap::new();
+                for &strat in &cfg.strategies {
+                    match run_one_strategy(
+                        strat,
+                        cfg,
+                        &events_for_run,
+                        &spot,
+                        &trades,
+                        &runner_cfg,
+                        cfg.starting_cash_usdc,
+                        cfg.max_clip_usdc,
+                        None,
+                        None,
+                    ) {
+                        Ok(mut r) => {
+                            for sample in &mut r.model_training_samples {
+                                sample.market_idx = (idx + market_id_offset) as u32;
+                            }
+                            per_strategy.insert(strat.name(), r);
+                        }
+                        Err(e) => {
+                            tracing::warn!(market = %m.slug, strategy = strat.name(), error = %e, "strategy run failed");
+                        }
+                    }
+                }
+                let volatility_range = market_volatility_range(&events_for_run);
+                let volatility_band = volatility_band(volatility_range, cfg.volatility_regime_threshold);
+
+                MarketResult {
+                    asset_id: m.asset_id,
+                    slug: m.slug,
+                    close_ts: m.close_ts,
+                    outcome_label: m.outcome,
+                    volatility_range,
+                    volatility_band,
+                    per_strategy,
+                }
+            })
+            .collect();
+
+        results.extend(parallel_results);
     }
 
     results.sort_by_key(|r| r.close_ts);
@@ -2735,26 +3100,21 @@ async fn run_portfolio(
     let mut oos_meta_samples: Vec<MetaTrainingSample> = Vec::with_capacity(markets.len());
 
     for (idx, m) in markets.iter().enumerate() {
-        let path = match store
-            .resolve_asset_day("polymarket", Channel::BookSnapshot25, &m.date, &m.asset_id)
-            .await
+        let events = match load_replay_events_for_market(
+            store,
+            store_inner.clone(),
+            m,
+            MarketId(idx as u32 + 1),
+            cfg.replay_event_cache_dir.as_deref(),
+        )
+        .await
         {
-            Ok(p) => p,
+            Ok(events) => events,
             Err(e) => {
-                tracing::warn!(market = %m.slug, error = %e, "resolve path failed");
+                tracing::warn!(market = %m.slug, error = %e, "tape load failed");
                 continue;
             }
         };
-        let (events, _stats) =
-            match load_book_snapshot_async(store_inner.clone(), path, MarketId(idx as u32 + 1))
-                .await
-            {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::warn!(market = %m.slug, error = %e, "tape load failed");
-                    continue;
-                }
-            };
         let sampled_events;
         let events_for_run = if cfg.replay_sample_ms > 0 {
             sampled_events = sample_replay_events(&events, cfg.replay_sample_ms);
@@ -3296,7 +3656,12 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         max_order_clip_multiplier: cfg.max_order_clip_multiplier,
         max_per_market_exposure_usdc: cfg.max_per_market_exposure_usdc,
         max_per_market_exposure_frac: cfg.max_per_market_exposure_frac,
+        max_concurrent_fetches: cfg.max_concurrent_fetches,
         replay_sample_ms: cfg.replay_sample_ms,
+        replay_event_cache_dir: cfg
+            .replay_event_cache_dir
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string()),
         load_pm_trades: cfg.load_pm_trades,
         clip_fraction_of_equity: cfg.clip_fraction_of_equity,
         clip_drawdown_soft_pct: cfg.clip_drawdown_soft_pct,
@@ -3501,6 +3866,90 @@ pub fn print_summary(summary: &WalkForwardSummary) {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_tmp_dir(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{nanos}"))
+    }
+
+    #[test]
+    fn profile_loads_nested_bonereaper_v2_section_without_zeroing_missing_fields() {
+        let root = unique_tmp_dir("pm-profile-test");
+        std::fs::create_dir_all(&root).expect("create profile temp dir");
+        let path = root.join("leader.toml");
+        std::fs::write(
+            &path,
+            r#"
+[strategy]
+name = "bonereaper_v2"
+
+[bonereaper_v2]
+late_favourite_max_clips = 8
+tail_budget_favourite_spend_frac = 0.20
+model_btc_whipsaw_risk_weight = 0.31
+"#,
+        )
+        .expect("write profile");
+
+        let profile = BonereaperV2Profile::load(&path).expect("load nested profile");
+        let mut cfg = WalkForwardConfig::default();
+        cfg.br2_late_favourite_min_ask = 0.77;
+        profile.apply_to_walkforward_config(&mut cfg);
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(cfg.br2_late_favourite_max_clips, 8);
+        assert!((cfg.br2_tail_budget_favourite_spend_frac - 0.20).abs() < f32::EPSILON);
+        assert!((cfg.model_btc_whipsaw_risk_weight - 0.31).abs() < f32::EPSILON);
+        assert!((cfg.br2_late_favourite_min_ask - 0.77).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn replay_event_cache_round_trips_jsonl() {
+        let root = unique_tmp_dir("pm-replay-cache-test");
+        let path = root.join("events.jsonl");
+        let event = pm_types::ReplayEvent {
+            ts_ns: 123,
+            market_id: MarketId(7),
+            yes_mid: 0.51,
+            yes_bid: 0.50,
+            yes_ask: 0.52,
+            volume: 10.0,
+            bids: [pm_types::BookLevel::default(); pm_types::tape::TAPE_DEPTH],
+            asks: [pm_types::BookLevel::default(); pm_types::tape::TAPE_DEPTH],
+            spot_price: 105_000.0,
+            flags: pm_types::ReplayFlags::BOOK_UPDATE,
+        };
+
+        write_replay_event_cache(&path, &[event]).expect("write replay cache");
+        let loaded = read_replay_event_cache(&path).expect("read replay cache");
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(loaded, vec![event]);
+    }
+
+    #[test]
+    fn replay_event_cache_market_ids_are_rebound_for_current_run() {
+        let mut events = vec![pm_types::ReplayEvent {
+            ts_ns: 123,
+            market_id: MarketId(7),
+            yes_mid: 0.51,
+            yes_bid: 0.50,
+            yes_ask: 0.52,
+            volume: 10.0,
+            bids: [pm_types::BookLevel::default(); pm_types::tape::TAPE_DEPTH],
+            asks: [pm_types::BookLevel::default(); pm_types::tape::TAPE_DEPTH],
+            spot_price: 105_000.0,
+            flags: pm_types::ReplayFlags::BOOK_UPDATE,
+        }];
+
+        rebind_replay_event_market_ids(&mut events, MarketId(99));
+
+        assert_eq!(events[0].market_id, MarketId(99));
+    }
 
     #[test]
     fn aggregate_handles_per_strategy_metrics() {

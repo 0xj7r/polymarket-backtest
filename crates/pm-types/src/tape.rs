@@ -3,7 +3,7 @@ use crate::market::MarketId;
 pub const TAPE_DEPTH: usize = 5;
 
 /// One level of an order book side.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub struct BookLevel {
     pub price: f32,
@@ -11,7 +11,7 @@ pub struct BookLevel {
 }
 
 bitflags::bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
     pub struct ReplayFlags: u8 {
         const TRADE        = 0b0000_0001;
         const BOOK_UPDATE  = 0b0000_0010;
@@ -25,7 +25,10 @@ bitflags::bitflags! {
 ///
 /// Single fixed depth (5 levels) keeps SIMD/vector access cheap. Bigger depth
 /// rebuilds the book offline before tape generation.
-#[derive(Debug, Clone, Copy)]
+///
+/// Now serializable — enables fast on-disk ReplayEvent caching for repeated
+/// large AWS/S3 runs (see --replay-event-cache-dir in pm-app).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub struct ReplayEvent {
     pub ts_ns: i64,
