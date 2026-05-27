@@ -80,6 +80,12 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+strip = "none"
+
 [profile.bench]
 inherits = "release"
 debug = true

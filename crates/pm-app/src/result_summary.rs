@@ -581,6 +581,217 @@ pub fn write_result_summary_json(path: &Path, summary: &ResultSummary) -> Result
         .with_context(|| format!("write {}", path.display()))
 }
 
+fn top_gate_failures(mut failures: Vec<(&'static str, u64)>) -> Vec<(&'static str, u64)> {
+    failures.retain(|(_, count)| *count > 0);
+    failures.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    failures.truncate(5);
+    failures
+}
+
+fn print_gate_failure_line(label: &str, failures: Vec<(&'static str, u64)>) {
+    let failures = top_gate_failures(failures);
+    if failures.is_empty() {
+        println!("  {} blockers: none", label);
+        return;
+    }
+
+    let joined = failures
+        .into_iter()
+        .map(|(name, count)| format!("{name}={count}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    println!("  {} blockers: {}", label, joined);
+}
+
+fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
+    let total_checks =
+        stats.late_confirm_checks + stats.high_skew_checks + stats.late_favourite_checks;
+    let total_emits = stats.late_confirm_emits + stats.high_skew_emits + stats.late_favourite_emits;
+    println!(
+        "bonereaper_v2 gates : checks={} emits={}",
+        total_checks, total_emits
+    );
+    println!(
+        "  late_confirm checks={} emits={}",
+        stats.late_confirm_checks, stats.late_confirm_emits
+    );
+    print_gate_failure_line(
+        "late_confirm",
+        vec![
+            ("price", stats.late_confirm_price_fail),
+            ("book_favourite", stats.late_confirm_book_favourite_fail),
+            ("book_skew", stats.late_confirm_book_skew_fail),
+            ("model_missing", stats.late_confirm_model_missing),
+            ("model_side", stats.late_confirm_model_side_fail),
+            ("model_confidence", stats.late_confirm_model_confidence_fail),
+            ("model_risk", stats.late_confirm_model_risk_fail),
+            ("model_side_p", stats.late_confirm_model_side_p_fail),
+            ("model_edge", stats.late_confirm_model_edge_fail),
+            ("whipsaw", stats.late_confirm_whipsaw_fail),
+            ("shares", stats.late_confirm_shares_fail),
+        ],
+    );
+    println!(
+        "  high_skew    checks={} emits={}",
+        stats.high_skew_checks, stats.high_skew_emits
+    );
+    print_gate_failure_line(
+        "high_skew",
+        vec![
+            ("regime", stats.high_skew_regime_fail),
+            ("threshold", stats.high_skew_threshold_fail),
+            ("sustain", stats.high_skew_sustain_fail),
+            ("spot_alignment", stats.high_skew_spot_alignment_fail),
+            ("price", stats.high_skew_price_fail),
+            ("model_missing", stats.high_skew_model_missing),
+            ("model_side", stats.high_skew_model_side_fail),
+            ("model_confidence", stats.high_skew_model_confidence_fail),
+            ("model_risk", stats.high_skew_model_risk_fail),
+            ("model_side_p", stats.high_skew_model_side_p_fail),
+            ("model_edge", stats.high_skew_model_edge_fail),
+            ("whipsaw", stats.high_skew_whipsaw_fail),
+            ("shares", stats.high_skew_shares_fail),
+        ],
+    );
+    println!(
+        "  late_favourite window_checks={} checks={} emits={}",
+        stats.late_favourite_window_checks, stats.late_favourite_checks, stats.late_favourite_emits
+    );
+    print_gate_failure_line(
+        "late_favourite",
+        vec![
+            ("capacity", stats.late_favourite_capacity_fail),
+            ("refresh", stats.late_favourite_refresh_fail),
+            ("skew", stats.late_favourite_skew_fail),
+            ("sustain", stats.late_favourite_sustain_fail),
+            ("alignment", stats.late_favourite_alignment_fail),
+            ("price", stats.late_favourite_price_fail),
+            ("model_missing", stats.late_favourite_model_missing),
+            ("model_side", stats.late_favourite_model_side_fail),
+            (
+                "model_confidence",
+                stats.late_favourite_model_confidence_fail,
+            ),
+            ("model_risk", stats.late_favourite_model_risk_fail),
+            ("model_side_p", stats.late_favourite_model_side_p_fail),
+            ("model_edge", stats.late_favourite_model_edge_fail),
+            ("model_direction", stats.late_favourite_model_direction_fail),
+            ("whipsaw", stats.late_favourite_whipsaw_fail),
+            (
+                "reversal_pressure",
+                stats.late_favourite_reversal_pressure_fail,
+            ),
+            ("path_efficiency", stats.late_favourite_path_efficiency_fail),
+            ("market_range", stats.late_favourite_market_range_fail),
+            (
+                "adverse_momentum",
+                stats.late_favourite_adverse_momentum_fail,
+            ),
+            ("entry_pullback", stats.late_favourite_entry_pullback_fail),
+            (
+                "avg_entry_drawdown",
+                stats.late_favourite_avg_entry_drawdown_fail,
+            ),
+            ("shares", stats.late_favourite_shares_fail),
+        ],
+    );
+    print_gate_failure_line(
+        "overall",
+        vec![
+            ("late_confirm_price", stats.late_confirm_price_fail),
+            (
+                "late_confirm_book_favourite",
+                stats.late_confirm_book_favourite_fail,
+            ),
+            ("late_confirm_book_skew", stats.late_confirm_book_skew_fail),
+            (
+                "late_confirm_model_confidence",
+                stats.late_confirm_model_confidence_fail,
+            ),
+            (
+                "late_confirm_model_risk",
+                stats.late_confirm_model_risk_fail,
+            ),
+            (
+                "late_confirm_model_side_p",
+                stats.late_confirm_model_side_p_fail,
+            ),
+            (
+                "late_confirm_model_edge",
+                stats.late_confirm_model_edge_fail,
+            ),
+            ("late_confirm_whipsaw", stats.late_confirm_whipsaw_fail),
+            ("high_skew_regime", stats.high_skew_regime_fail),
+            ("high_skew_threshold", stats.high_skew_threshold_fail),
+            ("high_skew_sustain", stats.high_skew_sustain_fail),
+            (
+                "high_skew_spot_alignment",
+                stats.high_skew_spot_alignment_fail,
+            ),
+            (
+                "high_skew_model_confidence",
+                stats.high_skew_model_confidence_fail,
+            ),
+            ("high_skew_model_risk", stats.high_skew_model_risk_fail),
+            ("high_skew_model_side_p", stats.high_skew_model_side_p_fail),
+            ("high_skew_model_edge", stats.high_skew_model_edge_fail),
+            ("high_skew_whipsaw", stats.high_skew_whipsaw_fail),
+            (
+                "late_favourite_capacity",
+                stats.late_favourite_capacity_fail,
+            ),
+            ("late_favourite_refresh", stats.late_favourite_refresh_fail),
+            ("late_favourite_skew", stats.late_favourite_skew_fail),
+            ("late_favourite_sustain", stats.late_favourite_sustain_fail),
+            (
+                "late_favourite_alignment",
+                stats.late_favourite_alignment_fail,
+            ),
+            ("late_favourite_price", stats.late_favourite_price_fail),
+            (
+                "late_favourite_model_confidence",
+                stats.late_favourite_model_confidence_fail,
+            ),
+            (
+                "late_favourite_model_risk",
+                stats.late_favourite_model_risk_fail,
+            ),
+            (
+                "late_favourite_model_side_p",
+                stats.late_favourite_model_side_p_fail,
+            ),
+            (
+                "late_favourite_model_direction",
+                stats.late_favourite_model_direction_fail,
+            ),
+            (
+                "late_favourite_reversal_pressure",
+                stats.late_favourite_reversal_pressure_fail,
+            ),
+            (
+                "late_favourite_path_efficiency",
+                stats.late_favourite_path_efficiency_fail,
+            ),
+            (
+                "late_favourite_market_range",
+                stats.late_favourite_market_range_fail,
+            ),
+            (
+                "late_favourite_adverse_momentum",
+                stats.late_favourite_adverse_momentum_fail,
+            ),
+            (
+                "late_favourite_entry_pullback",
+                stats.late_favourite_entry_pullback_fail,
+            ),
+            (
+                "late_favourite_avg_entry_drawdown",
+                stats.late_favourite_avg_entry_drawdown_fail,
+            ),
+        ],
+    );
+}
+
 pub fn print_result_summary(summary: &ResultSummary) {
     println!("== market-results summary ==");
     println!("strategy              : {}", summary.strategy);
@@ -652,29 +863,7 @@ pub fn print_result_summary(summary: &ResultSummary) {
         }
     }
     if let Some(stats) = summary.bonereaper_v2_gate_stats {
-        println!("late favourite gates:");
-        println!(
-            "  checks={} emits={} skew_fail={} sustain_fail={} price_fail={} whipsaw_fail={}",
-            stats.late_favourite_checks,
-            stats.late_favourite_emits,
-            stats.late_favourite_skew_fail,
-            stats.late_favourite_sustain_fail,
-            stats.late_favourite_price_fail,
-            stats.late_favourite_whipsaw_fail
-        );
-        println!(
-            "  model_conf_fail={} model_risk_fail={} model_side_p_fail={} model_dir_fail={} reversal_fail={} path_eff_fail={} market_range_fail={} adverse_mom_fail={} pullback_fail={} avg_entry_dd_fail={}",
-            stats.late_favourite_model_confidence_fail,
-            stats.late_favourite_model_risk_fail,
-            stats.late_favourite_model_side_p_fail,
-            stats.late_favourite_model_direction_fail,
-            stats.late_favourite_reversal_pressure_fail,
-            stats.late_favourite_path_efficiency_fail,
-            stats.late_favourite_market_range_fail,
-            stats.late_favourite_adverse_momentum_fail,
-            stats.late_favourite_entry_pullback_fail,
-            stats.late_favourite_avg_entry_drawdown_fail
-        );
+        print_bonereaper_v2_gate_summary(stats);
     }
     if !summary.by_day.is_empty() {
         println!("daily slices:");
