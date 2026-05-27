@@ -1334,6 +1334,24 @@ struct SplitCandidate {
     right_leaf: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RootStumpDelta {
+    feature: usize,
+    threshold: f32,
+    left_leaf: f32,
+    right_leaf: f32,
+}
+
+impl RootStumpDelta {
+    fn predict(self, features: &MetaFeatures) -> f32 {
+        if features.values[self.feature.min(META_FEATURES - 1)] <= self.threshold {
+            self.left_leaf
+        } else {
+            self.right_leaf
+        }
+    }
+}
+
 fn fit_boosted_tree(
     samples: &[MetaTrainingSample],
     train_indices: &[usize],
@@ -1351,11 +1369,19 @@ fn fit_boosted_tree(
         beta,
         isotonic,
         prior_trees,
+        None,
     )
     .unwrap_or_default();
     if root.gain <= 0.0 {
         return BoostedTree::default();
     }
+
+    let root_delta = RootStumpDelta {
+        feature: root.feature,
+        threshold: root.threshold,
+        left_leaf: root.left_leaf,
+        right_leaf: root.right_leaf,
+    };
 
     let (left_indices, right_indices): (Vec<usize>, Vec<usize>) = train_indices
         .iter()
@@ -1370,14 +1396,8 @@ fn fit_boosted_tree(
         beta,
         isotonic,
         prior_trees,
-    )
-    .unwrap_or(SplitCandidate {
-        feature: root.feature,
-        threshold: root.threshold,
-        gain: 0.0,
-        left_leaf: root.left_leaf,
-        right_leaf: root.left_leaf,
-    });
+        Some(root_delta),
+    );
     let right = best_split(
         samples,
         &right_indices,
@@ -1386,32 +1406,67 @@ fn fit_boosted_tree(
         beta,
         isotonic,
         prior_trees,
-    )
-    .unwrap_or(SplitCandidate {
-        feature: root.feature,
-        threshold: root.threshold,
-        gain: 0.0,
-        left_leaf: root.right_leaf,
-        right_leaf: root.right_leaf,
-    });
+        Some(root_delta),
+    );
+
+    let (left_feature, left_threshold, left_left_value, left_right_value, left_gain) =
+        if let Some(left) = left {
+            (
+                left.feature,
+                left.threshold,
+                root.left_leaf + left.left_leaf,
+                root.left_leaf + left.right_leaf,
+                left.gain,
+            )
+        } else {
+            (
+                root.feature,
+                root.threshold,
+                root.left_leaf,
+                root.left_leaf,
+                0.0,
+            )
+        };
+    let (right_feature, right_threshold, right_left_value, right_right_value, right_gain) =
+        if let Some(right) = right {
+            (
+                right.feature,
+                right.threshold,
+                root.right_leaf + right.left_leaf,
+                root.right_leaf + right.right_leaf,
+                right.gain,
+            )
+        } else {
+            (
+                root.feature,
+                root.threshold,
+                root.right_leaf,
+                root.right_leaf,
+                0.0,
+            )
+        };
 
     BoostedTree {
         root_feature: root.feature,
         root_threshold: finite_or(root.threshold, 0.0),
-        left_feature: left.feature,
-        left_threshold: finite_or(left.threshold, root.threshold),
-        left_left_value: finite_or(left.left_leaf, 0.0),
-        left_right_value: finite_or(left.right_leaf, 0.0),
-        right_feature: right.feature,
-        right_threshold: finite_or(right.threshold, root.threshold),
-        right_left_value: finite_or(right.left_leaf, 0.0),
-        right_right_value: finite_or(right.right_leaf, 0.0),
-        gain: finite_or(root.gain + 0.5 * (left.gain + right.gain), 0.0),
+        left_feature,
+        left_threshold: finite_or(left_threshold, root.threshold),
+        left_left_value: finite_or(clamp_tree_leaf(left_left_value), 0.0),
+        left_right_value: finite_or(clamp_tree_leaf(left_right_value), 0.0),
+        right_feature,
+        right_threshold: finite_or(right_threshold, root.threshold),
+        right_left_value: finite_or(clamp_tree_leaf(right_left_value), 0.0),
+        right_right_value: finite_or(clamp_tree_leaf(right_right_value), 0.0),
+        gain: finite_or(root.gain + 0.5 * (left_gain + right_gain), 0.0),
     }
 }
 
 fn finite_or(value: f32, fallback: f32) -> f32 {
     if value.is_finite() { value } else { fallback }
+}
+
+fn clamp_tree_leaf(value: f32) -> f32 {
+    value.clamp(-META_TREE_VALUE_CLIP, META_TREE_VALUE_CLIP)
 }
 
 fn best_split(
@@ -1422,6 +1477,7 @@ fn best_split(
     beta: &BetaCalibrator,
     isotonic: &IsotonicCalibrator,
     prior_trees: &[BoostedTree],
+    provisional_delta: Option<RootStumpDelta>,
 ) -> Option<SplitCandidate> {
     if indices.len() < META_TREE_MIN_LEAF * 2 {
         return None;
@@ -1434,6 +1490,7 @@ fn best_split(
         beta,
         isotonic,
         prior_trees,
+        provisional_delta,
         None,
     );
     let parent_gain = split_score(parent.0, parent.1);
@@ -1449,6 +1506,7 @@ fn best_split(
                 beta,
                 isotonic,
                 prior_trees,
+                provisional_delta,
                 Some((feature, threshold, true)),
             );
             let left_n = left.2;
@@ -1516,6 +1574,7 @@ fn gradient_sums(
     beta: &BetaCalibrator,
     isotonic: &IsotonicCalibrator,
     prior_trees: &[BoostedTree],
+    provisional_delta: Option<RootStumpDelta>,
     split: Option<(usize, f32, bool)>,
 ) -> (f32, f32, usize) {
     let mut sum_g = 0.0f32;
@@ -1529,8 +1588,15 @@ fn gradient_sums(
                 continue;
             }
         }
-        let p =
-            predict_probability_with_components(sample, weights, bias, beta, isotonic, prior_trees);
+        let p = predict_probability_with_components_and_delta(
+            sample,
+            weights,
+            bias,
+            beta,
+            isotonic,
+            prior_trees,
+            provisional_delta,
+        );
         let y = if sample.side_observed { 1.0 } else { 0.0 };
         sum_g += y - p;
         sum_h += (p * (1.0 - p)).max(1.0e-4);
@@ -1548,13 +1614,14 @@ fn leaf_value(sum_g: f32, sum_h: f32) -> f32 {
         .clamp(-META_TREE_VALUE_CLIP, META_TREE_VALUE_CLIP)
 }
 
-fn predict_probability_with_components(
+fn predict_probability_with_components_and_delta(
     sample: &MetaTrainingSample,
     weights: &[f32; META_FEATURES],
     bias: f32,
     beta: &BetaCalibrator,
     isotonic: &IsotonicCalibrator,
     trees: &[BoostedTree],
+    provisional_delta: Option<RootStumpDelta>,
 ) -> f32 {
     let base = sample.base_side_probability.clamp(1.0e-6, 1.0 - 1.0e-6);
     let beta_base = beta.predict(base).clamp(1.0e-6, 1.0 - 1.0e-6);
@@ -1569,7 +1636,10 @@ fn predict_probability_with_components(
         .iter()
         .map(|tree| tree.predict(&sample.features))
         .sum::<f32>();
-    sigmoid(logit(calibrated_base) + linear_delta + tree_delta)
+    let provisional = provisional_delta
+        .map(|delta| delta.predict(&sample.features))
+        .unwrap_or(0.0);
+    sigmoid(logit(calibrated_base) + linear_delta + tree_delta + provisional)
 }
 
 impl Default for OnlineMetaCalibrator {
@@ -2850,6 +2920,13 @@ mod tests {
         SpotHistory::new(samples)
     }
 
+    fn features_with_pair(x0: f32, x1: f32) -> MetaFeatures {
+        let mut values = [0.0; META_FEATURES];
+        values[0] = x0;
+        values[1] = x1;
+        MetaFeatures { values }
+    }
+
     fn run_trending_ticks(state: &mut ModelState, spot: &SpotHistory) -> ModelOutput {
         let base_ns = 1_000_000_000;
         let mut out = ModelOutput::default();
@@ -3465,6 +3542,53 @@ mod tests {
                 .any(|weight| weight.name == "direction_score_side"
                     || weight.name == "momentum_side")
         );
+    }
+
+    #[test]
+    fn tree_child_splits_are_fit_after_root_stump_delta() {
+        let mut samples = Vec::new();
+        for i in 0..1_024 {
+            let quadrant = i % 4;
+            let x0 = if quadrant < 2 { -0.8 } else { 0.8 };
+            let x1 = if quadrant % 2 == 0 { -0.8 } else { 0.8 };
+            let positive_rate = match quadrant {
+                0 => 0.10,
+                1 => 0.35,
+                2 => 0.65,
+                _ => 0.90,
+            };
+            let side_observed = ((i / 4) % 100) as f32 / 100.0 < positive_rate;
+            let mut values = [0.0; META_FEATURES];
+            values[0] = x0;
+            values[1] = x1;
+            samples.push(MetaTrainingSample {
+                features: MetaFeatures { values },
+                market_idx: i as u32,
+                base_side_probability: 0.50,
+                side_observed,
+            });
+        }
+
+        let train_indices = (0..samples.len()).collect::<Vec<_>>();
+        let tree = fit_boosted_tree(
+            &samples,
+            &train_indices,
+            &[0.0; META_FEATURES],
+            0.0,
+            &BetaCalibrator::default(),
+            &IsotonicCalibrator::default(),
+            &[],
+        );
+
+        assert!(tree.gain > 0.0);
+        let low_low = tree.predict(&features_with_pair(-0.8, -0.8));
+        let low_high = tree.predict(&features_with_pair(-0.8, 0.8));
+        let high_low = tree.predict(&features_with_pair(0.8, -0.8));
+        let high_high = tree.predict(&features_with_pair(0.8, 0.8));
+
+        assert!(low_low < low_high, "{low_low} !< {low_high}");
+        assert!(high_low < high_high, "{high_low} !< {high_high}");
+        assert!(low_high < high_low, "{low_high} !< {high_low}");
     }
 
     #[test]

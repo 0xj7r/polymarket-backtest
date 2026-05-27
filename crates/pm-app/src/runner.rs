@@ -2519,6 +2519,63 @@ mod tests {
     }
 
     #[test]
+    fn maker_buy_no_uses_canonical_yes_bid_and_settles_no_win() {
+        struct OneShot;
+        impl Strategy for OneShot {
+            fn on_event(
+                &mut self,
+                _event: &ReplayEvent,
+                ctx: &Ctx,
+                _spot: &SpotHistory,
+                _trades: &TradeHistory,
+            ) -> StrategyOutput {
+                if ctx.events_seen > 1 {
+                    return StrategyOutput::hold();
+                }
+                StrategyOutput::one(OrderRequest {
+                    side: Side::BuyNo,
+                    shares: 10.0,
+                    max_depth: 1,
+                    limit_price: Some(0.35),
+                    tag: "test_maker_buy_no",
+                })
+            }
+        }
+
+        let events = vec![
+            evt(0, 0.60, 0.61, 200.0),
+            evt(1_000_000_000, 0.64, 0.65, 200.0),
+            evt(2_000_000_000, 0.66, 0.67, 200.0),
+        ];
+        let cfg = RunnerConfig {
+            starting_cash_usdc: 100.0,
+            resolved_yes: Some(false),
+            maker_rebate_bps: 10.0,
+            portfolio_limits: PortfolioLimits {
+                max_clip_usdc: 10.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut strat = OneShot;
+        let rep = run_backtest(
+            &events,
+            &SpotHistory::default(),
+            &pm_types::TradeHistory::default(),
+            &mut strat,
+            &cfg,
+        )
+        .unwrap();
+
+        assert_eq!(rep.counters.orders_filled_maker, 1);
+        assert_eq!(rep.fills[0].side, "BuyNo");
+        assert_eq!(rep.fills[0].tag, "test_maker_buy_no");
+        assert!((rep.fills[0].price - 0.35).abs() < 1e-6);
+        assert!((rep.final_no_shares - 10.0).abs() < 1e-6);
+        assert!((rep.pnl_usdc - 6.5035).abs() < 1e-6, "pnl {}", rep.pnl_usdc);
+    }
+
+    #[test]
     fn model_gate_blocks_low_confidence_orders() {
         struct LowConfidenceShot;
         impl Strategy for LowConfidenceShot {
