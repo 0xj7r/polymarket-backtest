@@ -852,6 +852,25 @@ fn tail_coverage_for_regime(
     }
 }
 
+fn effective_favourite_tail_exposure(
+    held_favourite_shares: f64,
+    emitted_favourite_shares: f64,
+    emitted_favourite_notional: f64,
+) -> Option<(f64, f64)> {
+    if held_favourite_shares <= 0.0 || emitted_favourite_shares <= 0.0 {
+        return None;
+    }
+    let avg_favourite_px = emitted_favourite_notional / emitted_favourite_shares;
+    if !avg_favourite_px.is_finite() || avg_favourite_px <= 0.0 {
+        return None;
+    }
+    let effective_shares = held_favourite_shares.min(emitted_favourite_shares);
+    if effective_shares <= 0.0 {
+        return None;
+    }
+    Some((effective_shares, effective_shares * avg_favourite_px))
+}
+
 impl Strategy for BonereaperV2 {
     fn on_event(
         &mut self,
@@ -1442,21 +1461,23 @@ impl Strategy for BonereaperV2 {
                 let Some(tail_side) = opposite_buy_side(favourite_side) else {
                     return StrategyOutput { orders };
                 };
-                let favourite_shares = side_shares(ctx, favourite_side).max(
-                    self.late_favourite_shares_emitted
-                        .min(side_shares(ctx, favourite_side)),
-                );
-                if favourite_shares <= 0.0 {
+                let Some((effective_favourite_shares, effective_favourite_notional)) =
+                    effective_favourite_tail_exposure(
+                        side_shares(ctx, favourite_side),
+                        self.late_favourite_shares_emitted,
+                        self.late_favourite_notional_emitted,
+                    )
+                else {
                     return StrategyOutput { orders };
-                }
+                };
                 let tail_px = buy_px(event, tail_side);
                 let px32 = tail_px as f32;
                 if px32 >= self.cfg.tail_min_ask && px32 <= self.cfg.tail_max_ask {
                     let avg_favourite_px =
                         self.late_favourite_notional_emitted / self.late_favourite_shares_emitted;
                     let favourite_win_upside =
-                        self.late_favourite_shares_emitted * (1.0 - avg_favourite_px);
-                    let cap_by_fav_spend = self.late_favourite_notional_emitted
+                        effective_favourite_shares * (1.0 - avg_favourite_px);
+                    let cap_by_fav_spend = effective_favourite_notional
                         * self.cfg.tail_budget_favourite_spend_frac as f64;
                     let cap_by_win_upside =
                         favourite_win_upside * self.cfg.tail_budget_favourite_upside_frac as f64;
@@ -1474,7 +1495,7 @@ impl Strategy for BonereaperV2 {
                     let clip = tail_clip_notional(
                         self.cfg.max_clip_usdc,
                         self.cfg.tail_clip_frac,
-                        self.late_favourite_notional_emitted,
+                        effective_favourite_notional,
                         self.tail_notional_emitted,
                         tail_px,
                         coverage_frac,
@@ -1763,6 +1784,15 @@ mod tests {
     fn tail_clip_respects_budget_under_coverage_target() {
         let clip = tail_clip_notional(40.0, 0.15, 240.0, 0.0, 0.08, 0.80, 5.0);
         assert!((clip - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tail_exposure_uses_held_favourite_shares_not_emitted_shares() {
+        let (shares, notional) = effective_favourite_tail_exposure(40.0, 100.0, 75.0).unwrap();
+        assert!((shares - 40.0).abs() < 1e-9);
+        assert!((notional - 30.0).abs() < 1e-9);
+        assert!(effective_favourite_tail_exposure(0.0, 100.0, 75.0).is_none());
+        assert!(effective_favourite_tail_exposure(40.0, 0.0, 75.0).is_none());
     }
 
     #[test]
