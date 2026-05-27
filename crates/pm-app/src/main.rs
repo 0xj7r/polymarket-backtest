@@ -286,6 +286,9 @@ enum Cmd {
         /// values for the fields present in the profile.
         #[arg(long)]
         profile: Option<PathBuf>,
+        /// Chronological offset for smoke/diagnostic slices.
+        #[arg(long, default_value_t = 0)]
+        skip_markets: usize,
         /// Chronological cap for smoke/diagnostic runs. 0 means use all markets.
         #[arg(long, default_value_t = 0)]
         max_markets: usize,
@@ -982,6 +985,7 @@ async fn main() -> Result<()> {
         Cmd::WalkForward {
             markets,
             profile,
+            skip_markets,
             max_markets,
             starting_cash,
             kelly_fraction,
@@ -1099,6 +1103,7 @@ async fn main() -> Result<()> {
             walk_forward(
                 markets,
                 profile,
+                skip_markets,
                 max_markets,
                 starting_cash,
                 kelly_fraction,
@@ -1750,6 +1755,7 @@ fn string_value(array: &StringArray, row: usize) -> Option<&str> {
 async fn walk_forward(
     markets_path: PathBuf,
     profile: Option<PathBuf>,
+    skip_markets: usize,
     max_markets: usize,
     starting_cash: f64,
     kelly_fraction: f64,
@@ -1876,10 +1882,27 @@ async fn walk_forward(
     if markets.is_empty() {
         return Err(anyhow!("no markets in {}", markets_path.display()));
     }
-    if max_markets > 0 {
+    if skip_markets > 0 || max_markets > 0 {
         markets.sort_by_key(|m| m.close_ts);
-        markets.truncate(max_markets);
-        tracing::info!(max_markets, markets = markets.len(), "trimmed market list");
+        if skip_markets >= markets.len() {
+            return Err(anyhow!(
+                "--skip-markets={} leaves no markets from {}",
+                skip_markets,
+                markets_path.display()
+            ));
+        }
+        if skip_markets > 0 {
+            markets.drain(0..skip_markets);
+        }
+        if max_markets > 0 {
+            markets.truncate(max_markets);
+        }
+        tracing::info!(
+            skip_markets,
+            max_markets,
+            markets = markets.len(),
+            "sliced market list"
+        );
     }
     if walk_forward_folds.is_some() && fold_size.is_some() {
         return Err(anyhow!(
