@@ -567,6 +567,33 @@ Scaled 1K range + tail exact-profile run:
 - Instance: `i-026438638670e3522`
 - Status: active
 
+Scaled 3K range + tail exact-profile run:
+
+- Run: `20260528T212132Z-portfolio-grid-68579`
+- Label: `clip_0p015_gross_750_expfrac_0p12_lat500ms_cap3k_btc_5m_tail08_lc_range50_exact_profile`
+- Starting capital: `$3,000`
+- Kelly: `0.50`
+- Gross cap: `$750`
+- Max clip: `$90`
+- Max order clip multiplier: `10`
+- Drawdown clip throttle: soft `0.2%`, hard `0.4%`, min multiplier `0.1`
+- Range gate: `br2_late_confirm_max_observed_range = 0.50`
+- Tails: enabled with `br2_tail_max_ask = 0.08`
+- Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
+- Binary: prebuilt `pm-app-al2023-x86_64-607c3156`
+- Instance: `i-0b97808c7b58a5dda`
+- Status: active
+
+Stopped cheaper-tail branch:
+
+- Run: `20260528T205254Z-portfolio-grid-13193`
+- Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_tail06_lc_range50_exact`
+- Final preserved checkpoint before stop: `3,750` markets, `+$8,966.27`,
+  max drawdown `17.89%`
+- Convex-tail attribution: `-$160.72`
+- Reason: underperformed the 8c tail cap on the same family of settings while
+  offering less useful convex capture.
+
 ## Decision Rules
 
 Promote a BTC5m candidate only if it beats the verified no-tail leader on a
