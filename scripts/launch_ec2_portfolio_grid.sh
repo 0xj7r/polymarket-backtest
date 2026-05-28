@@ -37,6 +37,7 @@ RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-portfolio-grid-$$"
 MARKETS_KEY=""
 START_DATE=""
 END_DATE=""
+SLUG_PREFIXES="btc-updown-5m-"
 STRATEGIES="bonereaper_v2"
 PROFILE_PATH=""
 STARTING_CASH="1000"
@@ -166,6 +167,7 @@ while [ $# -gt 0 ]; do
         --markets-key) MARKETS_KEY="$2"; shift 2 ;;
         --start-date) START_DATE="$2"; shift 2 ;;
         --end-date) END_DATE="$2"; shift 2 ;;
+        --slug-prefixes) SLUG_PREFIXES="$2"; shift 2 ;;
         --strategies) STRATEGIES="$2"; shift 2 ;;
         --profile) PROFILE_PATH="$2"; shift 2 ;;
         --starting-cash) STARTING_CASH="$2"; shift 2 ;;
@@ -378,7 +380,7 @@ else
     --markets-parquet /opt/pm/markets-full.parquet \\
     --start-date "${START_DATE}" \\
     --end-date "${END_DATE}" \\
-    --slug-prefix btc-updown-5m- \\
+    --slug-prefix "${SLUG_PREFIXES}" \\
     --require-book-s3 \\
     --out /opt/pm/markets.jsonl
   aws s3 cp /opt/pm/markets.jsonl "s3://${RESULTS_BUCKET}/results/${RUN_ID}/artifacts/markets.jsonl"

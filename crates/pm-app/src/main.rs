@@ -249,8 +249,7 @@ enum Cmd {
         #[arg(long)]
         out: PathBuf,
     },
-    /// Generate BTC-updown-5m MarketHandle JSONL from the master Polymarket
-    /// markets parquet.
+    /// Generate MarketHandle JSONL from the master Polymarket markets parquet.
     DiscoverMarketsParquet {
         #[arg(long)]
         markets_parquet: PathBuf,
@@ -258,6 +257,7 @@ enum Cmd {
         start_date: String,
         #[arg(long)]
         end_date: String,
+        /// Slug prefix or comma-separated prefixes.
         #[arg(long, default_value = "btc-updown-5m-")]
         slug_prefix: String,
         #[arg(long, default_value_t = false)]
@@ -1764,7 +1764,7 @@ fn append_market_rows_from_parquet(
         let Some(slug_value) = string_value(slug, row) else {
             continue;
         };
-        if !slug_value.starts_with(slug_prefix) {
+        if !slug_matches_prefixes(slug_value, slug_prefix) {
             continue;
         }
         if string_value(status, row) != Some("resolved") {
@@ -1811,6 +1811,14 @@ fn append_market_rows_from_parquet(
         });
     }
     Ok(())
+}
+
+fn slug_matches_prefixes(slug: &str, slug_prefixes: &str) -> bool {
+    slug_prefixes
+        .split(',')
+        .map(str::trim)
+        .filter(|prefix| !prefix.is_empty())
+        .any(|prefix| slug.starts_with(prefix))
 }
 
 fn canonical_up_asset_for_row<'a>(
@@ -2889,5 +2897,14 @@ mod tests {
             canonical_up_asset_for_row(Some("No"), Some("asset0"), Some("Down"), Some("asset1")),
             None
         );
+    }
+
+    #[test]
+    fn parquet_discovery_slug_prefix_accepts_comma_separated_families() {
+        let prefixes = "btc-updown-5m-, eth-updown-5m-,btc-updown-15m-";
+        assert!(slug_matches_prefixes("btc-updown-5m-1778370900", prefixes));
+        assert!(slug_matches_prefixes("eth-updown-5m-1778370900", prefixes));
+        assert!(slug_matches_prefixes("btc-updown-15m-1778370300", prefixes));
+        assert!(!slug_matches_prefixes("sol-updown-5m-1778370900", prefixes));
     }
 }
