@@ -97,6 +97,7 @@ BR2_TAIL_SWEEP_DEPTH="3"
 BR2_TAIL_MIN_ASK="0.01"
 BR2_TAIL_MAX_ASK="0.10"
 BR2_TAIL_MIN_SECONDS_TO_CLOSE="10.0"
+BR2_TAIL_MIN_FAVOURITE_UNREALIZED_EDGE="0.0"
 BR2_TAIL_MIN_OBSERVED_RANGE="0.0"
 BR2_TAIL_TARGET_FAVOURITE_LOSS_COVERAGE_FRAC="0.00"
 BR2_TAIL_REVERSAL_COVERAGE_FRAC="0.00"
@@ -206,6 +207,7 @@ while [ $# -gt 0 ]; do
         --br2-tail-min-ask) BR2_TAIL_MIN_ASK="$2"; shift 2 ;;
         --br2-tail-max-ask) BR2_TAIL_MAX_ASK="$2"; shift 2 ;;
         --br2-tail-min-seconds-to-close) BR2_TAIL_MIN_SECONDS_TO_CLOSE="$2"; shift 2 ;;
+        --br2-tail-min-favourite-unrealized-edge) BR2_TAIL_MIN_FAVOURITE_UNREALIZED_EDGE="$2"; shift 2 ;;
         --br2-tail-min-observed-range) BR2_TAIL_MIN_OBSERVED_RANGE="$2"; shift 2 ;;
         --br2-tail-target-favourite-loss-coverage-frac) BR2_TAIL_TARGET_FAVOURITE_LOSS_COVERAGE_FRAC="$2"; shift 2 ;;
         --br2-tail-reversal-coverage-frac) BR2_TAIL_REVERSAL_COVERAGE_FRAC="$2"; shift 2 ;;
@@ -499,6 +501,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-tail-min-ask "${BR2_TAIL_MIN_ASK}" \\
       --br2-tail-max-ask "${BR2_TAIL_MAX_ASK}" \\
       --br2-tail-min-seconds-to-close "${BR2_TAIL_MIN_SECONDS_TO_CLOSE}" \\
+      --br2-tail-min-favourite-unrealized-edge "${BR2_TAIL_MIN_FAVOURITE_UNREALIZED_EDGE}" \\
       --br2-tail-min-observed-range "${BR2_TAIL_MIN_OBSERVED_RANGE}" \\
       --br2-tail-target-favourite-loss-coverage-frac "${BR2_TAIL_TARGET_FAVOURITE_LOSS_COVERAGE_FRAC}" \\
       --br2-tail-reversal-coverage-frac "${BR2_TAIL_REVERSAL_COVERAGE_FRAC}" \\

@@ -64,6 +64,7 @@ tail_sweep_depth = 3
 tail_min_ask = 0.01
 tail_max_ask = 0.10
 tail_min_seconds_to_close = 10.0
+tail_min_favourite_unrealized_edge = 0.0
 tail_extreme_threshold = 0.30
 tail_min_skew_step = 0.02
 tail_target_favourite_loss_coverage_frac = 0.50

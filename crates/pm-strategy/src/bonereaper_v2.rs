@@ -271,6 +271,11 @@ pub struct BonereaperV2Config {
     /// convex-tail rung. Avoids paying for tails with almost no time left to
     /// reverse.
     pub tail_min_seconds_to_close: f32,
+    /// Minimum mark-to-market edge on the favourite sleeve before buying
+    /// opposite-tail insurance. This keeps tails funded by a moved-in-favor
+    /// favourite position instead of paying premium while the favourite load
+    /// is already underwater.
+    pub tail_min_favourite_unrealized_edge: f32,
     /// Minimum live-observed YES-mid range required before buying convex tail.
     /// Useful for avoiding steady favourite markets where tail bleed is most
     /// likely and reserving spend for reversal-prone expanded-range regimes.
@@ -398,6 +403,7 @@ impl Default for BonereaperV2Config {
             tail_min_ask: 0.01,
             tail_max_ask: 0.10,
             tail_min_seconds_to_close: 10.0,
+            tail_min_favourite_unrealized_edge: 0.0,
             tail_min_observed_range: 0.0,
             tail_target_favourite_loss_coverage_frac: 0.0,
             tail_reversal_coverage_frac: 0.0,
@@ -522,6 +528,14 @@ fn buy_px(event: &ReplayEvent, side: Side) -> f64 {
     }
 }
 
+fn sell_px(event: &ReplayEvent, side: Side) -> f64 {
+    match side {
+        Side::BuyYes => event.yes_bid as f64,
+        Side::BuyNo => (1.0 - event.yes_ask as f64).max(0.0),
+        _ => 0.0,
+    }
+}
+
 fn side_shares(ctx: &Ctx, side: Side) -> f64 {
     match side {
         Side::BuyYes => ctx.yes_shares,
@@ -623,6 +637,17 @@ fn tail_observed_range_allowed(range: f32, min_range: f32) -> bool {
 
 fn tail_seconds_to_close_allowed(seconds_to_close: f32, min_seconds_to_close: f32) -> bool {
     seconds_to_close >= min_seconds_to_close.max(0.0)
+}
+
+fn tail_favourite_unrealized_edge_allowed(
+    current_bid: f64,
+    avg_entry_px: f64,
+    min_unrealized_edge: f32,
+) -> bool {
+    let min_unrealized_edge = min_unrealized_edge.max(0.0) as f64;
+    current_bid.is_finite()
+        && avg_entry_px.is_finite()
+        && current_bid - avg_entry_px >= min_unrealized_edge
 }
 
 fn range_throttle(range: f32, soft: f32, hard: f32) -> f32 {
@@ -1512,49 +1537,56 @@ impl Strategy for BonereaperV2 {
                 if px32 >= self.cfg.tail_min_ask && px32 <= self.cfg.tail_max_ask {
                     let avg_favourite_px =
                         self.late_favourite_notional_emitted / self.late_favourite_shares_emitted;
-                    let favourite_win_upside =
-                        effective_favourite_shares * (1.0 - avg_favourite_px);
-                    let cap_by_fav_spend = effective_favourite_notional
-                        * self.cfg.tail_budget_favourite_spend_frac as f64;
-                    let cap_by_win_upside =
-                        favourite_win_upside * self.cfg.tail_budget_favourite_upside_frac as f64;
-                    let remaining_tail_budget =
-                        cap_by_fav_spend.min(cap_by_win_upside) - self.tail_notional_emitted;
-                    let coverage_frac = tail_coverage_for_regime(
-                        self.cfg.tail_target_favourite_loss_coverage_frac,
+                    let favourite_bid = sell_px(event, favourite_side);
+                    if tail_favourite_unrealized_edge_allowed(
+                        favourite_bid,
                         avg_favourite_px,
-                        seconds_to_close,
-                        self.cfg.tail_reversal_coverage_frac,
-                        self.cfg.tail_reversal_min_seconds_to_close,
-                        self.cfg.tail_reversal_max_seconds_to_close,
-                        self.cfg.tail_reversal_min_favourite_ask,
-                    );
-                    let clip = tail_clip_notional(
-                        self.cfg.max_clip_usdc,
-                        self.cfg.tail_clip_frac,
-                        effective_favourite_notional,
-                        self.tail_notional_emitted,
-                        tail_px,
-                        coverage_frac,
-                        remaining_tail_budget,
-                    );
-                    let shares = if clip > 0.0 {
-                        shares_capped(clip, tail_px)
-                    } else {
-                        0.0
-                    };
-                    if shares > 0.0 {
-                        orders.push(OrderRequest {
-                            side: tail_side,
-                            shares,
-                            max_depth: self.cfg.tail_sweep_depth.max(1),
-                            limit_price: Some(self.cfg.tail_max_ask),
-                            tag: "br2_convex_tail",
-                        });
-                        self.tail_clips += 1;
-                        self.tail_notional_emitted += shares * tail_px;
-                        self.last_tail_skew_mag = skew_mag;
-                        self.last_tail_ns = event.ts_ns;
+                        self.cfg.tail_min_favourite_unrealized_edge,
+                    ) {
+                        let favourite_win_upside =
+                            effective_favourite_shares * (1.0 - avg_favourite_px);
+                        let cap_by_fav_spend = effective_favourite_notional
+                            * self.cfg.tail_budget_favourite_spend_frac as f64;
+                        let cap_by_win_upside = favourite_win_upside
+                            * self.cfg.tail_budget_favourite_upside_frac as f64;
+                        let remaining_tail_budget =
+                            cap_by_fav_spend.min(cap_by_win_upside) - self.tail_notional_emitted;
+                        let coverage_frac = tail_coverage_for_regime(
+                            self.cfg.tail_target_favourite_loss_coverage_frac,
+                            avg_favourite_px,
+                            seconds_to_close,
+                            self.cfg.tail_reversal_coverage_frac,
+                            self.cfg.tail_reversal_min_seconds_to_close,
+                            self.cfg.tail_reversal_max_seconds_to_close,
+                            self.cfg.tail_reversal_min_favourite_ask,
+                        );
+                        let clip = tail_clip_notional(
+                            self.cfg.max_clip_usdc,
+                            self.cfg.tail_clip_frac,
+                            effective_favourite_notional,
+                            self.tail_notional_emitted,
+                            tail_px,
+                            coverage_frac,
+                            remaining_tail_budget,
+                        );
+                        let shares = if clip > 0.0 {
+                            shares_capped(clip, tail_px)
+                        } else {
+                            0.0
+                        };
+                        if shares > 0.0 {
+                            orders.push(OrderRequest {
+                                side: tail_side,
+                                shares,
+                                max_depth: self.cfg.tail_sweep_depth.max(1),
+                                limit_price: Some(self.cfg.tail_max_ask),
+                                tag: "br2_convex_tail",
+                            });
+                            self.tail_clips += 1;
+                            self.tail_notional_emitted += shares * tail_px;
+                            self.last_tail_skew_mag = skew_mag;
+                            self.last_tail_ns = event.ts_ns;
+                        }
                     }
                 }
             }
@@ -1952,6 +1984,13 @@ mod tests {
     fn tail_clip_respects_budget_under_coverage_target() {
         let clip = tail_clip_notional(40.0, 0.15, 240.0, 0.0, 0.08, 0.80, 5.0);
         assert!((clip - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tail_unrealized_edge_requires_favourite_profit() {
+        assert!(tail_favourite_unrealized_edge_allowed(0.88, 0.84, 0.03));
+        assert!(!tail_favourite_unrealized_edge_allowed(0.86, 0.84, 0.03));
+        assert!(!tail_favourite_unrealized_edge_allowed(0.82, 0.84, 0.0));
     }
 
     #[test]

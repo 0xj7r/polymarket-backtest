@@ -98,6 +98,7 @@ pub struct BonereaperV2Profile {
     pub tail_min_ask: Option<f32>,
     pub tail_max_ask: Option<f32>,
     pub tail_min_seconds_to_close: Option<f32>,
+    pub tail_min_favourite_unrealized_edge: Option<f32>,
     pub tail_extreme_threshold: Option<f32>,
     pub tail_min_skew_step: Option<f32>,
     pub tail_target_favourite_loss_coverage_frac: Option<f32>,
@@ -232,6 +233,10 @@ impl BonereaperV2Profile {
         apply!(tail_min_ask, br2_tail_min_ask);
         apply!(tail_max_ask, br2_tail_max_ask);
         apply!(tail_min_seconds_to_close, br2_tail_min_seconds_to_close);
+        apply!(
+            tail_min_favourite_unrealized_edge,
+            br2_tail_min_favourite_unrealized_edge
+        );
         apply!(tail_extreme_threshold, br2_tail_extreme_threshold);
         apply!(tail_min_skew_step, br2_tail_min_skew_step);
         apply!(
@@ -423,6 +428,7 @@ pub struct WalkForwardConfig {
     pub br2_tail_min_ask: f32,
     pub br2_tail_max_ask: f32,
     pub br2_tail_min_seconds_to_close: f32,
+    pub br2_tail_min_favourite_unrealized_edge: f32,
     pub br2_tail_min_observed_range: f32,
     pub br2_tail_target_favourite_loss_coverage_frac: f32,
     pub br2_tail_reversal_coverage_frac: f32,
@@ -576,6 +582,7 @@ impl Default for WalkForwardConfig {
             br2_tail_min_ask: 0.01,
             br2_tail_max_ask: 0.10,
             br2_tail_min_seconds_to_close: 10.0,
+            br2_tail_min_favourite_unrealized_edge: 0.0,
             br2_tail_min_observed_range: 0.0,
             br2_tail_target_favourite_loss_coverage_frac: 0.00,
             br2_tail_reversal_coverage_frac: 0.00,
@@ -773,6 +780,7 @@ pub struct SummaryRunConfig {
     pub br2_tail_min_ask: f32,
     pub br2_tail_max_ask: f32,
     pub br2_tail_min_seconds_to_close: f32,
+    pub br2_tail_min_favourite_unrealized_edge: f32,
     pub br2_tail_min_observed_range: f32,
     pub br2_tail_target_favourite_loss_coverage_frac: f32,
     pub br2_tail_reversal_coverage_frac: f32,
@@ -3193,6 +3201,7 @@ fn run_one_strategy(
                 tail_min_ask: cfg.br2_tail_min_ask,
                 tail_max_ask: cfg.br2_tail_max_ask,
                 tail_min_seconds_to_close: cfg.br2_tail_min_seconds_to_close,
+                tail_min_favourite_unrealized_edge: cfg.br2_tail_min_favourite_unrealized_edge,
                 tail_min_observed_range: cfg.br2_tail_min_observed_range,
                 tail_target_favourite_loss_coverage_frac: cfg
                     .br2_tail_target_favourite_loss_coverage_frac,
@@ -3971,6 +3980,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_tail_min_ask: cfg.br2_tail_min_ask,
         br2_tail_max_ask: cfg.br2_tail_max_ask,
         br2_tail_min_seconds_to_close: cfg.br2_tail_min_seconds_to_close,
+        br2_tail_min_favourite_unrealized_edge: cfg.br2_tail_min_favourite_unrealized_edge,
         br2_tail_min_observed_range: cfg.br2_tail_min_observed_range,
         br2_tail_target_favourite_loss_coverage_frac: cfg
             .br2_tail_target_favourite_loss_coverage_frac,

@@ -27,5 +27,6 @@ model_btc_path_inefficiency_risk_weight = 0.10
 model_btc_reversal_pressure_risk_weight = 0.12
 
 # Conservative tail for smoke
+tail_min_favourite_unrealized_edge = 0.0
 tail_target_favourite_loss_coverage_frac = 0.30
 tail_budget_favourite_spend_frac = 0.15

@@ -522,6 +522,9 @@ enum Cmd {
         /// Bonereaper v2 minimum seconds remaining before opening a convex-tail entry.
         #[arg(long, default_value = "10.0")]
         br2_tail_min_seconds_to_close: f32,
+        /// Bonereaper v2 minimum favourite mark-to-market edge before buying convex-tail insurance.
+        #[arg(long, default_value = "0.0")]
+        br2_tail_min_favourite_unrealized_edge: f32,
         /// Bonereaper v2 minimum live-observed YES-mid range before convex-tail entries.
         #[arg(long, default_value = "0.0")]
         br2_tail_min_observed_range: f32,
@@ -1076,6 +1079,7 @@ async fn main() -> Result<()> {
             br2_tail_min_ask,
             br2_tail_max_ask,
             br2_tail_min_seconds_to_close,
+            br2_tail_min_favourite_unrealized_edge,
             br2_tail_min_observed_range,
             br2_tail_target_favourite_loss_coverage_frac,
             br2_tail_reversal_coverage_frac,
@@ -1198,6 +1202,7 @@ async fn main() -> Result<()> {
                 br2_tail_min_ask,
                 br2_tail_max_ask,
                 br2_tail_min_seconds_to_close,
+                br2_tail_min_favourite_unrealized_edge,
                 br2_tail_min_observed_range,
                 br2_tail_target_favourite_loss_coverage_frac,
                 br2_tail_reversal_coverage_frac,
@@ -1854,6 +1859,7 @@ async fn walk_forward(
     br2_tail_min_ask: f32,
     br2_tail_max_ask: f32,
     br2_tail_min_seconds_to_close: f32,
+    br2_tail_min_favourite_unrealized_edge: f32,
     br2_tail_min_observed_range: f32,
     br2_tail_target_favourite_loss_coverage_frac: f32,
     br2_tail_reversal_coverage_frac: f32,
@@ -2045,6 +2051,7 @@ async fn walk_forward(
         br2_tail_min_ask,
         br2_tail_max_ask,
         br2_tail_min_seconds_to_close,
+        br2_tail_min_favourite_unrealized_edge,
         br2_tail_min_observed_range,
         br2_tail_target_favourite_loss_coverage_frac,
         br2_tail_reversal_coverage_frac,
@@ -2129,6 +2136,7 @@ async fn walk_forward(
         "br2_tail_sweep_depth": wf_cfg.br2_tail_sweep_depth,
         "br2_tail_min_ask": wf_cfg.br2_tail_min_ask,
         "br2_tail_max_ask": wf_cfg.br2_tail_max_ask,
+        "br2_tail_min_favourite_unrealized_edge": wf_cfg.br2_tail_min_favourite_unrealized_edge,
         "br2_tail_min_observed_range": wf_cfg.br2_tail_min_observed_range,
         "br2_tail_budget_favourite_spend_frac": wf_cfg.br2_tail_budget_favourite_spend_frac,
         "br2_tail_budget_favourite_upside_frac": wf_cfg.br2_tail_budget_favourite_upside_frac,
