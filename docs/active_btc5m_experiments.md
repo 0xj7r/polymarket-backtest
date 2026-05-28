@@ -256,6 +256,32 @@ Exact-profile relaunch:
   `br2_late_confirm_max_observed_range = 0.50`
 - Status: active on instance `i-0a3e70b4634752994`
 
+First exact-profile checkpoint:
+
+- Markets: `250`
+- PnL: `+$218.45`
+- Return: `+4.37%`
+- Max drawdown: `3.05%`
+- Fills: `35`
+- Active markets: `8.0%`
+- Attribution:
+  - `br2_late_favourite_load`: `+$137.42`
+  - `br2_late_confirm`: `+$47.03`
+  - `br2_high_skew_load`: `+$38.25`
+  - `br2_convex_tail`: `-$4.24`
+
+Config verification:
+
+```bash
+python3 scripts/compare_run_configs.py \
+  s3://pm-research-backtest-prod/results/20260528T190005Z-portfolio-grid-94612/clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_directional_tail_fix/summary.json \
+  s3://pm-research-backtest-prod/results/20260528T202609Z-portfolio-grid-60941/clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_tail_fix_lc_range50_exact/summary.json \
+  --aws-profile visumlabs \
+  --allow br2_late_confirm_max_observed_range
+```
+
+Result: configs match outside the allowed range-gate key.
+
 ### No-Tail Late-Confirm Range-Gated Isolation
 
 Run: `20260528T192139Z-portfolio-grid-37354`
@@ -325,6 +351,31 @@ Exact-profile relaunch:
   `br2_late_confirm_max_observed_range = 0.50`
 - Status: active on instance `i-097d8531ba2e65a6c`
 
+First exact-profile checkpoint:
+
+- Markets: `250`
+- PnL: `+$222.86`
+- Return: `+4.46%`
+- Max drawdown: `3.05%`
+- Fills: `33`
+- Active markets: `8.0%`
+- Attribution:
+  - `br2_late_favourite_load`: `+$137.49`
+  - `br2_high_skew_load`: `+$38.28`
+  - `br2_late_confirm`: `+$47.09`
+
+Config verification:
+
+```bash
+python3 scripts/compare_run_configs.py \
+  s3://pm-research-backtest-prod/results/20260528T185235Z-portfolio-grid-79610/clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_exact_leader_scaled_notails/summary.json \
+  s3://pm-research-backtest-prod/results/20260528T202628Z-portfolio-grid-62169/clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_notail_lc_range50_exact/summary.json \
+  --aws-profile visumlabs \
+  --allow br2_late_confirm_max_observed_range
+```
+
+Result: configs match outside the allowed range-gate key.
+
 ## Decision Rules
 
 Promote a BTC5m candidate only if it beats the verified no-tail leader on a
@@ -341,3 +392,6 @@ For each candidate, compare:
 - Tail spend, payoff, hit rate, and price buckets
 
 Do not promote from a partial checkpoint alone.
+
+Before comparing any strategy candidate, run `scripts/compare_run_configs.py`
+against the intended baseline and allow only the intentional experimental keys.
