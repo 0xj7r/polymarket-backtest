@@ -4,11 +4,15 @@ name = "bonereaper_v2"
 
 [bonereaper_v2]
 disable_internal_model_gates = false
+late_confirm_min_model_edge = 0.02
 
 # Use current best-known settings but lighter for speed
 late_favourite_max_clips = 8
 late_favourite_sweep_depth = 5
 tail_max_clips = 2
+late_favourite_high_cert_full_clip_edge = 0.04
+late_favourite_min_model_edge = 0.03
+late_favourite_high_cert_min_model_edge = 0.02
 
 # Keep the important new features
 late_favourite_fragile_high_cert_ask = 0.923

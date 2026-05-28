@@ -310,7 +310,7 @@ impl Default for BonereaperV2Config {
             late_confirm_min_model_confidence: 0.58,
             late_confirm_max_model_risk: 0.80,
             late_confirm_min_model_side_p: 0.58,
-            late_confirm_min_model_edge: 0.00,
+            late_confirm_min_model_edge: 0.02,
             late_confirm_min_book_skew: 0.06,
             late_confirm_max_whipsaw_score: 0.85,
             // Favourite-loading lane. Keep this stricter than the old probe
@@ -333,7 +333,7 @@ impl Default for BonereaperV2Config {
             late_favourite_max_ask: 0.97,
             late_favourite_clip_frac: 1.00,
             late_favourite_high_cert_clip_frac: 1.00,
-            late_favourite_high_cert_full_clip_edge: 0.00,
+            late_favourite_high_cert_full_clip_edge: 0.04,
             late_favourite_fragile_high_cert_ask: 0.923,
             late_favourite_fragile_high_cert_max_edge: 0.005,
             late_favourite_fragile_high_cert_max_path_efficiency: 0.50,
@@ -348,11 +348,11 @@ impl Default for BonereaperV2Config {
             late_favourite_max_model_risk: 0.72,
             late_favourite_min_model_side_p: 0.62,
             // Strict 5c edge makes 90c+ favourite loading impossible while
-            // the model probability is capped at 94c. Keep the lane gated by
-            // side probability/confidence/risk, and require a smaller positive
-            // edge for the high-cert ladder.
-            late_favourite_min_model_edge: 0.00,
-            late_favourite_high_cert_min_model_edge: 0.00,
+            // the model probability is capped at 94c. Still require positive
+            // probability edge so expensive favourite ladders do not pay
+            // near-fair prices after fees/slippage.
+            late_favourite_min_model_edge: 0.03,
+            late_favourite_high_cert_min_model_edge: 0.02,
             late_favourite_high_cert_bypass_model_edge: false,
             late_favourite_max_whipsaw_score: 0.75,
             late_favourite_max_reversal_pressure: 1.0,
@@ -1055,7 +1055,12 @@ impl Strategy for BonereaperV2 {
                             side: target,
                             shares,
                             max_depth: self.cfg.late_sweep_depth,
-                            limit_price: None,
+                            limit_price: Some(model_limited_buy_price(
+                                ctx,
+                                target,
+                                1.0,
+                                self.cfg.late_confirm_min_model_edge,
+                            )),
                             tag: "br2_late_confirm",
                         });
                         self.late_fires += 1;
@@ -1183,7 +1188,12 @@ impl Strategy for BonereaperV2 {
                                     side,
                                     shares,
                                     max_depth: self.cfg.high_skew_sweep_depth,
-                                    limit_price: None,
+                                    limit_price: Some(model_limited_buy_price(
+                                        ctx,
+                                        side,
+                                        self.cfg.high_skew_max_ask,
+                                        self.cfg.late_favourite_min_model_edge,
+                                    )),
                                     tag: "br2_high_skew_load",
                                 });
                                 self.high_skew_clips += 1;
@@ -1556,7 +1566,7 @@ impl Strategy for BonereaperV2 {
 mod tests {
     use super::*;
     use pm_model::ModelOutput;
-    use pm_types::{BookLevel, MarketId, ReplayFlags};
+    use pm_types::{BookLevel, MarketId, ReplayFlags, SpotTick};
 
     fn test_event(ts_ns: i64, yes_mid: f32, yes_bid: f32, yes_ask: f32) -> ReplayEvent {
         ReplayEvent {
@@ -1590,6 +1600,29 @@ mod tests {
         }
     }
 
+    fn test_spot_uptrend(now_ns: i64) -> SpotHistory {
+        SpotHistory::new(vec![
+            SpotTick {
+                ts_ns: now_ns - 120_000_000_000,
+                price: 100.0,
+                quantity: 1.0,
+                is_buyer_maker: false,
+            },
+            SpotTick {
+                ts_ns: now_ns - 60_000_000_000,
+                price: 103.0,
+                quantity: 1.0,
+                is_buyer_maker: false,
+            },
+            SpotTick {
+                ts_ns: now_ns,
+                price: 106.0,
+                quantity: 1.0,
+                is_buyer_maker: false,
+            },
+        ])
+    }
+
     #[test]
     fn late_favourite_ladder_scales_by_price_and_final_window() {
         assert_eq!(late_favourite_ladder_levels(0.72, 200.0), 1);
@@ -1618,7 +1651,7 @@ mod tests {
         let first = strat.on_event(
             &test_event(240_000_000_000, 0.92, 0.91, 0.93),
             &test_ctx(close_ns, 0.9, 0.94),
-            &SpotHistory::default(),
+            &test_spot_uptrend(250_000_000_000),
             &TradeHistory::default(),
         );
         assert!(
@@ -1852,6 +1885,37 @@ mod tests {
 
         assert!((model_limited_buy_price(&ctx, Side::BuyYes, 0.93, 0.02) - 0.86).abs() < 1e-6);
         assert!((model_limited_buy_price(&ctx, Side::BuyNo, 0.93, 0.02) - 0.10).abs() < 1e-6);
+    }
+
+    #[test]
+    fn expensive_directional_orders_carry_model_edge_limit() {
+        let close_ns = 300_000_000_000;
+        let mut strat = BonereaperV2::new(BonereaperV2Config {
+            max_clip_usdc: 20.0,
+            late_clip_frac: 1.0,
+            late_max_fires: 1,
+            late_confirm_min_model_edge: 0.03,
+            late_confirm_min_model_confidence: 0.80,
+            late_confirm_min_model_side_p: 0.80,
+            late_confirm_min_book_skew: 0.05,
+            high_skew_max_clips: 0,
+            late_favourite_max_clips: 0,
+            ..BonereaperV2Config::default()
+        });
+
+        let out = strat.on_event(
+            &test_event(250_000_000_000, 0.81, 0.80, 0.82),
+            &test_ctx(close_ns, 0.9, 0.88),
+            &test_spot_uptrend(250_000_000_000),
+            &TradeHistory::default(),
+        );
+        let order = out
+            .orders
+            .iter()
+            .find(|order| order.tag == "br2_late_confirm")
+            .expect("late confirm order");
+        assert_eq!(order.side, Side::BuyYes);
+        assert!((order.limit_price.expect("limit price") - 0.85).abs() < 1e-6);
     }
 
     #[test]

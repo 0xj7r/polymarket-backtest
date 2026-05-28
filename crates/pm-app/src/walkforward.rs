@@ -63,6 +63,7 @@ pub struct BonereaperV2Profile {
     pub min_composite_direction: Option<f32>,
     pub late_clip_frac: Option<f32>,
     pub late_max_fires: Option<usize>,
+    pub late_confirm_min_model_edge: Option<f32>,
     pub high_skew_clip_frac: Option<f32>,
     pub high_skew_max_clips: Option<usize>,
     pub high_skew_max_whipsaw_score: Option<f32>,
@@ -72,12 +73,14 @@ pub struct BonereaperV2Profile {
     pub late_favourite_max_ask: Option<f32>,
     pub late_favourite_clip_frac: Option<f32>,
     pub late_favourite_high_cert_clip_frac: Option<f32>,
+    pub late_favourite_high_cert_full_clip_edge: Option<f32>,
     pub late_favourite_max_clips: Option<usize>,
     pub late_favourite_sweep_depth: Option<usize>,
     pub late_favourite_min_model_confidence: Option<f32>,
     pub late_favourite_max_model_risk: Option<f32>,
     pub late_favourite_min_model_side_p: Option<f32>,
     pub late_favourite_min_model_edge: Option<f32>,
+    pub late_favourite_high_cert_min_model_edge: Option<f32>,
     pub late_favourite_fragile_high_cert_ask: Option<f32>,
     pub late_favourite_fragile_high_cert_max_edge: Option<f32>,
     pub late_favourite_fragile_high_cert_max_path_efficiency: Option<f32>,
@@ -139,6 +142,7 @@ impl BonereaperV2Profile {
         apply!(min_composite_direction, br2_min_composite_direction);
         apply!(late_clip_frac, br2_late_clip_frac);
         apply!(late_max_fires, br2_late_max_fires);
+        apply!(late_confirm_min_model_edge, br2_late_confirm_min_model_edge);
         apply!(high_skew_clip_frac, br2_high_skew_clip_frac);
         apply!(high_skew_max_clips, br2_high_skew_max_clips);
         apply!(high_skew_max_whipsaw_score, br2_high_skew_max_whipsaw_score);
@@ -150,6 +154,10 @@ impl BonereaperV2Profile {
         apply!(
             late_favourite_high_cert_clip_frac,
             br2_late_favourite_high_cert_clip_frac
+        );
+        apply!(
+            late_favourite_high_cert_full_clip_edge,
+            br2_late_favourite_high_cert_full_clip_edge
         );
         apply!(late_favourite_max_clips, br2_late_favourite_max_clips);
         apply!(late_favourite_sweep_depth, br2_late_favourite_sweep_depth);
@@ -168,6 +176,10 @@ impl BonereaperV2Profile {
         apply!(
             late_favourite_min_model_edge,
             br2_late_favourite_min_model_edge
+        );
+        apply!(
+            late_favourite_high_cert_min_model_edge,
+            br2_late_favourite_high_cert_min_model_edge
         );
         apply!(
             late_favourite_fragile_high_cert_ask,
@@ -508,7 +520,7 @@ impl Default for WalkForwardConfig {
             br2_late_confirm_min_model_confidence: 0.58,
             br2_late_confirm_max_model_risk: 0.80,
             br2_late_confirm_min_model_side_p: 0.58,
-            br2_late_confirm_min_model_edge: 0.00,
+            br2_late_confirm_min_model_edge: 0.02,
             br2_late_confirm_min_book_skew: 0.06,
             br2_late_confirm_max_whipsaw_score: 0.85,
             br2_high_skew_clip_frac: 0.60,
@@ -520,7 +532,7 @@ impl Default for WalkForwardConfig {
             br2_late_favourite_max_ask: 0.97,
             br2_late_favourite_clip_frac: 1.00,
             br2_late_favourite_high_cert_clip_frac: 1.00,
-            br2_late_favourite_high_cert_full_clip_edge: 0.00,
+            br2_late_favourite_high_cert_full_clip_edge: 0.04,
             br2_late_favourite_fragile_high_cert_ask: 0.923,
             br2_late_favourite_fragile_high_cert_max_edge: 0.005,
             br2_late_favourite_fragile_high_cert_max_path_efficiency: 0.50,
@@ -532,8 +544,8 @@ impl Default for WalkForwardConfig {
             br2_late_favourite_min_model_direction_abs: 0.0,
             br2_late_favourite_max_model_risk: 0.72,
             br2_late_favourite_min_model_side_p: 0.62,
-            br2_late_favourite_min_model_edge: 0.00,
-            br2_late_favourite_high_cert_min_model_edge: 0.00,
+            br2_late_favourite_min_model_edge: 0.03,
+            br2_late_favourite_high_cert_min_model_edge: 0.02,
             br2_late_favourite_high_cert_bypass_model_edge: false,
             br2_late_favourite_max_whipsaw_score: 0.75,
             br2_late_favourite_max_reversal_pressure: 1.0,
@@ -3939,7 +3951,10 @@ name = "bonereaper_v2"
 
 [bonereaper_v2]
 replay_sample_ms = 1000
+late_confirm_min_model_edge = 0.025
 late_favourite_max_clips = 8
+late_favourite_high_cert_full_clip_edge = 0.045
+late_favourite_high_cert_min_model_edge = 0.015
 tail_budget_favourite_spend_frac = 0.20
 model_btc_whipsaw_risk_weight = 0.31
 "#,
@@ -3954,6 +3969,9 @@ model_btc_whipsaw_risk_weight = 0.31
 
         assert_eq!(cfg.br2_late_favourite_max_clips, 8);
         assert_eq!(cfg.replay_sample_ms, 1000);
+        assert!((cfg.br2_late_confirm_min_model_edge - 0.025).abs() < f32::EPSILON);
+        assert!((cfg.br2_late_favourite_high_cert_full_clip_edge - 0.045).abs() < f32::EPSILON);
+        assert!((cfg.br2_late_favourite_high_cert_min_model_edge - 0.015).abs() < f32::EPSILON);
         assert!((cfg.br2_tail_budget_favourite_spend_frac - 0.20).abs() < f32::EPSILON);
         assert!((cfg.model_btc_whipsaw_risk_weight - 0.31).abs() < f32::EPSILON);
         assert!((cfg.br2_late_favourite_min_ask - 0.77).abs() < f32::EPSILON);

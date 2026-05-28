@@ -21,6 +21,7 @@ min_composite_direction = 0.10
 # Late confirmation (kept modest)
 late_clip_frac = 1.0
 late_max_fires = 3
+late_confirm_min_model_edge = 0.02
 
 # High-skew load lane
 high_skew_clip_frac = 0.60
@@ -34,6 +35,7 @@ late_favourite_min_ask = 0.70
 late_favourite_max_ask = 0.97
 late_favourite_clip_frac = 1.0
 late_favourite_high_cert_clip_frac = 1.0
+late_favourite_high_cert_full_clip_edge = 0.04
 late_favourite_max_clips = 12
 late_favourite_sweep_depth = 7
 
@@ -41,7 +43,8 @@ late_favourite_sweep_depth = 7
 late_favourite_min_model_confidence = 0.68
 late_favourite_max_model_risk = 0.72
 late_favourite_min_model_side_p = 0.62
-late_favourite_min_model_edge = 0.00
+late_favourite_min_model_edge = 0.03
+late_favourite_high_cert_min_model_edge = 0.02
 
 # Fragile high-cert taper (key part of the "leader" variant)
 late_favourite_fragile_high_cert_ask = 0.923

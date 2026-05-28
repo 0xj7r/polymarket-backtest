@@ -379,7 +379,7 @@ enum Cmd {
         #[arg(long, default_value = "0.58")]
         br2_late_confirm_min_model_side_p: f32,
         /// Bonereaper v2 minimum ML probability edge over entry price for late confirmation entries.
-        #[arg(long, default_value = "0.00")]
+        #[arg(long, default_value = "0.02")]
         br2_late_confirm_min_model_edge: f32,
         /// Bonereaper v2 minimum absolute book skew from 0.5 for late confirmation entries.
         #[arg(long, default_value = "0.06")]
@@ -415,7 +415,7 @@ enum Cmd {
         #[arg(long, default_value = "1.00")]
         br2_late_favourite_high_cert_clip_frac: f32,
         /// Bonereaper v2 high-cert edge where late-favourite loads reach full clip size.
-        #[arg(long, default_value = "0.00")]
+        #[arg(long, default_value = "0.04")]
         br2_late_favourite_high_cert_full_clip_edge: f32,
         /// Ask threshold for fragile high-cert late-favourite size taper; disabled at 1.0.
         #[arg(long, default_value = "0.923")]
@@ -451,10 +451,10 @@ enum Cmd {
         #[arg(long, default_value = "0.62")]
         br2_late_favourite_min_model_side_p: f32,
         /// Bonereaper v2 minimum ML probability edge over entry price for late-favourite loads.
-        #[arg(long, default_value = "0.00")]
+        #[arg(long, default_value = "0.03")]
         br2_late_favourite_min_model_edge: f32,
         /// Bonereaper v2 minimum ML edge over entry price once ask is >= high-cert threshold.
-        #[arg(long, default_value = "0.00")]
+        #[arg(long, default_value = "0.02")]
         br2_late_favourite_high_cert_min_model_edge: f32,
         /// Let high-cert favourite loads use par-discount logic instead of requiring calibrated_p >= entry price.
         #[arg(long, default_value_t = false)]
