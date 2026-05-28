@@ -282,6 +282,30 @@ python3 scripts/compare_run_configs.py \
 
 Result: configs match outside the allowed range-gate key.
 
+Second exact-profile checkpoint:
+
+- Markets: `1,250`
+- PnL: `+$1,412.30`
+- Return: `+28.25%`
+- Max drawdown: `14.84%`
+- Fills: `530`
+- Active markets: `19.0%`
+- Attribution:
+  - `br2_late_confirm`: `+$579.80`
+  - `br2_late_favourite_load`: `+$462.53`
+  - `br2_high_skew_load`: `+$359.43`
+  - `br2_convex_tail`: `+$10.55`
+
+Same-prefix comparison at `1,250` markets:
+
+- No-tail leader: `+$274.69`, max drawdown `27.57%`
+- Fixed-tail leader: `+$208.55`, max drawdown `26.73%`
+- Exact range + tail: `+$1,412.30`, max drawdown `14.84%`
+
+Interpretation: this is the cleanest early evidence so far that the
+`late_confirm` observed-range cap addresses the early reversion damage without
+removing the favourite/high-skew workhorses or convex tail upside.
+
 ### No-Tail Late-Confirm Range-Gated Isolation
 
 Run: `20260528T192139Z-portfolio-grid-37354`
@@ -375,6 +399,25 @@ python3 scripts/compare_run_configs.py \
 ```
 
 Result: configs match outside the allowed range-gate key.
+
+Second exact-profile checkpoint:
+
+- Markets: `1,250`
+- PnL: `+$1,402.69`
+- Return: `+28.05%`
+- Max drawdown: `16.60%`
+- Fills: `478`
+- Active markets: `19.0%`
+- Attribution:
+  - `br2_late_confirm`: `+$575.59`
+  - `br2_late_favourite_load`: `+$466.68`
+  - `br2_high_skew_load`: `+$360.42`
+
+Interpretation: no-tail range-gated performance is very close to the tail
+version at this prefix, but drawdown is higher (`16.60%` versus `14.84%`).
+Given the strategic preference for convex reversal coverage, the tail version
+remains the stronger candidate unless later full-history results show the tail
+spend overwhelming path utility.
 
 ## Decision Rules
 
