@@ -545,6 +545,26 @@ Scaled 1K range + tail verification run:
 - Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
 - Binary: prebuilt `pm-app-al2023-x86_64-607c3156`
 - Instance: `i-047b07c20f934e3ee`
+- Status: stopped/replaced at first checkpoint. Config comparison showed it
+  inherited default `kelly_fraction`, drawdown clip throttles, max order
+  multiplier, and training metadata, so it was not an exact scaled version of
+  the 5K tail08 profile.
+
+Scaled 1K range + tail exact-profile run:
+
+- Run: `20260528T211443Z-portfolio-grid-55343`
+- Label: `clip_0p015_gross_250_expfrac_0p12_lat500ms_cap1k_btc_5m_tail08_lc_range50_exact_profile`
+- Starting capital: `$1,000`
+- Kelly: `0.50`
+- Gross cap: `$250`
+- Max clip: `$30`
+- Max order clip multiplier: `10`
+- Drawdown clip throttle: soft `0.2%`, hard `0.4%`, min multiplier `0.1`
+- Range gate: `br2_late_confirm_max_observed_range = 0.50`
+- Tails: enabled with `br2_tail_max_ask = 0.08`
+- Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
+- Binary: prebuilt `pm-app-al2023-x86_64-607c3156`
+- Instance: `i-026438638670e3522`
 - Status: active
 
 ## Decision Rules
