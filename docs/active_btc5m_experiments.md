@@ -70,6 +70,20 @@ Reasoning:
 - Keep the 8c cap because earlier 10c tails bled; do not broaden into the
   8-10c bucket until there is stronger evidence.
 
+Launch:
+
+- Run: `20260528T222500Z-portfolio-grid-89380`
+- Label: `clip_0p015_gross_250_expfrac_0p12_lat500ms_cap1k_btc_5m_tail08_cov75_ladder_lc_range50_exact_profile`
+- Starting capital: `$1,000`
+- Instance: `i-04582d750613706e2`
+- Instance type: `c7i.2xlarge`
+- Status: active
+
+Capacity note: the no-tail 5K baseline runner was stopped at its latest S3
+checkpoint because it was no longer the preferred production candidate and had
+not advanced its uploaded checkpoint. Latest preserved no-tail checkpoint:
+`12,000` markets, `+$15,270.25`, max drawdown `17.88%`.
+
 ## Current Verified Leader
 
 Run: `20260528T145725Z-portfolio-grid-24140`
