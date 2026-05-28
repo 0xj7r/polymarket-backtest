@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-28 23:26 UTC.
+Last updated: 2026-05-28 23:32 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -72,8 +72,8 @@ Active memory-safe full-history candidates:
    - Strategy logic: same 1K exact profile and frozen meta-calibrator.
    - First checkpoint: `250` markets, `+$60.01`, max drawdown `3.04%`,
      `33` fills.
-   - Latest S3 checkpoint: `3,750` markets, `+$2,888.91`, max drawdown
-     `18.23%`, `1,550` fills.
+   - Latest S3 checkpoint: `4,750` markets, `+$2,534.63`, max drawdown
+     `18.23%`, `1,732` fills.
 2. Broader tail-coverage variant
    - Run: `20260528T225904Z-portfolio-grid-53933`
    - Label:
@@ -88,8 +88,8 @@ Active memory-safe full-history candidates:
      `budget_favourite_upside_frac = 0.40`.
    - First checkpoint: `250` markets, `+$59.98`, max drawdown `3.04%`,
      `34` fills.
-   - Latest S3 checkpoint: `3,750` markets, `+$2,919.67`, max drawdown
-     `18.28%`, `1,552` fills.
+   - Latest S3 checkpoint: `5,000` markets, `+$2,340.45`, max drawdown
+     `23.72%`, `1,824` fills.
 
 Common-prefix memory-safe comparisons:
 
@@ -102,11 +102,19 @@ Common-prefix memory-safe comparisons:
 - `3,750` markets:
   - Base: `+$2,888.91`, max drawdown `18.23%`, tail `+$23.69`
   - Cov75: `+$2,919.67`, max drawdown `18.28%`, tail `+$37.31`
+- `4,750` markets:
+  - Base: `+$2,534.63`, max drawdown `18.23%`, tail `+$7.80`
+  - Cov75: `+$2,554.29`, max drawdown `18.28%`, tail `+$13.29`
 
 Interim read: cov75 remains slightly ahead on PnL and tail contribution with
-no meaningful drawdown penalty, but this is still early history. Selection is
-not made until the runs finish full history or at minimum pass the previous
-OOM point around `12,500` markets.
+no meaningful drawdown penalty on equal prefixes, but the next `250` markets
+are a drawdown slice: cov75's current `5,000` checkpoint is down to
+`+$2,340.45` with max drawdown `23.72%`. Wait for base to process the same
+slice before comparing. Selection is not made until the runs finish full
+history or at minimum pass the previous OOM point around `12,500` markets.
+
+Health check at `23:32 UTC`: both memory-safe `pm-app` processes are still
+running, each using about `17GB` RSS on `r7i.4xlarge` hosts with `123GB` RAM.
 
 Selection rule: once both memory-safe runners finish, promote the better 1K
 path unless the coverage variant improves hedge/reversal protection at an
