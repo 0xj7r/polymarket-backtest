@@ -136,6 +136,7 @@ MAX_CONCURRENT_FETCHES="32"
 REPLAY_SAMPLE_MS="0"
 TAKER_LATENCY_MS="0"
 USE_LOCAL_CACHE="0"
+LABEL_SUFFIX=""
 LOCAL_CACHE_DIR="/opt/pm/cache"
 PREP_CACHE_MAX_CONCURRENT="128"
 DISCOVERY_MAX_CONCURRENT="4"
@@ -249,6 +250,7 @@ while [ $# -gt 0 ]; do
         --replay-sample-ms) REPLAY_SAMPLE_MS="$2"; shift 2 ;;
         --taker-latency-ms) TAKER_LATENCY_MS="$2"; shift 2 ;;
         --use-local-cache) USE_LOCAL_CACHE="1"; shift ;;
+        --label-suffix) LABEL_SUFFIX="$2"; shift 2 ;;
         --local-cache-dir) LOCAL_CACHE_DIR="$2"; shift 2 ;;
         --prep-cache-max-concurrent) PREP_CACHE_MAX_CONCURRENT="$2"; shift 2 ;;
         --discovery-max-concurrent) DISCOVERY_MAX_CONCURRENT="$2"; shift 2 ;;
@@ -405,6 +407,9 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
     fi
     if [ "${TAKER_LATENCY_MS}" != "0" ]; then
       LABEL="\${LABEL}_lat${TAKER_LATENCY_MS}ms"
+    fi
+    if [ -n "${LABEL_SUFFIX}" ]; then
+      LABEL="\${LABEL}_${LABEL_SUFFIX}"
     fi
     OUT_DIR="/opt/pm/results/\${LABEL}"
     mkdir -p "\${OUT_DIR}"

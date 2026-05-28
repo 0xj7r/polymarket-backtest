@@ -90,6 +90,14 @@ The launcher now writes partial `markets.jsonl` and `summary.json` every 250
 evaluated markets and syncs them to S3 every 180 seconds while each variant is
 running.
 
+Use `--label-suffix` whenever two sweeps share the same clip/gross/latency
+settings but differ in strategy gates. The suffix is appended to the S3 result
+directory, which keeps full-history comparisons readable:
+
+```bash
+--label-suffix vol1p0
+```
+
 The EC2 launcher intentionally does not pass `--profile` through to
 `pm-app walk-forward`. Profile files are useful for direct local named-variant
 runs, but `pm-app` applies profile values after CLI defaults. For AWS sweeps,
