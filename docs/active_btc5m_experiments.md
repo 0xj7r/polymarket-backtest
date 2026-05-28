@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-28 23:05 UTC.
+Last updated: 2026-05-28 22:59 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -40,6 +40,53 @@ These are active checkpoints, not final full-history results.
    - Max drawdown: `17.88%`
    - Reason to keep: no-tail PnL ceiling and regression baseline; not the
      preferred production candidate because it lacks convex tail coverage.
+
+## Full-History Relaunches
+
+The earlier exact-profile runners did not finish the `23,705`-market history.
+SSM/systemd showed `cloud-final.service` failed with `Result: oom-kill`, and
+the `pm-app` process was killed after the local run logs reached about
+`12,500 / 23,705` markets. The durable S3 summaries are still valid up to their
+last uploaded checkpoints, but those runs should not be treated as complete.
+
+Idle OOM-killed instances terminated to control cost:
+
+- `i-026438638670e3522` (`1K` exact profile)
+- `i-0b97808c7b58a5dda` (`3K` exact profile)
+- `i-0261b49082277a123` (`5K` exact profile)
+
+The smaller coverage runner also became stale with pending SSM commands and no
+new S3 checkpoint beyond `3,500` markets, so it was terminated:
+
+- `i-04582d750613706e2`
+
+Active memory-safe full-history candidates:
+
+1. Base 1K exact tail08 profile
+   - Run: `20260528T225810Z-portfolio-grid-52322`
+   - Label:
+     `clip_0p015_gross_250_expfrac_0p12_lat500ms_cap1k_btc_5m_tail08_lc_range50_exact_profile_mem128_cf8`
+   - Instance: `i-03916a47348b6d96b`
+   - Instance type: `r7i.4xlarge`
+   - Memory-safety change: `max_concurrent_fetches = 8`, larger memory host.
+   - Strategy logic: same 1K exact profile and frozen meta-calibrator.
+2. Broader tail-coverage variant
+   - Run: `20260528T225904Z-portfolio-grid-53933`
+   - Label:
+     `clip_0p015_gross_250_expfrac_0p12_lat500ms_cap1k_btc_5m_tail08_cov75_ladder_lc_range50_exact_profile_mem128_cf8`
+   - Instance: `i-0e76ad30421811c0d`
+   - Instance type: `r7i.4xlarge`
+   - Memory-safety change: `max_concurrent_fetches = 8`, larger memory host.
+   - Strategy logic: same exact profile except broader tail coverage:
+     `target_favourite_loss_coverage_frac = 0.75`, `tail_max_clips = 10`,
+     `tail_min_skew_step = 0.01`, `tail_extreme_threshold = 0.25`,
+     `budget_favourite_spend_frac = 0.30`, and
+     `budget_favourite_upside_frac = 0.40`.
+
+Selection rule: once both memory-safe runners finish, promote the better 1K
+path unless the coverage variant improves hedge/reversal protection at an
+unacceptable PnL or drawdown cost. Do not launch more broad grids unless both
+full-history candidates fail.
 
 ## Tail Hedge Readout
 
