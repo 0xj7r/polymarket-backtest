@@ -84,16 +84,18 @@ Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_exact_leader_sc
 Purpose: tail-enabled comparison launched before the directional-tail anchoring
 fix.
 
-Latest checkpoint observed:
+Status: stopped after preserving artifacts to S3. This run is not promotable
+because it predates the tail anchoring fix, but its partial checkpoint remains
+useful for rough shape comparison.
 
-- Markets: `500`
-- PnL: `-$291.06`
-- Return: `-5.82%`
-- Max drawdown: `11.55%`
-- Fills: `199`
-- Markets with orders: `97`
+Final preserved checkpoint before stop:
 
-Early attribution:
+- Markets: `2,500`
+- PnL: `+$1,968.64`
+- Return: `+39.37%`
+- Max drawdown: `27.33%`
+
+Earlier attribution at `500` markets:
 
 - `br2_late_favourite_load`: `+$475.32`
 - `br2_high_skew_load`: `+$24.14`
@@ -149,6 +151,26 @@ Evidence from the 750-market no-tail checkpoint:
 
 This post-hoc result is a hypothesis generator only. Promotion requires a clean
 full-history replay with the gate applied during order generation.
+
+### No-Tail Late-Confirm Range-Gated Isolation
+
+Run: `20260528T192139Z-portfolio-grid-37354`
+
+Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_notail_lc_range50`
+
+Purpose: isolate the `late_confirm_max_observed_range = 0.50` change without
+convex tails. This should be compared directly against the scaled no-tail
+reproduction run.
+
+Only intentional strategy changes versus the scaled no-tail reproduction:
+
+```text
+--br2-late-confirm-max-observed-range 0.50
+--br2-tail-clip-frac 0.0
+--br2-tail-max-clips 0
+```
+
+Status at launch: active on instance `i-0924b2f000a266257`.
 
 ## Decision Rules
 
