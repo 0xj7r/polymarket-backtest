@@ -223,7 +223,9 @@ Corrected relaunch retry:
 - Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610` after
   manually uploading active leader artifacts
 - Meta retraining: forbidden
-- Status: active on instance `i-08407b3d72d607bac`
+- Status: stopped. This run was still not apples-to-apples: it differed from
+  the leader on late-favourite edge/range throttles and realized-vol gates,
+  which inflated participation to `53.5%` by the `750`-market checkpoint.
 
 First corrected checkpoint:
 
@@ -239,10 +241,20 @@ First corrected checkpoint:
   - `br2_late_confirm`: `+$86.45`
   - `br2_convex_tail`: `-$63.24`
 
-Interpretation: the corrected replay cadence reverses the earlier concern about
-participation starvation. With the same `1000ms` sampling as the leaders, the
-range gate is active in `48.0%` of markets at the first checkpoint and strongly
-outperforms the old early baseline.
+Interpretation: discard as config-contaminated. The first `250` markets looked
+strong, but the `750`-market checkpoint fell to `-$1,020.65` with `44.26%` max
+drawdown because unrelated late-favourite gates were looser than the leader.
+
+Exact-profile relaunch:
+
+- Run: `20260528T202609Z-portfolio-grid-60941`
+- Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_tail_fix_lc_range50_exact`
+- Replay sample: `1000ms`
+- Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
+- Meta retraining: forbidden
+- Only intentional strategy change versus fixed-tail leader:
+  `br2_late_confirm_max_observed_range = 0.50`
+- Status: active on instance `i-0a3e70b4634752994`
 
 ### No-Tail Late-Confirm Range-Gated Isolation
 
@@ -283,7 +295,7 @@ Corrected relaunch retry:
 - Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610` after
   manually uploading active leader artifacts
 - Meta retraining: forbidden
-- Status: active on instance `i-0f3b6876adcd46c6f`
+- Status: stopped for the same config-contamination issue as the tail retry.
 
 First corrected checkpoint:
 
@@ -298,10 +310,20 @@ First corrected checkpoint:
   - `br2_high_skew_load`: `+$326.45`
   - `br2_late_confirm`: `+$87.66`
 
-Interpretation: this isolates the range gate without tail insurance. It is
-slightly ahead of the tail variant at the first checkpoint because tails cost
-`$63.24`, but its drawdown is worse (`18.46%` versus `17.12%`), so the tail
-variant remains strategically relevant as insurance.
+Interpretation: discard as config-contaminated. At `750` markets it was
+`-$1,229.53` with `44.55%` max drawdown and `53.5%` active markets, which is
+not comparable to the leader profile.
+
+Exact-profile relaunch:
+
+- Run: `20260528T202628Z-portfolio-grid-62169`
+- Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_notail_lc_range50_exact`
+- Replay sample: `1000ms`
+- Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
+- Meta retraining: forbidden
+- Only intentional strategy change versus no-tail leader:
+  `br2_late_confirm_max_observed_range = 0.50`
+- Status: active on instance `i-097d8531ba2e65a6c`
 
 ## Decision Rules
 
