@@ -131,6 +131,7 @@ ENFORCE_MODEL_GATE="true"
 MODEL_GATE_MIN_CONFIDENCE="0.68"
 MODEL_GATE_MAX_RISK="0.72"
 MODEL_GATE_MIN_EDGE="0.00"
+ENABLE_MARKET_CONTEXT_FEATURES="0"
 TRAIN_MARKETS="2880"
 META_EPOCHS="24"
 META_LEARNING_RATE="0.04"
@@ -261,6 +262,7 @@ while [ $# -gt 0 ]; do
         --model-gate-min-confidence) MODEL_GATE_MIN_CONFIDENCE="$2"; shift 2 ;;
         --model-gate-max-risk) MODEL_GATE_MAX_RISK="$2"; shift 2 ;;
         --model-gate-min-edge) MODEL_GATE_MIN_EDGE="$2"; shift 2 ;;
+        --enable-market-context-features) ENABLE_MARKET_CONTEXT_FEATURES="1"; shift ;;
         --train-markets) TRAIN_MARKETS="$2"; shift 2 ;;
         --meta-epochs) META_EPOCHS="$2"; shift 2 ;;
         --meta-learning-rate) META_LEARNING_RATE="$2"; shift 2 ;;
@@ -414,6 +416,10 @@ fi
 FORBID_META_TRAINING_ARGS=()
 if [ "${FORBID_META_TRAINING}" = "1" ]; then
   FORBID_META_TRAINING_ARGS=(--forbid-meta-training)
+fi
+MARKET_CONTEXT_FEATURE_ARGS=()
+if [ "${ENABLE_MARKET_CONTEXT_FEATURES}" = "1" ]; then
+  MARKET_CONTEXT_FEATURE_ARGS=(--enable-market-context-features)
 fi
 BR2_INTERNAL_MODEL_GATE_ARGS=()
 if [ "${BR2_DISABLE_INTERNAL_MODEL_GATES}" = "1" ]; then
@@ -600,6 +606,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --portfolio-checkpoint-every-markets "${PORTFOLIO_CHECKPOINT_EVERY_MARKETS}" \\
       "\${LOCAL_CACHE_ARGS[@]}" \\
       "\${FORBID_META_TRAINING_ARGS[@]}" \\
+      "\${MARKET_CONTEXT_FEATURE_ARGS[@]}" \\
       "\${EXTRA_MODEL_ARGS[@]}" \\
       --out-markets "\${OUT_DIR}/markets.jsonl" \\
       --out-summary "\${OUT_DIR}/summary.json" \\

@@ -633,6 +633,9 @@ enum Cmd {
         /// Canonical model risk weight for short-term BTC reversal pressure.
         #[arg(long, default_value = "0.12")]
         model_btc_reversal_pressure_risk_weight: f32,
+        /// Add explicit asset/timeframe meta features for mixed BTC/ETH or 5m/15m experiments.
+        #[arg(long, default_value_t = false)]
+        enable_market_context_features: bool,
         /// Local directory mirroring the S3 prefix structure. When set, the
         /// loader reads parquets from local disk instead of S3 (use after
         /// `pm-app prep-cache`).
@@ -1170,6 +1173,7 @@ async fn main() -> Result<()> {
             model_btc_whipsaw_risk_weight,
             model_btc_path_inefficiency_risk_weight,
             model_btc_reversal_pressure_risk_weight,
+            enable_market_context_features,
             walk_forward_folds,
             fold_size,
             purge_markets,
@@ -1310,6 +1314,7 @@ async fn main() -> Result<()> {
                 model_btc_whipsaw_risk_weight,
                 model_btc_path_inefficiency_risk_weight,
                 model_btc_reversal_pressure_risk_weight,
+                enable_market_context_features,
                 walk_forward_folds,
                 fold_size,
                 purge_markets,
@@ -1993,6 +1998,7 @@ async fn walk_forward(
     model_btc_whipsaw_risk_weight: f32,
     model_btc_path_inefficiency_risk_weight: f32,
     model_btc_reversal_pressure_risk_weight: f32,
+    enable_market_context_features: bool,
     walk_forward_folds: Option<usize>,
     fold_size: Option<usize>,
     purge_markets: usize,
@@ -2203,6 +2209,7 @@ async fn walk_forward(
         model_btc_whipsaw_risk_weight,
         model_btc_path_inefficiency_risk_weight,
         model_btc_reversal_pressure_risk_weight,
+        enable_market_context_features,
         volatility_regime_threshold,
         walk_forward_folds,
         fold_size,
@@ -2297,6 +2304,7 @@ async fn walk_forward(
         "model_btc_whipsaw_risk_weight": wf_cfg.model_btc_whipsaw_risk_weight,
         "model_btc_path_inefficiency_risk_weight": wf_cfg.model_btc_path_inefficiency_risk_weight,
         "model_btc_reversal_pressure_risk_weight": wf_cfg.model_btc_reversal_pressure_risk_weight,
+        "enable_market_context_features": wf_cfg.enable_market_context_features,
         "forbid_meta_training": wf_cfg.forbid_meta_training,
         "meta_calibrator_snapshot_in": wf_cfg.meta_calibrator_snapshot_in.as_ref().map(|p| p.to_string_lossy()),
         "meta_calibrator_snapshot_out": wf_cfg.meta_calibrator_snapshot_out.as_ref().map(|p| p.to_string_lossy()),
@@ -2636,6 +2644,7 @@ async fn run_market_backtest(
         update_model_state_on_resolution: true,
         meta_calibrator_snapshot: None,
         enable_meta_calibration: true,
+        model_market_context: pm_model::ModelMarketContext::default(),
         model_btc_whipsaw_risk_weight: 0.16,
         model_btc_path_inefficiency_risk_weight: 0.10,
         model_btc_reversal_pressure_risk_weight: 0.12,

@@ -11,8 +11,9 @@ use anyhow::{Context, Result, anyhow};
 use chrono::{Duration, NaiveDate};
 use futures::StreamExt;
 use pm_model::{
-    MetaFeatureWeight, MetaTrainingConfig, MetaTrainingSample, MetaTrainingStats, ModelState,
-    OnlineMetaCalibrator, OnlineMetaCalibratorSnapshot, SkewWinRateTable,
+    MarketAsset, MetaFeatureWeight, MetaTrainingConfig, MetaTrainingSample, MetaTrainingStats,
+    ModelMarketContext, ModelState, OnlineMetaCalibrator, OnlineMetaCalibratorSnapshot,
+    SkewWinRateTable,
 };
 use pm_risk::PortfolioLimits;
 use pm_strategy::{
@@ -545,6 +546,10 @@ pub struct WalkForwardConfig {
     pub model_btc_whipsaw_risk_weight: f32,
     pub model_btc_path_inefficiency_risk_weight: f32,
     pub model_btc_reversal_pressure_risk_weight: f32,
+    /// Opt into explicit asset/timeframe features for mixed BTC/ETH or 5m/15m
+    /// model experiments. Kept off by default to preserve BTC 5m baseline
+    /// comparability.
+    pub enable_market_context_features: bool,
     /// Split aggregate reporting by per-market price range in YES mid: high
     /// volatility if `range > threshold`.
     pub volatility_regime_threshold: f64,
@@ -717,6 +722,7 @@ impl Default for WalkForwardConfig {
             model_btc_whipsaw_risk_weight: 0.16,
             model_btc_path_inefficiency_risk_weight: 0.10,
             model_btc_reversal_pressure_risk_weight: 0.12,
+            enable_market_context_features: false,
             volatility_regime_threshold: 0.08,
             walk_forward_folds: None,
             fold_size: None,
@@ -933,6 +939,7 @@ pub struct SummaryRunConfig {
     pub model_btc_whipsaw_risk_weight: f32,
     pub model_btc_path_inefficiency_risk_weight: f32,
     pub model_btc_reversal_pressure_risk_weight: f32,
+    pub enable_market_context_features: bool,
     pub min_train_markets: usize,
     pub meta_epochs: usize,
     pub meta_learning_rate: f32,
@@ -1727,6 +1734,39 @@ fn spot_history_for_market(
         .get(&spot_cache_key(&symbol, &market.date))
         .cloned()
         .unwrap_or_else(|| empty_spot.clone())
+}
+
+fn model_market_context_for_slug(slug: &str) -> ModelMarketContext {
+    let slug = slug.to_ascii_lowercase();
+    let asset = if slug.starts_with("btc-updown-") {
+        MarketAsset::Btc
+    } else if slug.starts_with("eth-updown-") {
+        MarketAsset::Eth
+    } else {
+        MarketAsset::Unknown
+    };
+    let window_seconds = if slug.contains("-5m-") {
+        300
+    } else if slug.contains("-15m-") {
+        900
+    } else {
+        0
+    };
+    ModelMarketContext {
+        asset,
+        window_seconds,
+    }
+}
+
+fn model_market_context_for_cfg(
+    cfg: &WalkForwardConfig,
+    market: &MarketHandle,
+) -> ModelMarketContext {
+    if cfg.enable_market_context_features {
+        model_market_context_for_slug(&market.slug)
+    } else {
+        ModelMarketContext::default()
+    }
 }
 
 pub async fn run_walkforward(
@@ -2813,6 +2853,7 @@ async fn collect_training_samples(
             let starting_cash_usdc = cfg.starting_cash_usdc;
             let replay_sample_ms = cfg.replay_sample_ms;
             let replay_event_cache_dir = cfg.replay_event_cache_dir.clone();
+            let enable_market_context_features = cfg.enable_market_context_features;
             let completed = completed.clone();
             async move {
                 let samples = collect_training_samples_for_market(
@@ -2825,6 +2866,7 @@ async fn collect_training_samples(
                     starting_cash_usdc,
                     replay_sample_ms,
                     replay_event_cache_dir.as_deref(),
+                    enable_market_context_features,
                 )
                 .await;
                 let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
@@ -2856,6 +2898,7 @@ async fn collect_training_samples_for_market(
     starting_cash_usdc: f64,
     replay_sample_ms: u64,
     replay_event_cache_dir: Option<&Path>,
+    enable_market_context_features: bool,
 ) -> Vec<MetaTrainingSample> {
     let events = match load_replay_events_for_market(
         store,
@@ -2900,6 +2943,11 @@ async fn collect_training_samples_for_market(
         update_model_state_on_resolution: true,
         meta_calibrator_snapshot: None,
         enable_meta_calibration: true,
+        model_market_context: if enable_market_context_features {
+            model_market_context_for_slug(&m.slug)
+        } else {
+            ModelMarketContext::default()
+        },
         model_btc_whipsaw_risk_weight: 0.16,
         model_btc_path_inefficiency_risk_weight: 0.10,
         model_btc_reversal_pressure_risk_weight: 0.12,
@@ -3033,6 +3081,7 @@ async fn run_markets(
                 update_model_state_on_resolution: meta_calibrator_snapshot.is_none(),
                 meta_calibrator_snapshot,
                 enable_meta_calibration: cfg_arc.enable_meta_calibration,
+                model_market_context: model_market_context_for_cfg(&cfg_arc, &m),
                 model_btc_whipsaw_risk_weight: cfg_arc.model_btc_whipsaw_risk_weight,
                 model_btc_path_inefficiency_risk_weight: cfg_arc
                     .model_btc_path_inefficiency_risk_weight,
@@ -3600,6 +3649,7 @@ async fn run_portfolio(
                 update_model_state_on_resolution: meta_calibrator_snapshot.is_none(),
                 meta_calibrator_snapshot: meta_calibrator_snapshot.clone(),
                 enable_meta_calibration: cfg.enable_meta_calibration,
+                model_market_context: model_market_context_for_cfg(cfg, &m),
                 model_btc_whipsaw_risk_weight: cfg.model_btc_whipsaw_risk_weight,
                 model_btc_path_inefficiency_risk_weight: cfg
                     .model_btc_path_inefficiency_risk_weight,
@@ -4188,6 +4238,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         model_btc_whipsaw_risk_weight: cfg.model_btc_whipsaw_risk_weight,
         model_btc_path_inefficiency_risk_weight: cfg.model_btc_path_inefficiency_risk_weight,
         model_btc_reversal_pressure_risk_weight: cfg.model_btc_reversal_pressure_risk_weight,
+        enable_market_context_features: cfg.enable_market_context_features,
         min_train_markets: cfg.min_train_markets,
         meta_epochs: cfg.meta_training_config.epochs,
         meta_learning_rate: cfg.meta_training_config.learning_rate,

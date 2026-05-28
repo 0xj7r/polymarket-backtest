@@ -13,7 +13,7 @@ const MOMENTUM_WINDOWS_SECONDS: [i64; 5] = [10, 30, 60, 120, 300];
 const MOMENTUM_WEIGHTS: [f32; 5] = [0.45, 0.25, 0.15, 0.10, 0.05];
 const SKEW_BINS: usize = 10;
 const HOUR_BINS: usize = 24;
-const META_FEATURES: usize = 75;
+const META_FEATURES: usize = 84;
 const META_CALIBRATOR_LR: f32 = 0.08;
 const META_CALIBRATOR_MIN_UPDATES: u32 = 12;
 const META_CALIBRATOR_WEIGHT_DECAY: f32 = 1.0e-3;
@@ -115,6 +115,15 @@ pub const META_FEATURE_NAMES: [&str; META_FEATURES] = [
     "spot_1h_4h_alignment",
     "spot_ultra_trend_consistency",
     "spot_ultra_acceleration_side",
+    "market_is_btc",
+    "market_is_eth",
+    "market_window_5m",
+    "market_window_15m",
+    "market_window_minutes_norm",
+    "market_btc_5m",
+    "market_btc_15m",
+    "market_eth_5m",
+    "market_eth_15m",
 ];
 
 /// Output contract expected by the 4-score engine.
@@ -458,6 +467,66 @@ pub struct SpotRegimeFeatures {
     pub reversal_pressure: f32,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MarketAsset {
+    #[default]
+    Unknown,
+    Btc,
+    Eth,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelMarketContext {
+    pub asset: MarketAsset,
+    pub window_seconds: u32,
+}
+
+impl ModelMarketContext {
+    pub const fn btc_5m() -> Self {
+        Self {
+            asset: MarketAsset::Btc,
+            window_seconds: 300,
+        }
+    }
+
+    pub const fn btc_15m() -> Self {
+        Self {
+            asset: MarketAsset::Btc,
+            window_seconds: 900,
+        }
+    }
+
+    pub const fn eth_5m() -> Self {
+        Self {
+            asset: MarketAsset::Eth,
+            window_seconds: 300,
+        }
+    }
+
+    pub const fn eth_15m() -> Self {
+        Self {
+            asset: MarketAsset::Eth,
+            window_seconds: 900,
+        }
+    }
+
+    fn is_btc(self) -> bool {
+        matches!(self.asset, MarketAsset::Btc)
+    }
+
+    fn is_eth(self) -> bool {
+        matches!(self.asset, MarketAsset::Eth)
+    }
+
+    fn is_5m(self) -> bool {
+        self.window_seconds == 300
+    }
+
+    fn is_15m(self) -> bool {
+        self.window_seconds == 900
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SequenceFeatures {
     pub dir_mean_3: f32,
@@ -651,6 +720,39 @@ impl MetaFeatures {
         spot_regime: SpotRegimeFeatures,
         seconds_since_window_open: f32,
     ) -> Self {
+        Self::from_raw_with_market_context(
+            direction_score,
+            direction,
+            confidence,
+            risk,
+            sequence,
+            volatility_regime,
+            book_imbalance,
+            market_mid,
+            side_probability_pre_meta,
+            observed_yes_range_so_far,
+            spot_regime,
+            seconds_since_window_open,
+            ModelMarketContext::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_raw_with_market_context(
+        direction_score: f32,
+        direction: DirectionScore,
+        confidence: ConfidenceScore,
+        risk: RiskScore,
+        sequence: SequenceFeatures,
+        volatility_regime: f32,
+        book_imbalance: f32,
+        market_mid: f32,
+        side_probability_pre_meta: f32,
+        observed_yes_range_so_far: f32,
+        spot_regime: SpotRegimeFeatures,
+        seconds_since_window_open: f32,
+        market_context: ModelMarketContext,
+    ) -> Self {
         let side = if direction_score >= 0.0 { 1.0 } else { -1.0 };
         let side_market_price = if side > 0.0 {
             market_mid
@@ -817,6 +919,40 @@ impl MetaFeatures {
         values[idx] = direction.spot_ultra_trend_consistency;
         idx += 1;
         values[idx] = direction.spot_ultra_acceleration * side;
+        idx += 1;
+        values[idx] = if market_context.is_btc() { 1.0 } else { 0.0 };
+        idx += 1;
+        values[idx] = if market_context.is_eth() { 1.0 } else { 0.0 };
+        idx += 1;
+        values[idx] = if market_context.is_5m() { 1.0 } else { 0.0 };
+        idx += 1;
+        values[idx] = if market_context.is_15m() { 1.0 } else { 0.0 };
+        idx += 1;
+        values[idx] = (market_context.window_seconds as f32 / 900.0).clamp(0.0, 1.0);
+        idx += 1;
+        values[idx] = if market_context.is_btc() && market_context.is_5m() {
+            1.0
+        } else {
+            0.0
+        };
+        idx += 1;
+        values[idx] = if market_context.is_btc() && market_context.is_15m() {
+            1.0
+        } else {
+            0.0
+        };
+        idx += 1;
+        values[idx] = if market_context.is_eth() && market_context.is_5m() {
+            1.0
+        } else {
+            0.0
+        };
+        idx += 1;
+        values[idx] = if market_context.is_eth() && market_context.is_15m() {
+            1.0
+        } else {
+            0.0
+        };
         idx += 1;
         debug_assert_eq!(idx, META_FEATURES);
         Self { values }
@@ -2024,6 +2160,23 @@ impl ModelState {
         seconds_since_window_open: f32,
         cfg: &ModelConfig,
     ) -> ModelEvaluation {
+        self.evaluate_detailed_with_market_context(
+            event,
+            spot,
+            seconds_since_window_open,
+            cfg,
+            ModelMarketContext::default(),
+        )
+    }
+
+    pub fn evaluate_detailed_with_market_context(
+        &mut self,
+        event: &ReplayEvent,
+        spot: &SpotHistory,
+        seconds_since_window_open: f32,
+        cfg: &ModelConfig,
+        market_context: ModelMarketContext,
+    ) -> ModelEvaluation {
         self.last_event_ts_ns = event.ts_ns;
         self.vol_state.on_event(event);
         self.recent_mids.push(event.ts_ns, event.yes_mid);
@@ -2109,7 +2262,7 @@ impl ModelState {
             1.0 - calibrated_yes_p
         }
         .clamp(cfg.calibrated_p_min, cfg.calibrated_p_max);
-        let meta_features = MetaFeatures::from_raw(
+        let meta_features = MetaFeatures::from_raw_with_market_context(
             direction_score,
             book_dir,
             conf,
@@ -2122,6 +2275,7 @@ impl ModelState {
             observed_yes_range_so_far,
             spot_regime,
             seconds_since_window_open,
+            market_context,
         );
         self.pending_meta_features = Some(PendingMetaTrainingSample {
             features: meta_features,
@@ -3759,6 +3913,51 @@ mod tests {
         assert_eq!(features.values[39], 39.0);
         assert_eq!(features.values[40], 0.0);
         assert_eq!(features.values[META_FEATURES - 1], 0.0);
+    }
+
+    #[test]
+    fn market_context_features_are_opt_in() {
+        let base = MetaFeatures::from_raw(
+            0.35,
+            DirectionScore::default(),
+            ConfidenceScore::default(),
+            RiskScore::default(),
+            SequenceFeatures::default(),
+            0.0,
+            0.0,
+            0.70,
+            0.75,
+            0.10,
+            SpotRegimeFeatures::default(),
+            180.0,
+        );
+        let contextual = MetaFeatures::from_raw_with_market_context(
+            0.35,
+            DirectionScore::default(),
+            ConfidenceScore::default(),
+            RiskScore::default(),
+            SequenceFeatures::default(),
+            0.0,
+            0.0,
+            0.70,
+            0.75,
+            0.10,
+            SpotRegimeFeatures::default(),
+            180.0,
+            ModelMarketContext::btc_5m(),
+        );
+
+        let market_idx = META_FEATURE_NAMES
+            .iter()
+            .position(|name| *name == "market_is_btc")
+            .unwrap();
+        assert_eq!(base.values[market_idx], 0.0);
+        assert_eq!(base.values[META_FEATURES - 1], 0.0);
+        assert_eq!(contextual.values[market_idx], 1.0);
+        assert_eq!(contextual.values[market_idx + 2], 1.0);
+        assert!((contextual.values[market_idx + 4] - (1.0 / 3.0)).abs() < 1.0e-6);
+        assert_eq!(contextual.values[market_idx + 5], 1.0);
+        assert_eq!(contextual.values[market_idx + 8], 0.0);
     }
 
     #[test]

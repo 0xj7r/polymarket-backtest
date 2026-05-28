@@ -21,7 +21,7 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use parquet::arrow::ArrowWriter;
 use pm_model::{
-    MetaFeatures, MetaTrainingSample, ModelConfig, ModelOutput, ModelState,
+    MetaFeatures, MetaTrainingSample, ModelConfig, ModelMarketContext, ModelOutput, ModelState,
     OnlineMetaCalibratorSnapshot, edge_vs_mid,
 };
 use pm_risk::{PortfolioLimits, PortfolioSnapshot, PortfolioState};
@@ -311,6 +311,10 @@ pub struct RunnerConfig {
     /// Enable the online meta-calibrator adjustment in the canonical model.
     /// Disable this for strategy-only A/B runs against the hand-crafted score.
     pub enable_meta_calibration: bool,
+    /// Optional asset/timeframe context for explicit mixed-universe calibration.
+    /// Defaults to unknown so BTC 5m baseline runs remain comparable unless a
+    /// caller opts into market-context features.
+    pub model_market_context: ModelMarketContext,
     /// Weight for BTC spot whipsaw risk in the canonical model risk score.
     pub model_btc_whipsaw_risk_weight: f32,
     /// Weight for BTC spot path inefficiency in the canonical model risk score.
@@ -350,6 +354,7 @@ impl Default for RunnerConfig {
             update_model_state_on_resolution: true,
             meta_calibrator_snapshot: None,
             enable_meta_calibration: true,
+            model_market_context: ModelMarketContext::default(),
             model_btc_whipsaw_risk_weight: ModelConfig::default().btc_whipsaw_risk_weight,
             model_btc_path_inefficiency_risk_weight: ModelConfig::default()
                 .btc_path_inefficiency_risk_weight,
@@ -582,9 +587,21 @@ pub fn run_backtest<S: Strategy>(
         let secs_since_open = ((event.ts_ns - market_open_ts_ns).max(0) as f64) / 1e9;
         let canonical_model_eval = if let Some(shared) = &cfg.shared_model_state {
             let mut state = shared.lock().expect("shared model mutex poisoned");
-            state.evaluate_detailed(event, spot, secs_since_open as f32, &model_cfg)
+            state.evaluate_detailed_with_market_context(
+                event,
+                spot,
+                secs_since_open as f32,
+                &model_cfg,
+                cfg.model_market_context,
+            )
         } else {
-            model_state.evaluate_detailed(event, spot, secs_since_open as f32, &model_cfg)
+            model_state.evaluate_detailed_with_market_context(
+                event,
+                spot,
+                secs_since_open as f32,
+                &model_cfg,
+                cfg.model_market_context,
+            )
         };
         let canonical_prediction_is_yes = canonical_model_eval.output.direction_score >= 0.0;
         last_canonical_prediction_is_yes = Some(canonical_prediction_is_yes);
