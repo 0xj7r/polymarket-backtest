@@ -263,6 +263,7 @@ pub struct BonereaperV2Config {
     pub tail_extreme_threshold: f32,
     pub tail_min_skew_step: f32,
     pub tail_max_clips: usize,
+    pub tail_sweep_depth: usize,
     pub tail_refresh_secs: f32,
     pub tail_min_ask: f32,
     pub tail_max_ask: f32,
@@ -392,6 +393,7 @@ impl Default for BonereaperV2Config {
             tail_extreme_threshold: 0.30,
             tail_min_skew_step: 0.02,
             tail_max_clips: 3,
+            tail_sweep_depth: 3,
             tail_refresh_secs: 5.0,
             tail_min_ask: 0.01,
             tail_max_ask: 0.10,
@@ -1545,7 +1547,7 @@ impl Strategy for BonereaperV2 {
                         orders.push(OrderRequest {
                             side: tail_side,
                             shares,
-                            max_depth: 2,
+                            max_depth: self.cfg.tail_sweep_depth.max(1),
                             limit_price: Some(self.cfg.tail_max_ask),
                             tag: "br2_convex_tail",
                         });

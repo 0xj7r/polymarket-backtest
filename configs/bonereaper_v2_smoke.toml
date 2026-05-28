@@ -10,6 +10,7 @@ late_confirm_min_model_edge = 0.02
 late_favourite_max_clips = 8
 late_favourite_sweep_depth = 5
 tail_max_clips = 2
+tail_sweep_depth = 3
 late_favourite_high_cert_full_clip_edge = 0.04
 late_favourite_min_model_edge = 0.03
 late_favourite_high_cert_min_model_edge = 0.02

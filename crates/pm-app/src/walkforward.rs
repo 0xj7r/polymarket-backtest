@@ -94,6 +94,7 @@ pub struct BonereaperV2Profile {
     pub late_favourite_min_path_efficiency: Option<f32>,
     pub tail_clip_frac: Option<f32>,
     pub tail_max_clips: Option<usize>,
+    pub tail_sweep_depth: Option<usize>,
     pub tail_min_ask: Option<f32>,
     pub tail_max_ask: Option<f32>,
     pub tail_min_seconds_to_close: Option<f32>,
@@ -227,6 +228,7 @@ impl BonereaperV2Profile {
         );
         apply!(tail_clip_frac, br2_tail_clip_frac);
         apply!(tail_max_clips, br2_tail_max_clips);
+        apply!(tail_sweep_depth, br2_tail_sweep_depth);
         apply!(tail_min_ask, br2_tail_min_ask);
         apply!(tail_max_ask, br2_tail_max_ask);
         apply!(tail_min_seconds_to_close, br2_tail_min_seconds_to_close);
@@ -417,6 +419,7 @@ pub struct WalkForwardConfig {
     pub br2_late_favourite_max_avg_entry_drawdown: f32,
     pub br2_tail_clip_frac: f32,
     pub br2_tail_max_clips: usize,
+    pub br2_tail_sweep_depth: usize,
     pub br2_tail_min_ask: f32,
     pub br2_tail_max_ask: f32,
     pub br2_tail_min_seconds_to_close: f32,
@@ -569,6 +572,7 @@ impl Default for WalkForwardConfig {
             br2_late_favourite_max_avg_entry_drawdown: 1.0,
             br2_tail_clip_frac: 0.10,
             br2_tail_max_clips: 3,
+            br2_tail_sweep_depth: 3,
             br2_tail_min_ask: 0.01,
             br2_tail_max_ask: 0.10,
             br2_tail_min_seconds_to_close: 10.0,
@@ -765,6 +769,7 @@ pub struct SummaryRunConfig {
     pub br2_late_favourite_max_avg_entry_drawdown: f32,
     pub br2_tail_clip_frac: f32,
     pub br2_tail_max_clips: usize,
+    pub br2_tail_sweep_depth: usize,
     pub br2_tail_min_ask: f32,
     pub br2_tail_max_ask: f32,
     pub br2_tail_min_seconds_to_close: f32,
@@ -3184,6 +3189,7 @@ fn run_one_strategy(
                     .br2_late_favourite_max_avg_entry_drawdown,
                 tail_clip_frac: cfg.br2_tail_clip_frac,
                 tail_max_clips: cfg.br2_tail_max_clips,
+                tail_sweep_depth: cfg.br2_tail_sweep_depth,
                 tail_min_ask: cfg.br2_tail_min_ask,
                 tail_max_ask: cfg.br2_tail_max_ask,
                 tail_min_seconds_to_close: cfg.br2_tail_min_seconds_to_close,
@@ -3961,6 +3967,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_late_favourite_max_avg_entry_drawdown: cfg.br2_late_favourite_max_avg_entry_drawdown,
         br2_tail_clip_frac: cfg.br2_tail_clip_frac,
         br2_tail_max_clips: cfg.br2_tail_max_clips,
+        br2_tail_sweep_depth: cfg.br2_tail_sweep_depth,
         br2_tail_min_ask: cfg.br2_tail_min_ask,
         br2_tail_max_ask: cfg.br2_tail_max_ask,
         br2_tail_min_seconds_to_close: cfg.br2_tail_min_seconds_to_close,

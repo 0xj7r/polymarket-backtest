@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use anyhow::{Context, Result, anyhow};
 use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
@@ -508,6 +510,9 @@ enum Cmd {
         /// Bonereaper v2 maximum convex-tail clips.
         #[arg(long, default_value = "3")]
         br2_tail_max_clips: usize,
+        /// Bonereaper v2 book depth to sweep for convex-tail entries.
+        #[arg(long, default_value = "3")]
+        br2_tail_sweep_depth: usize,
         /// Bonereaper v2 minimum convex-tail ask price.
         #[arg(long, default_value = "0.01")]
         br2_tail_min_ask: f32,
@@ -1067,6 +1072,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_max_avg_entry_drawdown,
             br2_tail_clip_frac,
             br2_tail_max_clips,
+            br2_tail_sweep_depth,
             br2_tail_min_ask,
             br2_tail_max_ask,
             br2_tail_min_seconds_to_close,
@@ -1188,6 +1194,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_max_avg_entry_drawdown,
                 br2_tail_clip_frac,
                 br2_tail_max_clips,
+                br2_tail_sweep_depth,
                 br2_tail_min_ask,
                 br2_tail_max_ask,
                 br2_tail_min_seconds_to_close,
@@ -1843,6 +1850,7 @@ async fn walk_forward(
     br2_late_favourite_max_avg_entry_drawdown: f32,
     br2_tail_clip_frac: f32,
     br2_tail_max_clips: usize,
+    br2_tail_sweep_depth: usize,
     br2_tail_min_ask: f32,
     br2_tail_max_ask: f32,
     br2_tail_min_seconds_to_close: f32,
@@ -2033,6 +2041,7 @@ async fn walk_forward(
         br2_late_favourite_max_avg_entry_drawdown,
         br2_tail_clip_frac,
         br2_tail_max_clips,
+        br2_tail_sweep_depth,
         br2_tail_min_ask,
         br2_tail_max_ask,
         br2_tail_min_seconds_to_close,
@@ -2117,6 +2126,7 @@ async fn walk_forward(
         "br2_late_favourite_range_extra_confidence": wf_cfg.br2_late_favourite_range_extra_confidence,
         "br2_tail_clip_frac": wf_cfg.br2_tail_clip_frac,
         "br2_tail_max_clips": wf_cfg.br2_tail_max_clips,
+        "br2_tail_sweep_depth": wf_cfg.br2_tail_sweep_depth,
         "br2_tail_min_ask": wf_cfg.br2_tail_min_ask,
         "br2_tail_max_ask": wf_cfg.br2_tail_max_ask,
         "br2_tail_min_observed_range": wf_cfg.br2_tail_min_observed_range,

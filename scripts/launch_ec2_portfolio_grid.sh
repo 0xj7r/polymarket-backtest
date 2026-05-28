@@ -93,6 +93,7 @@ BR2_LATE_FAVOURITE_MAX_ENTRY_PULLBACK="1.0"
 BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN="1.0"
 BR2_TAIL_CLIP_FRAC="0.10"
 BR2_TAIL_MAX_CLIPS="3"
+BR2_TAIL_SWEEP_DEPTH="3"
 BR2_TAIL_MIN_ASK="0.01"
 BR2_TAIL_MAX_ASK="0.10"
 BR2_TAIL_MIN_SECONDS_TO_CLOSE="10.0"
@@ -201,6 +202,7 @@ while [ $# -gt 0 ]; do
         --br2-late-favourite-max-avg-entry-drawdown) BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN="$2"; shift 2 ;;
         --br2-tail-clip-frac) BR2_TAIL_CLIP_FRAC="$2"; shift 2 ;;
         --br2-tail-max-clips) BR2_TAIL_MAX_CLIPS="$2"; shift 2 ;;
+        --br2-tail-sweep-depth) BR2_TAIL_SWEEP_DEPTH="$2"; shift 2 ;;
         --br2-tail-min-ask) BR2_TAIL_MIN_ASK="$2"; shift 2 ;;
         --br2-tail-max-ask) BR2_TAIL_MAX_ASK="$2"; shift 2 ;;
         --br2-tail-min-seconds-to-close) BR2_TAIL_MIN_SECONDS_TO_CLOSE="$2"; shift 2 ;;
@@ -493,6 +495,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-favourite-max-avg-entry-drawdown "${BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN}" \\
       --br2-tail-clip-frac "${BR2_TAIL_CLIP_FRAC}" \\
       --br2-tail-max-clips "${BR2_TAIL_MAX_CLIPS}" \\
+      --br2-tail-sweep-depth "${BR2_TAIL_SWEEP_DEPTH}" \\
       --br2-tail-min-ask "${BR2_TAIL_MIN_ASK}" \\
       --br2-tail-max-ask "${BR2_TAIL_MAX_ASK}" \\
       --br2-tail-min-seconds-to-close "${BR2_TAIL_MIN_SECONDS_TO_CLOSE}" \\

@@ -60,6 +60,7 @@ late_favourite_min_path_efficiency = 0.0
 # Convex tail
 tail_clip_frac = 0.10
 tail_max_clips = 3
+tail_sweep_depth = 3
 tail_min_ask = 0.01
 tail_max_ask = 0.10
 tail_min_seconds_to_close = 10.0
