@@ -1150,8 +1150,29 @@ pub struct StrategyAggregate {
     pub best_market_pnl: f64,
     pub sharpe_ratio: f64,
     pub by_fill_tag: HashMap<String, FillTagAggregate>,
+    pub model_fill_quality: ModelFillQualitySummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bonereaper_v2_gate_stats: Option<BonereaperV2GateStats>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModelFillQualitySummary {
+    pub all: ModelFillQuality,
+    pub range_ge_050: ModelFillQuality,
+    pub range_lt_050: ModelFillQuality,
+    pub whipsaw_ge_035: ModelFillQuality,
+    pub whipsaw_lt_035: ModelFillQuality,
+    pub market_samples: usize,
+    pub market_majority_side_accuracy: f64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModelFillQuality {
+    pub fills: usize,
+    pub hit_rate: f64,
+    pub avg_predicted_p: f64,
+    pub brier: f64,
+    pub log_loss: f64,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1195,6 +1216,133 @@ struct FillTagAccumulator {
     sum_regime_sign_flip_rate: f64,
     sum_regime_realized_vol_180s_bps: f64,
     regime_samples: usize,
+}
+
+#[derive(Debug, Default)]
+struct ModelFillQualityAccumulator {
+    all: ModelFillQualityBucket,
+    range_ge_050: ModelFillQualityBucket,
+    range_lt_050: ModelFillQualityBucket,
+    whipsaw_ge_035: ModelFillQualityBucket,
+    whipsaw_lt_035: ModelFillQualityBucket,
+    market_samples: usize,
+    market_majority_side_correct: usize,
+}
+
+#[derive(Debug, Default)]
+struct ModelFillQualityBucket {
+    fills: usize,
+    wins: usize,
+    sum_predicted_p: f64,
+    sum_brier: f64,
+    sum_log_loss: f64,
+}
+
+impl ModelFillQualityAccumulator {
+    fn push_fill(&mut self, fill: &crate::runner::Fill, yes_resolved: bool) {
+        let Some(predicted_p) = fill.side_model_p else {
+            return;
+        };
+        let Some(win) = buy_fill_won(fill, yes_resolved) else {
+            return;
+        };
+        let p = (predicted_p as f64).clamp(1e-6, 1.0 - 1e-6);
+        self.all.push(p, win);
+        if let Some(range) = fill.market_yes_range_so_far {
+            if range >= 0.50 {
+                self.range_ge_050.push(p, win);
+            } else {
+                self.range_lt_050.push(p, win);
+            }
+        }
+        if let Some(whipsaw) = fill.regime_whipsaw_score {
+            if whipsaw >= 0.35 {
+                self.whipsaw_ge_035.push(p, win);
+            } else {
+                self.whipsaw_lt_035.push(p, win);
+            }
+        }
+    }
+
+    fn push_market_majority(&mut self, record: &StrategyMarketResult) {
+        let mut yes_notional = 0.0;
+        let mut no_notional = 0.0;
+        for fill in &record.fills_detail {
+            if fill.side_model_p.is_none() {
+                continue;
+            }
+            match fill.side.as_str() {
+                "BuyYes" => yes_notional += fill.notional,
+                "BuyNo" => no_notional += fill.notional,
+                _ => {}
+            }
+        }
+        if yes_notional == 0.0 && no_notional == 0.0 {
+            return;
+        }
+        let predicted_yes = yes_notional >= no_notional;
+        self.market_samples += 1;
+        if predicted_yes == record.yes_resolved {
+            self.market_majority_side_correct += 1;
+        }
+    }
+
+    fn into_summary(self) -> ModelFillQualitySummary {
+        ModelFillQualitySummary {
+            all: self.all.into_quality(),
+            range_ge_050: self.range_ge_050.into_quality(),
+            range_lt_050: self.range_lt_050.into_quality(),
+            whipsaw_ge_035: self.whipsaw_ge_035.into_quality(),
+            whipsaw_lt_035: self.whipsaw_lt_035.into_quality(),
+            market_samples: self.market_samples,
+            market_majority_side_accuracy: if self.market_samples > 0 {
+                self.market_majority_side_correct as f64 / self.market_samples as f64
+            } else {
+                0.0
+            },
+        }
+    }
+}
+
+impl ModelFillQualityBucket {
+    fn push(&mut self, predicted_p: f64, win: bool) {
+        self.fills += 1;
+        if win {
+            self.wins += 1;
+            self.sum_log_loss -= predicted_p.ln();
+        } else {
+            self.sum_log_loss -= (1.0 - predicted_p).ln();
+        }
+        let outcome = if win { 1.0 } else { 0.0 };
+        self.sum_predicted_p += predicted_p;
+        self.sum_brier += (predicted_p - outcome).powi(2);
+    }
+
+    fn into_quality(self) -> ModelFillQuality {
+        ModelFillQuality {
+            fills: self.fills,
+            hit_rate: if self.fills > 0 {
+                self.wins as f64 / self.fills as f64
+            } else {
+                0.0
+            },
+            avg_predicted_p: if self.fills > 0 {
+                self.sum_predicted_p / self.fills as f64
+            } else {
+                0.0
+            },
+            brier: if self.fills > 0 {
+                self.sum_brier / self.fills as f64
+            } else {
+                0.0
+            },
+            log_loss: if self.fills > 0 {
+                self.sum_log_loss / self.fills as f64
+            } else {
+                0.0
+            },
+        }
+    }
 }
 
 impl FillTagAccumulator {
@@ -3484,6 +3632,7 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
     let mut total_orders_rejected_model_gate_risk = 0usize;
     let mut total_orders_rejected_model_gate_edge = 0usize;
     let mut tag_fills: HashMap<String, FillTagAccumulator> = HashMap::new();
+    let mut model_fill_quality = ModelFillQualityAccumulator::default();
     let mut bonereaper_v2_gate_stats: Option<BonereaperV2GateStats> = None;
     let first_start_equity = records
         .first()
@@ -3522,7 +3671,9 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
                 .entry(fill.tag.clone())
                 .or_default()
                 .push(fill, pnl);
+            model_fill_quality.push_fill(fill, r.yes_resolved);
         }
+        model_fill_quality.push_market_majority(r);
         if let Some(stats) = r.bonereaper_v2_gate_stats {
             bonereaper_v2_gate_stats
                 .get_or_insert_with(BonereaperV2GateStats::default)
@@ -3629,6 +3780,7 @@ fn aggregate_for_strategy(records: &[&StrategyMarketResult]) -> StrategyAggregat
             0.0
         },
         by_fill_tag,
+        model_fill_quality: model_fill_quality.into_summary(),
         bonereaper_v2_gate_stats,
     }
 }
@@ -3653,6 +3805,14 @@ fn fill_resolution_pnl(fill: &crate::runner::Fill, yes_resolved: bool) -> f64 {
         _ => 0.0,
     };
     payout - fill.notional + fill.rebate_usdc
+}
+
+fn buy_fill_won(fill: &crate::runner::Fill, yes_resolved: bool) -> Option<bool> {
+    match fill.side.as_str() {
+        "BuyYes" => Some(yes_resolved),
+        "BuyNo" => Some(!yes_resolved),
+        _ => None,
+    }
 }
 
 fn aggregate(results: &[MarketResult], strategies: &[StratId]) -> WalkForwardSummary {
@@ -4213,6 +4373,105 @@ model_btc_whipsaw_risk_weight = 0.31
             .expect("high bonereaper missing");
         assert_eq!(high_bonereaper.total_pnl_usdc, -2.0);
         assert_eq!(reactive.sharpe_ratio, 0.0);
+    }
+
+    fn test_fill(
+        side: &str,
+        side_model_p: f32,
+        notional: f64,
+        range: f32,
+        whipsaw: f32,
+    ) -> crate::runner::Fill {
+        crate::runner::Fill {
+            ts_ns: 0,
+            side: side.to_string(),
+            shares: 10.0,
+            price: (notional / 10.0) as f32,
+            notional,
+            tag: "test".to_string(),
+            maker: false,
+            rebate_usdc: 0.0,
+            slippage_bps: 0.0,
+            yes_mid: Some(0.50),
+            yes_bid: Some(0.49),
+            yes_ask: Some(0.51),
+            side_model_p: Some(side_model_p),
+            side_edge_vs_mid: Some(side_model_p - 0.50),
+            side_edge_vs_fill: Some(side_model_p - (notional / 10.0) as f32),
+            direction_score: Some(0.40),
+            confidence_score: Some(0.75),
+            calibrated_p: Some(side_model_p),
+            risk_score: Some(0.30),
+            market_yes_range_so_far: Some(range),
+            seconds_since_open: Some(240.0),
+            seconds_to_close: Some(60.0),
+            regime_whipsaw_score: Some(whipsaw),
+            regime_path_efficiency: Some(0.70),
+            regime_reversal_pressure: Some(0.20),
+            regime_sign_flip_rate: Some(0.10),
+            regime_realized_vol_180s_bps: Some(25.0),
+        }
+    }
+
+    fn strategy_result_with_fills(
+        yes_resolved: bool,
+        fills_detail: Vec<crate::runner::Fill>,
+    ) -> StrategyMarketResult {
+        let filled_notional_usdc = fills_detail.iter().map(|fill| fill.notional).sum::<f64>();
+        let filled_shares = fills_detail.iter().map(|fill| fill.shares).sum::<f64>();
+        StrategyMarketResult {
+            orders_submitted: fills_detail.len(),
+            orders_filled: fills_detail.len(),
+            orders_filled_taker: fills_detail.len(),
+            orders_filled_maker: 0,
+            orders_rejected_model_gate: 0,
+            orders_rejected_model_gate_confidence: 0,
+            orders_rejected_model_gate_risk: 0,
+            orders_rejected_model_gate_edge: 0,
+            pnl_usdc: 0.0,
+            start_equity_usdc: 100.0,
+            end_equity_usdc: 100.0,
+            max_drawdown_pct: 0.0,
+            fills: fills_detail.len(),
+            maker_rebates_usdc: 0.0,
+            requested_shares: filled_shares,
+            filled_shares,
+            fill_shares_ratio: if filled_shares > 0.0 { 1.0 } else { 0.0 },
+            requested_notional_usdc: filled_notional_usdc,
+            filled_notional_usdc,
+            fill_notional_ratio: if filled_notional_usdc > 0.0 { 1.0 } else { 0.0 },
+            avg_slippage_bps: 0.0,
+            clip_used_usdc: filled_notional_usdc,
+            yes_resolved,
+            fills_detail,
+            bonereaper_v2_gate_stats: None,
+            model_training_samples: vec![],
+        }
+    }
+
+    #[test]
+    fn aggregate_reports_model_fill_quality() {
+        let win_yes = test_fill("BuyYes", 0.80, 8.0, 0.60, 0.40);
+        let win_no = test_fill("BuyNo", 0.70, 7.0, 0.40, 0.20);
+        let lose_yes = test_fill("BuyYes", 0.90, 9.0, 0.60, 0.50);
+        let first = strategy_result_with_fills(true, vec![win_yes]);
+        let second = strategy_result_with_fills(false, vec![win_no, lose_yes]);
+        let records = vec![&first, &second];
+
+        let agg = aggregate_for_strategy(&records);
+        let quality = &agg.model_fill_quality;
+
+        assert_eq!(quality.all.fills, 3);
+        assert!((quality.all.hit_rate - 2.0 / 3.0).abs() < 1e-12);
+        assert!((quality.all.avg_predicted_p - 0.80).abs() < 1e-6);
+        assert!((quality.all.brier - ((0.04 + 0.09 + 0.81) / 3.0)).abs() < 1e-6);
+        assert!(quality.all.log_loss > 0.95 && quality.all.log_loss < 0.97);
+        assert_eq!(quality.range_ge_050.fills, 2);
+        assert_eq!(quality.range_lt_050.fills, 1);
+        assert_eq!(quality.whipsaw_ge_035.fills, 2);
+        assert_eq!(quality.whipsaw_lt_035.fills, 1);
+        assert_eq!(quality.market_samples, 2);
+        assert!((quality.market_majority_side_accuracy - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]
