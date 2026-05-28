@@ -2066,6 +2066,44 @@ async fn walk_forward(
         prof.apply_to_walkforward_config(&mut wf_cfg);
     }
 
+    let effective_config = serde_json::json!({
+        "replay_sample_ms": wf_cfg.replay_sample_ms,
+        "starting_cash_usdc": wf_cfg.starting_cash_usdc,
+        "clip_fraction_of_equity": wf_cfg.clip_fraction_of_equity,
+        "max_clip_usdc": wf_cfg.max_clip_usdc,
+        "max_order_clip_multiplier": wf_cfg.max_order_clip_multiplier,
+        "max_per_market_exposure_usdc": wf_cfg.max_per_market_exposure_usdc,
+        "br2_late_confirm_min_model_edge": wf_cfg.br2_late_confirm_min_model_edge,
+        "br2_late_confirm_min_model_confidence": wf_cfg.br2_late_confirm_min_model_confidence,
+        "br2_late_confirm_max_model_risk": wf_cfg.br2_late_confirm_max_model_risk,
+        "br2_late_favourite_min_model_edge": wf_cfg.br2_late_favourite_min_model_edge,
+        "br2_late_favourite_high_cert_min_model_edge": wf_cfg.br2_late_favourite_high_cert_min_model_edge,
+        "br2_late_favourite_high_cert_full_clip_edge": wf_cfg.br2_late_favourite_high_cert_full_clip_edge,
+        "br2_late_favourite_min_model_confidence": wf_cfg.br2_late_favourite_min_model_confidence,
+        "br2_late_favourite_max_model_risk": wf_cfg.br2_late_favourite_max_model_risk,
+        "br2_late_favourite_min_model_side_p": wf_cfg.br2_late_favourite_min_model_side_p,
+        "br2_late_favourite_sweep_depth": wf_cfg.br2_late_favourite_sweep_depth,
+        "br2_late_favourite_max_clips": wf_cfg.br2_late_favourite_max_clips,
+        "br2_tail_budget_favourite_spend_frac": wf_cfg.br2_tail_budget_favourite_spend_frac,
+        "br2_tail_budget_favourite_upside_frac": wf_cfg.br2_tail_budget_favourite_upside_frac,
+        "br2_tail_target_favourite_loss_coverage_frac": wf_cfg.br2_tail_target_favourite_loss_coverage_frac,
+        "model_gate_min_edge": wf_cfg.model_gate_min_edge,
+        "model_btc_whipsaw_risk_weight": wf_cfg.model_btc_whipsaw_risk_weight,
+        "model_btc_path_inefficiency_risk_weight": wf_cfg.model_btc_path_inefficiency_risk_weight,
+        "model_btc_reversal_pressure_risk_weight": wf_cfg.model_btc_reversal_pressure_risk_weight,
+    });
+    tracing::info!(
+        br2_late_confirm_min_model_edge = wf_cfg.br2_late_confirm_min_model_edge,
+        br2_late_favourite_min_model_edge = wf_cfg.br2_late_favourite_min_model_edge,
+        br2_late_favourite_high_cert_min_model_edge =
+            wf_cfg.br2_late_favourite_high_cert_min_model_edge,
+        br2_late_favourite_high_cert_full_clip_edge =
+            wf_cfg.br2_late_favourite_high_cert_full_clip_edge,
+        br2_tail_budget_favourite_spend_frac = wf_cfg.br2_tail_budget_favourite_spend_frac,
+        replay_sample_ms = wf_cfg.replay_sample_ms,
+        "effective walk-forward profile"
+    );
+
     tracing::info!(markets = markets.len(), "starting walk-forward");
     let started = Instant::now();
     let (results, summary) = run_walkforward(&store, &markets, &wf_cfg).await?;
@@ -2090,6 +2128,7 @@ async fn walk_forward(
                 "git_sha": std::process::Command::new("git").args(["rev-parse", "HEAD"]).output().ok().and_then(|o| String::from_utf8(o.stdout).ok()).map(|s| s.trim().to_string()),
                 "timestamp": chrono::Utc::now().to_rfc3339(),
                 "command": std::env::args().collect::<Vec<_>>(),
+                "effective_config": effective_config,
             });
             if let Ok(mut f) = std::fs::File::create(&manifest_path) {
                 let _ = writeln!(

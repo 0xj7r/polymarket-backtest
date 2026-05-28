@@ -39,6 +39,7 @@ PROFILE_PATH=""
 STARTING_CASH="1000"
 MAX_CLIP="100"
 MAX_ORDER_CLIP_MULTIPLIER="6.0"
+MAX_PER_MARKET_EXPOSURE_FRAC=""
 KELLY="0.25"
 CLIP_DRAWDOWN_SOFT_PCT="1.0"
 CLIP_DRAWDOWN_HARD_PCT="1.0"
@@ -126,6 +127,7 @@ while [ $# -gt 0 ]; do
         --starting-cash) STARTING_CASH="$2"; shift 2 ;;
         --max-clip) MAX_CLIP="$2"; shift 2 ;;
         --max-order-clip-multiplier) MAX_ORDER_CLIP_MULTIPLIER="$2"; shift 2 ;;
+        --max-per-market-exposure-frac) MAX_PER_MARKET_EXPOSURE_FRAC="$2"; shift 2 ;;
         --kelly) KELLY="$2"; shift 2 ;;
         --clip-drawdown-soft-pct) CLIP_DRAWDOWN_SOFT_PCT="$2"; shift 2 ;;
         --clip-drawdown-hard-pct) CLIP_DRAWDOWN_HARD_PCT="$2"; shift 2 ;;
@@ -303,6 +305,10 @@ PROFILE_ARGS=()
 if [ -n "${PROFILE_PATH}" ]; then
   PROFILE_ARGS=(--profile "${PROFILE_PATH}")
 fi
+PER_MARKET_EXPOSURE_FRAC_ARGS=()
+if [ -n "${MAX_PER_MARKET_EXPOSURE_FRAC}" ]; then
+  PER_MARKET_EXPOSURE_FRAC_ARGS=(--max-per-market-exposure-frac "${MAX_PER_MARKET_EXPOSURE_FRAC}")
+fi
 
 IFS=',' read -r -a CLIPS <<< "${CLIP_FRACTIONS}"
 IFS=',' read -r -a GROSS_CAPS <<< "${GROSS_CAPS}"
@@ -311,6 +317,9 @@ FIRST=1
 for CLIP_FRAC in "\${CLIPS[@]}"; do
   for GROSS_CAP in "\${GROSS_CAPS[@]}"; do
     LABEL="clip_\${CLIP_FRAC//./p}_gross_\${GROSS_CAP//./p}"
+    if [ -n "${MAX_PER_MARKET_EXPOSURE_FRAC}" ]; then
+      LABEL="\${LABEL}_expfrac_${MAX_PER_MARKET_EXPOSURE_FRAC//./p}"
+    fi
     OUT_DIR="/opt/pm/results/\${LABEL}"
     mkdir -p "\${OUT_DIR}"
     echo "[\$(date -u)] running \${LABEL}"
@@ -354,6 +363,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --max-clip-usdc "${MAX_CLIP}" \\
       --max-order-clip-multiplier "${MAX_ORDER_CLIP_MULTIPLIER}" \\
       --max-per-market-exposure-usdc "\${GROSS_CAP}" \\
+      "\${PER_MARKET_EXPOSURE_FRAC_ARGS[@]}" \\
       --kelly-fraction "${KELLY}" \\
       --spot-symbol "${SPOT_SYMBOL}" \\
       --use-outcome-label \\

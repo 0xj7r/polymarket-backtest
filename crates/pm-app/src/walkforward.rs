@@ -3953,6 +3953,7 @@ name = "bonereaper_v2"
 replay_sample_ms = 1000
 late_confirm_min_model_edge = 0.025
 late_favourite_max_clips = 8
+late_favourite_min_model_edge = 0.035
 late_favourite_high_cert_full_clip_edge = 0.045
 late_favourite_high_cert_min_model_edge = 0.015
 tail_budget_favourite_spend_frac = 0.20
@@ -3970,6 +3971,7 @@ model_btc_whipsaw_risk_weight = 0.31
         assert_eq!(cfg.br2_late_favourite_max_clips, 8);
         assert_eq!(cfg.replay_sample_ms, 1000);
         assert!((cfg.br2_late_confirm_min_model_edge - 0.025).abs() < f32::EPSILON);
+        assert!((cfg.br2_late_favourite_min_model_edge - 0.035).abs() < f32::EPSILON);
         assert!((cfg.br2_late_favourite_high_cert_full_clip_edge - 0.045).abs() < f32::EPSILON);
         assert!((cfg.br2_late_favourite_high_cert_min_model_edge - 0.015).abs() < f32::EPSILON);
         assert!((cfg.br2_tail_budget_favourite_spend_frac - 0.20).abs() < f32::EPSILON);
