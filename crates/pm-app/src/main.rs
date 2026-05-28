@@ -363,6 +363,27 @@ enum Cmd {
         /// Disable Bonereaper v2's internal model gates for pure heuristic strategy tests.
         #[arg(long, default_value_t = false)]
         br2_disable_internal_model_gates: bool,
+        /// Bonereaper v2 market-neutral maker participation clip multiplier.
+        #[arg(long, default_value = "0.0")]
+        br2_participation_clip_frac: f32,
+        /// Bonereaper v2 maximum paired maker entry cost.
+        #[arg(long, default_value = "0.99")]
+        br2_participation_max_pair_cost: f32,
+        /// Bonereaper v2 maximum participation quote count per leg.
+        #[arg(long, default_value = "500")]
+        br2_participation_max_orders_per_leg: usize,
+        /// Bonereaper v2 participation inventory hard cap in shares.
+        #[arg(long, default_value = "25.0")]
+        br2_participation_max_inventory_delta_shares: f64,
+        /// Bonereaper v2 participation inventory repair threshold in shares.
+        #[arg(long, default_value = "5.0")]
+        br2_participation_repair_inventory_delta_shares: f64,
+        /// Bonereaper v2 participation same-leg quote refresh seconds.
+        #[arg(long, default_value = "0.50")]
+        br2_participation_refresh_secs: f32,
+        /// Bonereaper v2 seconds before close where participation maker quotes stop.
+        #[arg(long, default_value = "20.0")]
+        br2_participation_stop_secs_before_close: f32,
         /// Bonereaper v2 minimum composite direction for early/mid/late lanes.
         #[arg(long, default_value = "0.10")]
         br2_min_composite_direction: f32,
@@ -1059,6 +1080,13 @@ async fn main() -> Result<()> {
             clip_drawdown_hard_pct,
             clip_drawdown_min_multiplier,
             br2_disable_internal_model_gates,
+            br2_participation_clip_frac,
+            br2_participation_max_pair_cost,
+            br2_participation_max_orders_per_leg,
+            br2_participation_max_inventory_delta_shares,
+            br2_participation_repair_inventory_delta_shares,
+            br2_participation_refresh_secs,
+            br2_participation_stop_secs_before_close,
             br2_min_composite_direction,
             br2_early_clip_frac,
             br2_mid_clip_frac,
@@ -1193,6 +1221,13 @@ async fn main() -> Result<()> {
                 clip_drawdown_hard_pct,
                 clip_drawdown_min_multiplier,
                 br2_disable_internal_model_gates,
+                br2_participation_clip_frac,
+                br2_participation_max_pair_cost,
+                br2_participation_max_orders_per_leg,
+                br2_participation_max_inventory_delta_shares,
+                br2_participation_repair_inventory_delta_shares,
+                br2_participation_refresh_secs,
+                br2_participation_stop_secs_before_close,
                 br2_min_composite_direction,
                 br2_early_clip_frac,
                 br2_mid_clip_frac,
@@ -1861,6 +1896,13 @@ async fn walk_forward(
     clip_drawdown_hard_pct: f64,
     clip_drawdown_min_multiplier: f64,
     br2_disable_internal_model_gates: bool,
+    br2_participation_clip_frac: f32,
+    br2_participation_max_pair_cost: f32,
+    br2_participation_max_orders_per_leg: usize,
+    br2_participation_max_inventory_delta_shares: f64,
+    br2_participation_repair_inventory_delta_shares: f64,
+    br2_participation_refresh_secs: f32,
+    br2_participation_stop_secs_before_close: f32,
     br2_min_composite_direction: f32,
     br2_early_clip_frac: f32,
     br2_mid_clip_frac: f32,
@@ -2064,6 +2106,13 @@ async fn walk_forward(
         clip_drawdown_hard_pct,
         clip_drawdown_min_multiplier,
         br2_disable_internal_model_gates,
+        br2_participation_clip_frac,
+        br2_participation_max_pair_cost,
+        br2_participation_max_orders_per_leg,
+        br2_participation_max_inventory_delta_shares,
+        br2_participation_repair_inventory_delta_shares,
+        br2_participation_refresh_secs,
+        br2_participation_stop_secs_before_close,
         br2_min_composite_direction,
         br2_early_clip_frac,
         br2_mid_clip_frac,
@@ -2189,6 +2238,13 @@ async fn walk_forward(
         "max_clip_usdc": wf_cfg.max_clip_usdc,
         "max_order_clip_multiplier": wf_cfg.max_order_clip_multiplier,
         "max_per_market_exposure_usdc": wf_cfg.max_per_market_exposure_usdc,
+        "br2_participation_clip_frac": wf_cfg.br2_participation_clip_frac,
+        "br2_participation_max_pair_cost": wf_cfg.br2_participation_max_pair_cost,
+        "br2_participation_max_orders_per_leg": wf_cfg.br2_participation_max_orders_per_leg,
+        "br2_participation_max_inventory_delta_shares": wf_cfg.br2_participation_max_inventory_delta_shares,
+        "br2_participation_repair_inventory_delta_shares": wf_cfg.br2_participation_repair_inventory_delta_shares,
+        "br2_participation_refresh_secs": wf_cfg.br2_participation_refresh_secs,
+        "br2_participation_stop_secs_before_close": wf_cfg.br2_participation_stop_secs_before_close,
         "br2_late_confirm_min_model_edge": wf_cfg.br2_late_confirm_min_model_edge,
         "br2_late_confirm_min_model_confidence": wf_cfg.br2_late_confirm_min_model_confidence,
         "br2_late_confirm_max_model_risk": wf_cfg.br2_late_confirm_max_model_risk,

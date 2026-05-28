@@ -176,6 +176,20 @@ pub struct BonereaperV2Config {
     pub tick: f64,
     pub disable_internal_model_gates: bool,
 
+    // Market-neutral participation sleeve. This is the Bonereaper-like
+    // all-market layer: small paired maker bids on both outcomes when pair cost
+    // is attractive, with inventory repair before directional exposure grows.
+    pub participation_clip_frac: f32,
+    pub participation_start_secs: f32,
+    pub participation_stop_secs_before_close: f32,
+    pub participation_max_pair_cost: f32,
+    pub participation_min_price: f32,
+    pub participation_max_price: f32,
+    pub participation_max_inventory_delta_shares: f64,
+    pub participation_repair_inventory_delta_shares: f64,
+    pub participation_refresh_secs: f32,
+    pub participation_max_orders_per_leg: usize,
+
     pub early_phase_end_secs: f32,
     pub mid_phase_end_secs: f32,
 
@@ -319,6 +333,16 @@ impl Default for BonereaperV2Config {
             max_clip_usdc: 5.0,
             tick: 0.01,
             disable_internal_model_gates: false,
+            participation_clip_frac: 0.0,
+            participation_start_secs: 0.0,
+            participation_stop_secs_before_close: 20.0,
+            participation_max_pair_cost: 0.99,
+            participation_min_price: 0.03,
+            participation_max_price: 0.97,
+            participation_max_inventory_delta_shares: 25.0,
+            participation_repair_inventory_delta_shares: 5.0,
+            participation_refresh_secs: 0.50,
+            participation_max_orders_per_leg: 500,
             early_phase_end_secs: 30.0,
             mid_phase_end_secs: 240.0,
             min_composite_direction: 0.10,
@@ -475,6 +499,10 @@ pub struct BonereaperV2 {
     last_tail_ns: i64,
     tail_notional_emitted: f64,
     gate_stats: BonereaperV2GateStats,
+    participation_yes_emitted: usize,
+    participation_no_emitted: usize,
+    last_participation_yes_ns: i64,
+    last_participation_no_ns: i64,
 }
 
 impl BonereaperV2 {
@@ -506,6 +534,10 @@ impl BonereaperV2 {
             last_tail_ns: i64::MIN / 2,
             tail_notional_emitted: 0.0,
             gate_stats: BonereaperV2GateStats::default(),
+            participation_yes_emitted: 0,
+            participation_no_emitted: 0,
+            last_participation_yes_ns: i64::MIN / 2,
+            last_participation_no_ns: i64::MIN / 2,
         }
     }
 
@@ -581,6 +613,23 @@ fn opposite_buy_side(side: Side) -> Option<Side> {
         Side::BuyYes => Some(Side::BuyNo),
         Side::BuyNo => Some(Side::BuyYes),
         _ => None,
+    }
+}
+
+fn maker_participation_native_prices(event: &ReplayEvent, tick: f64) -> Option<(f64, f64)> {
+    if event.yes_bid <= 0.0
+        || event.yes_ask <= 0.0
+        || event.yes_bid >= event.yes_ask
+        || event.yes_ask >= 1.0
+    {
+        return None;
+    }
+    let yes_px = event.yes_ask as f64 - tick;
+    let no_px = (1.0 - event.yes_bid as f64) - tick;
+    if yes_px.is_finite() && no_px.is_finite() && yes_px > 0.0 && no_px > 0.0 {
+        Some((yes_px, no_px))
+    } else {
+        None
     }
 }
 
@@ -1013,6 +1062,73 @@ impl Strategy for BonereaperV2 {
         }
 
         let mut orders: Vec<OrderRequest> = Vec::new();
+
+        // ---- LANE 0: Market-neutral maker participation ----
+        // This is intentionally separate from directional commitment. It posts
+        // small paired bids when the implied pair cost is attractive and uses
+        // inventory repair to avoid getting stranded one-sided.
+        let seconds_to_close = BETTING_WINDOW_SECS as f32 - secs_in;
+        if self.cfg.participation_clip_frac > 0.0
+            && secs_in >= self.cfg.participation_start_secs
+            && seconds_to_close > self.cfg.participation_stop_secs_before_close
+        {
+            if let Some((yes_px, no_px)) = maker_participation_native_prices(event, self.cfg.tick) {
+                let pair_cost = yes_px + no_px;
+                if pair_cost <= self.cfg.participation_max_pair_cost as f64 {
+                    let delta = ctx.yes_shares - ctx.no_shares;
+                    let repair_yes = delta <= -self.cfg.participation_repair_inventory_delta_shares;
+                    let repair_no = delta >= self.cfg.participation_repair_inventory_delta_shares;
+                    let too_long_yes = delta >= self.cfg.participation_max_inventory_delta_shares;
+                    let too_long_no = -delta >= self.cfg.participation_max_inventory_delta_shares;
+                    let refresh_ns =
+                        (self.cfg.participation_refresh_secs.max(0.0) as f64 * 1e9) as i64;
+                    let clip = self.cfg.max_clip_usdc * self.cfg.participation_clip_frac as f64;
+                    let can_yes = !too_long_yes
+                        && !repair_no
+                        && self.participation_yes_emitted
+                            < self.cfg.participation_max_orders_per_leg
+                        && event.ts_ns - self.last_participation_yes_ns >= refresh_ns
+                        && yes_px as f32 >= self.cfg.participation_min_price
+                        && yes_px as f32 <= self.cfg.participation_max_price;
+                    let can_no = !too_long_no
+                        && !repair_yes
+                        && self.participation_no_emitted
+                            < self.cfg.participation_max_orders_per_leg
+                        && event.ts_ns - self.last_participation_no_ns >= refresh_ns
+                        && no_px as f32 >= self.cfg.participation_min_price
+                        && no_px as f32 <= self.cfg.participation_max_price;
+
+                    if can_yes {
+                        let shares = shares_capped(clip, yes_px);
+                        if shares > 0.0 {
+                            orders.push(OrderRequest {
+                                side: Side::BuyYes,
+                                shares,
+                                max_depth: 1,
+                                limit_price: Some(yes_px as f32),
+                                tag: "br2_participation_yes",
+                            });
+                            self.participation_yes_emitted += 1;
+                            self.last_participation_yes_ns = event.ts_ns;
+                        }
+                    }
+                    if can_no {
+                        let shares = shares_capped(clip, no_px);
+                        if shares > 0.0 {
+                            orders.push(OrderRequest {
+                                side: Side::BuyNo,
+                                shares,
+                                max_depth: 1,
+                                limit_price: Some(no_px as f32),
+                                tag: "br2_participation_no",
+                            });
+                            self.participation_no_emitted += 1;
+                            self.last_participation_no_ns = event.ts_ns;
+                        }
+                    }
+                }
+            }
+        }
 
         // ---- LANE 1: Early directional probe ----
         if !self.early_emitted
@@ -1747,6 +1863,56 @@ mod tests {
         assert_eq!(late_favourite_ladder_levels(0.84, 200.0), 3);
         assert_eq!(late_favourite_ladder_levels(0.91, 120.0), 4);
         assert_eq!(late_favourite_ladder_levels(0.91, 190.0), 5);
+    }
+
+    #[test]
+    fn participation_sleeve_emits_paired_maker_quotes_when_pair_cost_is_good() {
+        let close_ns = 300_000_000_000;
+        let mut strat = BonereaperV2::new(BonereaperV2Config {
+            max_clip_usdc: 10.0,
+            participation_clip_frac: 0.50,
+            participation_max_pair_cost: 0.99,
+            ..BonereaperV2Config::default()
+        });
+        let out = strat.on_event(
+            &test_event(10_000_000_000, 0.495, 0.49, 0.50),
+            &test_ctx(close_ns, 0.0, 0.55),
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+        );
+        assert_eq!(out.orders.len(), 2);
+        assert!(
+            out.orders
+                .iter()
+                .any(|o| o.tag == "br2_participation_yes" && o.limit_price == Some(0.49))
+        );
+        assert!(
+            out.orders
+                .iter()
+                .any(|o| o.tag == "br2_participation_no" && o.limit_price == Some(0.50))
+        );
+    }
+
+    #[test]
+    fn participation_sleeve_repairs_inventory_instead_of_adding_heavy_side() {
+        let close_ns = 300_000_000_000;
+        let mut ctx = test_ctx(close_ns, 0.0, 0.55);
+        ctx.yes_shares = 20.0;
+        let mut strat = BonereaperV2::new(BonereaperV2Config {
+            max_clip_usdc: 10.0,
+            participation_clip_frac: 0.50,
+            participation_max_pair_cost: 0.99,
+            participation_repair_inventory_delta_shares: 5.0,
+            ..BonereaperV2Config::default()
+        });
+        let out = strat.on_event(
+            &test_event(10_000_000_000, 0.495, 0.49, 0.50),
+            &ctx,
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+        );
+        assert_eq!(out.orders.len(), 1);
+        assert_eq!(out.orders[0].tag, "br2_participation_no");
     }
 
     #[test]

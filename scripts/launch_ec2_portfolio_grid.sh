@@ -48,6 +48,13 @@ CLIP_DRAWDOWN_SOFT_PCT="1.0"
 CLIP_DRAWDOWN_HARD_PCT="1.0"
 CLIP_DRAWDOWN_MIN_MULTIPLIER="0.0"
 BR2_DISABLE_INTERNAL_MODEL_GATES="0"
+BR2_PARTICIPATION_CLIP_FRAC="0.0"
+BR2_PARTICIPATION_MAX_PAIR_COST="0.99"
+BR2_PARTICIPATION_MAX_ORDERS_PER_LEG="500"
+BR2_PARTICIPATION_MAX_INVENTORY_DELTA_SHARES="25.0"
+BR2_PARTICIPATION_REPAIR_INVENTORY_DELTA_SHARES="5.0"
+BR2_PARTICIPATION_REFRESH_SECS="0.50"
+BR2_PARTICIPATION_STOP_SECS_BEFORE_CLOSE="20.0"
 BR2_MIN_COMPOSITE_DIRECTION="0.10"
 BR2_EARLY_CLIP_FRAC="0.00"
 BR2_MID_CLIP_FRAC="0.00"
@@ -170,6 +177,13 @@ while [ $# -gt 0 ]; do
         --clip-drawdown-hard-pct) CLIP_DRAWDOWN_HARD_PCT="$2"; shift 2 ;;
         --clip-drawdown-min-multiplier) CLIP_DRAWDOWN_MIN_MULTIPLIER="$2"; shift 2 ;;
         --br2-disable-internal-model-gates) BR2_DISABLE_INTERNAL_MODEL_GATES="1"; shift ;;
+        --br2-participation-clip-frac) BR2_PARTICIPATION_CLIP_FRAC="$2"; shift 2 ;;
+        --br2-participation-max-pair-cost) BR2_PARTICIPATION_MAX_PAIR_COST="$2"; shift 2 ;;
+        --br2-participation-max-orders-per-leg) BR2_PARTICIPATION_MAX_ORDERS_PER_LEG="$2"; shift 2 ;;
+        --br2-participation-max-inventory-delta-shares) BR2_PARTICIPATION_MAX_INVENTORY_DELTA_SHARES="$2"; shift 2 ;;
+        --br2-participation-repair-inventory-delta-shares) BR2_PARTICIPATION_REPAIR_INVENTORY_DELTA_SHARES="$2"; shift 2 ;;
+        --br2-participation-refresh-secs) BR2_PARTICIPATION_REFRESH_SECS="$2"; shift 2 ;;
+        --br2-participation-stop-secs-before-close) BR2_PARTICIPATION_STOP_SECS_BEFORE_CLOSE="$2"; shift 2 ;;
         --br2-min-composite-direction) BR2_MIN_COMPOSITE_DIRECTION="$2"; shift 2 ;;
         --br2-early-clip-frac) BR2_EARLY_CLIP_FRAC="$2"; shift 2 ;;
         --br2-mid-clip-frac) BR2_MID_CLIP_FRAC="$2"; shift 2 ;;
@@ -484,6 +498,13 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --clip-drawdown-hard-pct "${CLIP_DRAWDOWN_HARD_PCT}" \\
       --clip-drawdown-min-multiplier "${CLIP_DRAWDOWN_MIN_MULTIPLIER}" \\
       "\${BR2_INTERNAL_MODEL_GATE_ARGS[@]}" \\
+      --br2-participation-clip-frac "${BR2_PARTICIPATION_CLIP_FRAC}" \\
+      --br2-participation-max-pair-cost "${BR2_PARTICIPATION_MAX_PAIR_COST}" \\
+      --br2-participation-max-orders-per-leg "${BR2_PARTICIPATION_MAX_ORDERS_PER_LEG}" \\
+      --br2-participation-max-inventory-delta-shares "${BR2_PARTICIPATION_MAX_INVENTORY_DELTA_SHARES}" \\
+      --br2-participation-repair-inventory-delta-shares "${BR2_PARTICIPATION_REPAIR_INVENTORY_DELTA_SHARES}" \\
+      --br2-participation-refresh-secs "${BR2_PARTICIPATION_REFRESH_SECS}" \\
+      --br2-participation-stop-secs-before-close "${BR2_PARTICIPATION_STOP_SECS_BEFORE_CLOSE}" \\
       --br2-min-composite-direction "${BR2_MIN_COMPOSITE_DIRECTION}" \\
       --br2-early-clip-frac "${BR2_EARLY_CLIP_FRAC}" \\
       --br2-mid-clip-frac "${BR2_MID_CLIP_FRAC}" \\

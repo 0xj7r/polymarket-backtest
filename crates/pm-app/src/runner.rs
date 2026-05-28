@@ -634,7 +634,7 @@ pub fn run_backtest<S: Strategy>(
 
         for req in output.orders {
             let yes_side = order_adds_yes_exposure(req.side);
-            if cfg.enforce_model_gate {
+            if cfg.enforce_model_gate && order_requires_model_gate(req.tag) {
                 let side_edge = pm_model::side_edge_vs_mid(&model_output, event.yes_mid, yes_side)
                     .clamp(0.0, 1.0);
                 if model_output.confidence_score < cfg.model_gate_min_confidence {
@@ -2098,6 +2098,10 @@ fn depth_weighted_fill(event: &ReplayEvent, req: &OrderRequest) -> Option<(f32, 
     Some(((notional / filled) as f32, filled))
 }
 
+fn order_requires_model_gate(tag: &str) -> bool {
+    !tag.starts_with("br2_participation_")
+}
+
 fn fill_respects_limit(side: Side, price: f32, limit_price: Option<f32>) -> bool {
     let Some(limit) = limit_price else {
         return true;
@@ -2813,6 +2817,68 @@ mod tests {
             rep.counters.orders_filled_taker + rep.counters.orders_filled_maker,
             0
         );
+    }
+
+    #[test]
+    fn model_gate_allows_neutral_participation_quotes() {
+        struct ParticipationQuote;
+        impl Strategy for ParticipationQuote {
+            fn on_event(
+                &mut self,
+                _event: &ReplayEvent,
+                ctx: &Ctx,
+                _spot: &SpotHistory,
+                _trades: &TradeHistory,
+            ) -> StrategyOutput {
+                if ctx.events_seen > 1 {
+                    return StrategyOutput::hold();
+                }
+                StrategyOutput::one(OrderRequest {
+                    side: Side::BuyYes,
+                    shares: 10.0,
+                    max_depth: 1,
+                    limit_price: Some(0.45),
+                    tag: "br2_participation_yes",
+                })
+            }
+
+            fn on_event_scored(
+                &mut self,
+                event: &ReplayEvent,
+                ctx: &Ctx,
+                spot: &SpotHistory,
+                trades: &TradeHistory,
+            ) -> (StrategyOutput, Option<ModelOutput>) {
+                (
+                    self.on_event(event, ctx, spot, trades),
+                    Some(ModelOutput {
+                        direction_score: -0.20,
+                        confidence_score: 0.20,
+                        calibrated_p: 0.55,
+                        risk_score: 0.95,
+                    }),
+                )
+            }
+        }
+
+        let events = vec![evt(0, 0.49, 0.51, 200.0)];
+        let cfg = RunnerConfig {
+            enforce_model_gate: true,
+            ..Default::default()
+        };
+        let mut strat = ParticipationQuote;
+        let spot = SpotHistory::default();
+        let rep = run_backtest(
+            &events,
+            &spot,
+            &pm_types::TradeHistory::default(),
+            &mut strat,
+            &cfg,
+        )
+        .unwrap();
+        assert_eq!(rep.counters.orders_submitted, 1);
+        assert_eq!(rep.counters.orders_rejected_model_gate, 0);
+        assert_eq!(rep.counters.resting_orders_cancelled_eom, 1);
     }
 
     #[test]

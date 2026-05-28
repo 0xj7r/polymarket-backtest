@@ -60,6 +60,13 @@ pub struct BonereaperV2Profile {
     /// such as 1000 keep one event per second plus first/last event.
     pub replay_sample_ms: Option<u64>,
     pub disable_internal_model_gates: Option<bool>,
+    pub participation_clip_frac: Option<f32>,
+    pub participation_max_pair_cost: Option<f32>,
+    pub participation_max_orders_per_leg: Option<usize>,
+    pub participation_max_inventory_delta_shares: Option<f64>,
+    pub participation_repair_inventory_delta_shares: Option<f64>,
+    pub participation_refresh_secs: Option<f32>,
+    pub participation_stop_secs_before_close: Option<f32>,
     pub min_composite_direction: Option<f32>,
     pub late_clip_frac: Option<f32>,
     pub late_max_fires: Option<usize>,
@@ -152,6 +159,25 @@ impl BonereaperV2Profile {
             br2_disable_internal_model_gates
         );
         apply!(replay_sample_ms, replay_sample_ms);
+        apply!(participation_clip_frac, br2_participation_clip_frac);
+        apply!(participation_max_pair_cost, br2_participation_max_pair_cost);
+        apply!(
+            participation_max_orders_per_leg,
+            br2_participation_max_orders_per_leg
+        );
+        apply!(
+            participation_max_inventory_delta_shares,
+            br2_participation_max_inventory_delta_shares
+        );
+        apply!(
+            participation_repair_inventory_delta_shares,
+            br2_participation_repair_inventory_delta_shares
+        );
+        apply!(participation_refresh_secs, br2_participation_refresh_secs);
+        apply!(
+            participation_stop_secs_before_close,
+            br2_participation_stop_secs_before_close
+        );
         apply!(min_composite_direction, br2_min_composite_direction);
         apply!(late_clip_frac, br2_late_clip_frac);
         apply!(late_max_fires, br2_late_max_fires);
@@ -430,6 +456,13 @@ pub struct WalkForwardConfig {
     /// preserves hard-stop behavior; non-zero keeps a recovery-sized lane open.
     pub clip_drawdown_min_multiplier: f64,
     pub br2_disable_internal_model_gates: bool,
+    pub br2_participation_clip_frac: f32,
+    pub br2_participation_max_pair_cost: f32,
+    pub br2_participation_max_orders_per_leg: usize,
+    pub br2_participation_max_inventory_delta_shares: f64,
+    pub br2_participation_repair_inventory_delta_shares: f64,
+    pub br2_participation_refresh_secs: f32,
+    pub br2_participation_stop_secs_before_close: f32,
     pub br2_min_composite_direction: f32,
     pub br2_early_clip_frac: f32,
     pub br2_mid_clip_frac: f32,
@@ -595,6 +628,13 @@ impl Default for WalkForwardConfig {
             clip_drawdown_hard_pct: 1.0,
             clip_drawdown_min_multiplier: 0.0,
             br2_disable_internal_model_gates: false,
+            br2_participation_clip_frac: 0.0,
+            br2_participation_max_pair_cost: 0.99,
+            br2_participation_max_orders_per_leg: 500,
+            br2_participation_max_inventory_delta_shares: 25.0,
+            br2_participation_repair_inventory_delta_shares: 5.0,
+            br2_participation_refresh_secs: 0.50,
+            br2_participation_stop_secs_before_close: 20.0,
             br2_min_composite_direction: 0.10,
             br2_early_clip_frac: 0.00,
             br2_mid_clip_frac: 0.00,
@@ -804,6 +844,13 @@ pub struct SummaryRunConfig {
     pub clip_drawdown_hard_pct: f64,
     pub clip_drawdown_min_multiplier: f64,
     pub br2_disable_internal_model_gates: bool,
+    pub br2_participation_clip_frac: f32,
+    pub br2_participation_max_pair_cost: f32,
+    pub br2_participation_max_orders_per_leg: usize,
+    pub br2_participation_max_inventory_delta_shares: f64,
+    pub br2_participation_repair_inventory_delta_shares: f64,
+    pub br2_participation_refresh_secs: f32,
+    pub br2_participation_stop_secs_before_close: f32,
     pub br2_min_composite_direction: f32,
     pub br2_early_clip_frac: f32,
     pub br2_mid_clip_frac: f32,
@@ -3225,6 +3272,15 @@ fn run_one_strategy(
                 bankroll_usdc: bankroll,
                 max_clip_usdc: clip,
                 disable_internal_model_gates: cfg.br2_disable_internal_model_gates,
+                participation_clip_frac: cfg.br2_participation_clip_frac,
+                participation_max_pair_cost: cfg.br2_participation_max_pair_cost,
+                participation_max_orders_per_leg: cfg.br2_participation_max_orders_per_leg,
+                participation_max_inventory_delta_shares: cfg
+                    .br2_participation_max_inventory_delta_shares,
+                participation_repair_inventory_delta_shares: cfg
+                    .br2_participation_repair_inventory_delta_shares,
+                participation_refresh_secs: cfg.br2_participation_refresh_secs,
+                participation_stop_secs_before_close: cfg.br2_participation_stop_secs_before_close,
                 min_composite_direction: cfg.br2_min_composite_direction,
                 early_clip_frac: cfg.br2_early_clip_frac,
                 mid_clip_frac: cfg.br2_mid_clip_frac,
@@ -4023,6 +4079,15 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         clip_drawdown_hard_pct: cfg.clip_drawdown_hard_pct,
         clip_drawdown_min_multiplier: cfg.clip_drawdown_min_multiplier,
         br2_disable_internal_model_gates: cfg.br2_disable_internal_model_gates,
+        br2_participation_clip_frac: cfg.br2_participation_clip_frac,
+        br2_participation_max_pair_cost: cfg.br2_participation_max_pair_cost,
+        br2_participation_max_orders_per_leg: cfg.br2_participation_max_orders_per_leg,
+        br2_participation_max_inventory_delta_shares: cfg
+            .br2_participation_max_inventory_delta_shares,
+        br2_participation_repair_inventory_delta_shares: cfg
+            .br2_participation_repair_inventory_delta_shares,
+        br2_participation_refresh_secs: cfg.br2_participation_refresh_secs,
+        br2_participation_stop_secs_before_close: cfg.br2_participation_stop_secs_before_close,
         br2_min_composite_direction: cfg.br2_min_composite_direction,
         br2_early_clip_frac: cfg.br2_early_clip_frac,
         br2_mid_clip_frac: cfg.br2_mid_clip_frac,
