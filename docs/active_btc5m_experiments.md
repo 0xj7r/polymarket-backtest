@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-28 22:45 UTC.
+Last updated: 2026-05-28 23:05 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -19,9 +19,9 @@ These are active checkpoints, not final full-history results.
      enabled, and strong compounded PnL so far.
 2. `cap3k_btc_5m_tail08_lc_range50_exact_profile`
    - Run: `20260528T212132Z-portfolio-grid-68579`
-   - Markets: `11,750`
-   - PnL: `+$12,806.39`
-   - Return: `+426.88%`
+   - Markets: `12,250`
+   - PnL: `+$12,814.25`
+   - Return: `+427.14%`
    - Max drawdown: `20.07%`
    - Reason to keep: exact profile scaled to the current wallet size.
 3. `cap5k_btc_5m_tail08_lc_range50_exact`
@@ -40,6 +40,56 @@ These are active checkpoints, not final full-history results.
    - Max drawdown: `17.88%`
    - Reason to keep: no-tail PnL ceiling and regression baseline; not the
      preferred production candidate because it lacks convex tail coverage.
+
+## Tail Hedge Readout
+
+Latest 1K base tail08 checkpoint:
+`20260528T211443Z-portfolio-grid-55343`, `12,250` markets.
+
+- Late-favourite notional: `$47,742.74`
+- Directional notional across favourite/confirm/high-skew lanes: `$111,454.23`
+- Tail spend: `$246.47`
+- Tail shares: `3,971.3`
+- Tail PnL: `-$71.49`
+- Tail spend as share of favourite notional: `0.52%`
+- Tail spend as share of all directional notional: `0.22%`
+- Tail share count as share of favourite share count: `6.41%`
+- Favourite positions with opposite tail coverage: `65 / 752`, `8.64%`
+- Losing favourite positions with opposite tail coverage: `5 / 143`, `3.50%`
+- Net hedge cover across all losing favourite losses: `1.10%`
+- Net hedge cover when a losing favourite actually had tail coverage: `65.56%`
+
+Interpretation: the tail lane is currently too selective to protect the whole
+favourite book. The per-fire hedge is meaningful when it exists, but it appears
+on too few losing favourite positions. The current issue is coverage frequency,
+not the hedge math on filled tails.
+
+Latest 1K coverage variant checkpoint:
+`20260528T222500Z-portfolio-grid-89380`, `3,500` markets.
+
+- PnL: `+$2,993.01`
+- Max drawdown: `18.28%`
+- Tail spend: `$151.25`
+- Tail shares: `2,333.9`
+- Tail PnL: `+$43.10`
+- Tail spend as share of favourite notional: `0.86%`
+- Tail spend as share of all directional notional: `0.42%`
+- Favourite positions with opposite tail coverage: `39 / 372`, `10.48%`
+- Losing favourite positions with opposite tail coverage: `5 / 70`, `7.14%`
+- Net hedge cover across all losing favourite losses: `4.51%`
+- Net hedge cover when a losing favourite actually had tail coverage: `98.20%`
+
+Same-prefix comparison at `3,500` markets:
+
+- Base tail08: tail spend `$100.22`, tail PnL `+$27.47`, all-losing-fav net
+  cover `3.02%`, covered-losing-fav net cover `65.56%`
+- Coverage variant: tail spend `$151.25`, tail PnL `+$43.10`,
+  all-losing-fav net cover `4.51%`, covered-losing-fav net cover `98.20%`
+
+Interpretation: the focused coverage variant is spending about `$51` more over
+the same first `3,500` markets and is getting meaningfully more hedge share
+weight without yet creating tail bleed. This remains provisional until it runs
+deeper into the later-history drawdown regimes.
 
 ## Next Focused Tail-Coverage Test
 
