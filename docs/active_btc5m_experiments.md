@@ -325,6 +325,21 @@ Interpretation: the range gate remains strongly positive, but the current
 valid as convex insurance, but this result supports testing a cheaper tail cap
 such as `tail_max_ask = 0.08` or reducing only the 8-10c rung.
 
+Cheaper-tail exact relaunches:
+
+- `8c` cap:
+  - Run: `20260528T205238Z-portfolio-grid-12673`
+  - Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_tail08_lc_range50_exact`
+  - Instance: `i-0261b49082277a123`
+- `6c` cap:
+  - Run: `20260528T205254Z-portfolio-grid-13193`
+  - Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_tail06_lc_range50_exact`
+  - Instance: `i-0666effd4c4f595da`
+
+Both reuse the frozen meta-calibrator and prebuilt Linux `pm-app` binary. The
+only intentional differences versus the 10c exact tail run are
+`br2_late_confirm_max_observed_range = 0.50` and `br2_tail_max_ask`.
+
 ### No-Tail Late-Confirm Range-Gated Isolation
 
 Run: `20260528T192139Z-portfolio-grid-37354`
