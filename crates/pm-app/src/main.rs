@@ -538,7 +538,7 @@ enum Cmd {
         #[arg(long, default_value = "0.0")]
         br2_tail_min_observed_range: f32,
         /// Bonereaper v2 tail target coverage of favourite loss, disabled at 0.
-        #[arg(long, default_value = "0.00")]
+        #[arg(long, default_value = "0.50")]
         br2_tail_target_favourite_loss_coverage_frac: f32,
         /// Bonereaper v2 higher tail coverage target for high-cert favourite reversal windows.
         #[arg(long, default_value = "0.00")]
@@ -559,7 +559,7 @@ enum Cmd {
         #[arg(long, default_value = "0.02")]
         br2_tail_min_skew_step: f32,
         /// Bonereaper v2 tail budget cap as fraction of favourite spend.
-        #[arg(long, default_value = "0.05")]
+        #[arg(long, default_value = "0.20")]
         br2_tail_budget_favourite_spend_frac: f32,
         /// Bonereaper v2 tail budget cap as fraction of favourite upside.
         #[arg(long, default_value = "0.25")]

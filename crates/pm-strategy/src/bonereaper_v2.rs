@@ -417,12 +417,12 @@ impl Default for BonereaperV2Config {
             tail_min_seconds_to_close: 10.0,
             tail_min_favourite_unrealized_edge: 0.0,
             tail_min_observed_range: 0.0,
-            tail_target_favourite_loss_coverage_frac: 0.0,
+            tail_target_favourite_loss_coverage_frac: 0.50,
             tail_reversal_coverage_frac: 0.0,
             tail_reversal_min_seconds_to_close: 10.0,
             tail_reversal_max_seconds_to_close: 35.0,
             tail_reversal_min_favourite_ask: 0.895,
-            tail_budget_favourite_spend_frac: 0.05,
+            tail_budget_favourite_spend_frac: 0.20,
             tail_budget_favourite_upside_frac: 0.25,
         }
     }
