@@ -41,6 +41,35 @@ These are active checkpoints, not final full-history results.
    - Reason to keep: no-tail PnL ceiling and regression baseline; not the
      preferred production candidate because it lacks convex tail coverage.
 
+## Next Focused Tail-Coverage Test
+
+Do not launch this until one of the active completion runners frees capacity.
+The goal is to answer whether cheap tails can provide broader favourite
+insurance without turning into the lossy 8-10c tail bleed seen in earlier runs.
+
+Candidate label:
+`cap1k_btc_5m_tail08_cov75_ladder_lc_range50_exact_profile`
+
+Keep the selected 1K exact profile unchanged except:
+
+- `br2_tail_target_favourite_loss_coverage_frac = 0.75`
+- `br2_tail_max_clips = 10`
+- `br2_tail_min_skew_step = 0.01`
+- `br2_tail_extreme_threshold = 0.25`
+- `br2_tail_budget_favourite_spend_frac = 0.30`
+- `br2_tail_budget_favourite_upside_frac = 0.40`
+- keep `br2_tail_max_ask = 0.08`
+
+Reasoning:
+
+- Current tail spend is only about `0.6%` of favourite notional and appears on
+  only about `10%` of favourite positions.
+- When a losing favourite actually has opposite tail coverage, the hedge is
+  meaningful at roughly `65-70%` net cover.
+- The current problem is coverage frequency, not per-fire hedge sizing.
+- Keep the 8c cap because earlier 10c tails bled; do not broaden into the
+  8-10c bucket until there is stronger evidence.
+
 ## Current Verified Leader
 
 Run: `20260528T145725Z-portfolio-grid-24140`
