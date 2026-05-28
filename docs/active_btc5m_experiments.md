@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-28 21:51 UTC.
+Last updated: 2026-05-28 22:03 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -11,32 +11,32 @@ These are active checkpoints, not final full-history results.
 
 1. `cap1k_btc_5m_tail08_lc_range50_exact_profile`
    - Run: `20260528T211443Z-portfolio-grid-55343`
-   - Markets: `4,000`
-   - PnL: `+$2,537.82`
-   - Return: `+253.78%`
-   - Max drawdown: `18.23%`
+   - Markets: `7,250`
+   - PnL: `+$5,191.71`
+   - Return: `+519.17%`
+   - Max drawdown: `23.70%`
    - Reason to keep: exact `$1,000` pilot sizing, range-gated, convex tails
-     enabled, and all fill lanes positive so far.
+     enabled, and strong compounded PnL so far.
 2. `cap3k_btc_5m_tail08_lc_range50_exact_profile`
    - Run: `20260528T212132Z-portfolio-grid-68579`
-   - Markets: `3,000`
-   - PnL: `+$4,930.48`
-   - Return: `+164.35%`
-   - Max drawdown: `17.28%`
+   - Markets: `6,250`
+   - PnL: `+$9,775.21`
+   - Return: `+325.84%`
+   - Max drawdown: `20.07%`
    - Reason to keep: exact profile scaled to the current wallet size.
 3. `cap5k_btc_5m_tail08_lc_range50_exact`
    - Run: `20260528T205238Z-portfolio-grid-12673`
-   - Markets: `7,250`
-   - PnL: `+$13,068.70`
-   - Return: `+261.37%`
+   - Markets: `10,250`
+   - PnL: `+$15,021.70`
+   - Return: `+300.43%`
    - Max drawdown: `17.94%`
    - Reason to keep: larger-capital validation of the same range + 8c-tail
      profile.
 4. `cap5k_btc_5m_notail_lc_range50_exact`
    - Run: `20260528T202628Z-portfolio-grid-62169`
-   - Markets: `10,250`
-   - PnL: `+$14,880.20`
-   - Return: `+297.60%`
+   - Markets: `12,000`
+   - PnL: `+$15,270.25`
+   - Return: `+305.41%`
    - Max drawdown: `17.88%`
    - Reason to keep: no-tail PnL ceiling and regression baseline; not the
      preferred production candidate because it lacks convex tail coverage.
@@ -634,17 +634,17 @@ Scaled 1K range + tail exact-profile run:
 
 Latest checkpoint:
 
-- Markets: `4,000`
-- PnL: `+$2,537.82`
-- Return: `+253.78%`
-- Max drawdown: `18.23%`
-- Fills: `1,644`
-- Active markets: `20.0%`
+- Markets: `7,250`
+- PnL: `+$5,191.71`
+- Return: `+519.17%`
+- Max drawdown: `23.70%`
+- Fills: `2,276`
+- Active markets: `15.6%`
 - Attribution:
-  - `br2_late_confirm`: `+$1,086.71`
-  - `br2_late_favourite_load`: `+$1,203.21`
-  - `br2_high_skew_load`: `+$235.43`
-  - `br2_convex_tail`: `+$12.47`
+  - `br2_late_confirm`: `+$2,556.44`
+  - `br2_late_favourite_load`: `+$2,312.29`
+  - `br2_high_skew_load`: `+$333.49`
+  - `br2_convex_tail`: `-$10.50`
 - Config verification: matches the 5K tail08 exact profile outside scaled
   `starting_cash_usdc`, `max_clip_usdc`, and
   `max_per_market_exposure_usdc`.
@@ -668,17 +668,17 @@ Scaled 3K range + tail exact-profile run:
 
 Latest checkpoint:
 
-- Markets: `3,000`
-- PnL: `+$4,930.48`
-- Return: `+164.35%`
-- Max drawdown: `17.28%`
-- Fills: `1,252`
-- Active markets: `20.1%`
+- Markets: `6,250`
+- PnL: `+$9,775.21`
+- Return: `+325.84%`
+- Max drawdown: `20.07%`
+- Fills: `2,110`
+- Active markets: `16.6%`
 - Attribution:
-  - `br2_late_confirm`: `+$2,520.56`
-  - `br2_late_favourite_load`: `+$1,958.73`
-  - `br2_high_skew_load`: `+$408.80`
-  - `br2_convex_tail`: `+$42.39`
+  - `br2_late_confirm`: `+$4,115.03`
+  - `br2_late_favourite_load`: `+$4,108.46`
+  - `br2_high_skew_load`: `+$1,513.74`
+  - `br2_convex_tail`: `+$37.98`
 - Config verification: matches the 5K tail08 exact profile outside scaled
   `starting_cash_usdc`, `max_clip_usdc`, and
   `max_per_market_exposure_usdc`.
