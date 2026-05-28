@@ -43,7 +43,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::discovery::{MarketHandle, parse_close_ts};
+use crate::discovery::{MarketHandle, parse_close_ts, spot_cache_key, spot_symbol_for_market};
 use crate::runner::{RunnerConfig, run_backtest};
 
 const DEFAULT_META_MAX_FIT_SAMPLES: usize = 120_000;
@@ -1643,7 +1643,8 @@ impl SpotCache {
         date: &str,
         required: bool,
     ) -> Result<Option<Arc<Vec<SpotTick>>>> {
-        if let Some(ticks) = self.raw_days.get(date) {
+        let key = spot_cache_key(symbol, date);
+        if let Some(ticks) = self.raw_days.get(&key) {
             return Ok(Some(ticks.clone()));
         }
 
@@ -1665,7 +1666,7 @@ impl SpotCache {
         let (ticks, stats) = load_binance_agg_trades_async(store.store(), path).await?;
         tracing::info!(symbol, date, ticks = stats.rows_emitted, "spot day loaded");
         let ticks = Arc::new(ticks);
-        self.raw_days.insert(date.to_string(), ticks.clone());
+        self.raw_days.insert(key, ticks.clone());
         Ok(Some(ticks))
     }
 
@@ -1675,7 +1676,8 @@ impl SpotCache {
         symbol: &str,
         date: &str,
     ) -> Result<Arc<SpotHistory>> {
-        if let Some(s) = self.inner.get(date) {
+        let key = spot_cache_key(symbol, date);
+        if let Some(s) = self.inner.get(&key) {
             return Ok(s.clone());
         }
         let current = self
@@ -1696,7 +1698,7 @@ impl SpotCache {
         }
         ticks.extend_from_slice(&current);
         let h = Arc::new(SpotHistory::new(ticks));
-        self.inner.insert(date.to_string(), h.clone());
+        self.inner.insert(key, h.clone());
         Ok(h)
     }
 }
@@ -1707,6 +1709,24 @@ fn previous_date(date: &str) -> Result<Option<String>> {
     Ok(parsed
         .checked_sub_signed(Duration::days(1))
         .map(|d| d.format("%Y-%m-%d").to_string()))
+}
+
+fn spot_history_for_market(
+    spot_map: &HashMap<String, Arc<SpotHistory>>,
+    empty_spot: &Arc<SpotHistory>,
+    cfg: &WalkForwardConfig,
+    market: &MarketHandle,
+) -> Arc<SpotHistory> {
+    let Some(symbol) = spot_symbol_for_market(&cfg.spot_symbol, &market.slug)
+        .ok()
+        .flatten()
+    else {
+        return empty_spot.clone();
+    };
+    spot_map
+        .get(&spot_cache_key(&symbol, &market.date))
+        .cloned()
+        .unwrap_or_else(|| empty_spot.clone())
 }
 
 pub async fn run_walkforward(
@@ -1722,21 +1742,25 @@ pub async fn run_walkforward(
     let markets = &markets_sorted[..];
 
     let mut spot_cache = SpotCache::default();
-    // Preload all distinct spot days up front to amortize the big download.
-    // (Few days, so serial is fine; the heavy parallelism is now in the market loading phase.)
-    let unique_dates: Vec<String> = markets
+    // Preload all distinct spot symbol/date pairs up front to amortize downloads.
+    // Use `--spot-symbol auto` for mixed BTC/ETH market lists.
+    let unique_spot_days: Vec<(String, String)> = markets
         .iter()
-        .map(|m| m.date.clone())
+        .map(|m| {
+            spot_symbol_for_market(&cfg.spot_symbol, &m.slug)
+                .map(|symbol| symbol.map(|symbol| (symbol, m.date.clone())))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
-    for date in &unique_dates {
-        if !cfg.spot_symbol.is_empty() {
-            spot_cache
-                .get_or_load(store, &cfg.spot_symbol, date)
-                .await
-                .with_context(|| format!("preload spot {date}"))?;
-        }
+    for (symbol, date) in &unique_spot_days {
+        spot_cache
+            .get_or_load(store, symbol, date)
+            .await
+            .with_context(|| format!("preload spot {symbol} {date}"))?;
     }
     let spot_map_top: HashMap<String, Arc<SpotHistory>> = spot_cache.inner.clone();
     if cfg.portfolio_mode && (cfg.walk_forward_folds.is_some() || cfg.fold_size.is_some()) {
@@ -2784,14 +2808,7 @@ async fn collect_training_samples(
         futures::stream::iter(markets.iter().cloned().enumerate().map(|(idx, m)| {
             let store = store.clone();
             let store_inner = store_inner.clone();
-            let spot = if cfg.spot_symbol.is_empty() {
-                empty_spot.clone()
-            } else {
-                spot_map
-                    .get(&m.date)
-                    .cloned()
-                    .unwrap_or_else(|| empty_spot.clone())
-            };
+            let spot = spot_history_for_market(spot_map, &empty_spot, cfg, &m);
             let use_outcome_label = cfg.use_outcome_label;
             let starting_cash_usdc = cfg.starting_cash_usdc;
             let replay_sample_ms = cfg.replay_sample_ms;
@@ -2985,11 +3002,7 @@ async fn run_markets(
                 Arc::new(TradeHistory::default())
             };
 
-            let spot = if cfg_arc.spot_symbol.is_empty() {
-                spot_empty
-            } else {
-                spot_map.get(&m.date).cloned().unwrap_or(spot_empty)
-            };
+            let spot = spot_history_for_market(&spot_map, &spot_empty, &cfg_arc, &m);
 
             let resolved_yes = if cfg_arc.use_outcome_label {
                 Some(matches!(m.outcome.as_str(), "Up" | "Yes" | "yes" | "UP"))
@@ -3529,14 +3542,7 @@ async fn run_portfolio(
         } else {
             Arc::new(TradeHistory::default())
         };
-        let spot = if cfg.spot_symbol.is_empty() {
-            empty_spot.clone()
-        } else {
-            spot_map
-                .get(&m.date)
-                .cloned()
-                .unwrap_or_else(|| empty_spot.clone())
-        };
+        let spot = spot_history_for_market(spot_map, &empty_spot, cfg, m);
         let resolved_yes = if cfg.use_outcome_label {
             Some(matches!(m.outcome.as_str(), "Up" | "Yes" | "yes" | "UP"))
         } else {

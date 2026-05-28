@@ -29,6 +29,33 @@ pub struct MarketHandle {
     pub date: String,
 }
 
+pub fn spot_symbol_for_market(configured: &str, slug: &str) -> Result<Option<String>> {
+    if configured.is_empty() {
+        return Ok(None);
+    }
+    if !configured.eq_ignore_ascii_case("auto") {
+        return Ok(Some(configured.to_string()));
+    }
+    infer_spot_symbol_from_slug(slug)
+        .map(|symbol| Some(symbol.to_string()))
+        .ok_or_else(|| anyhow!("cannot infer spot symbol from market slug: {slug}"))
+}
+
+pub fn spot_cache_key(symbol: &str, date: &str) -> String {
+    format!("{}|{}", symbol.to_ascii_uppercase(), date)
+}
+
+fn infer_spot_symbol_from_slug(slug: &str) -> Option<&'static str> {
+    let slug = slug.to_ascii_lowercase();
+    if slug.starts_with("btc-updown-") {
+        Some("BTCUSDT")
+    } else if slug.starts_with("eth-updown-") {
+        Some("ETHUSDT")
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct AvailabilityResponse {
     #[allow(dead_code)]
@@ -624,5 +651,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
 
         assert_eq!(loaded, cache);
+    }
+
+    #[test]
+    fn infers_spot_symbol_for_crypto_updown_slugs() {
+        assert_eq!(
+            spot_symbol_for_market("auto", "btc-updown-5m-1778587500").unwrap(),
+            Some("BTCUSDT".to_string())
+        );
+        assert_eq!(
+            spot_symbol_for_market("auto", "eth-updown-15m-1778587500").unwrap(),
+            Some("ETHUSDT".to_string())
+        );
+        assert_eq!(
+            spot_symbol_for_market("BTCUSDT", "eth-updown-15m-1778587500").unwrap(),
+            Some("BTCUSDT".to_string())
+        );
+        assert_eq!(
+            spot_symbol_for_market("", "eth-updown-15m-1778587500").unwrap(),
+            None
+        );
+        assert!(spot_symbol_for_market("auto", "sol-updown-5m-1778587500").is_err());
     }
 }

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::AsyncWriteExt;
 
-use crate::discovery::MarketHandle;
+use crate::discovery::{MarketHandle, spot_symbol_for_market};
 
 #[derive(Debug, Clone)]
 pub struct PrepCacheConfig {
@@ -37,17 +37,25 @@ pub async fn run_prep_cache(
     // Build the set of (s3_key, local_path) pairs we need. Prefix discovery is
     // the slow part at 20k+ markets, so resolve those S3 listings concurrently.
     let list_concurrency = cfg.max_concurrent.max(1);
-    let unique_dates: BTreeSet<String> = markets.iter().map(|m| m.date.clone()).collect();
+    let unique_spot_days: BTreeSet<(String, String)> = markets
+        .iter()
+        .map(|m| {
+            spot_symbol_for_market(&cfg.spot_symbol, &m.slug)
+                .map(|symbol| symbol.map(|symbol| (symbol, m.date.clone())))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
     let mut targets: Vec<(ObjectPath, PathBuf)> = if cfg.spot_symbol.is_empty() {
         Vec::new()
     } else {
         let store = store.clone();
         let cache_dir = cfg.cache_dir.clone();
-        futures::stream::iter(unique_dates.iter().cloned())
-            .map(|date| {
+        futures::stream::iter(unique_spot_days.iter().cloned())
+            .map(|(spot_symbol, date)| {
                 let store = store.clone();
                 let cache_dir = cache_dir.clone();
-                let spot_symbol = cfg.spot_symbol.clone();
                 async move {
                     resolve_spot_target(&store, &cache_dir, &spot_symbol, &date)
                         .await
