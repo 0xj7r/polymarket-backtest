@@ -306,6 +306,25 @@ Interpretation: this is the cleanest early evidence so far that the
 `late_confirm` observed-range cap addresses the early reversion damage without
 removing the favourite/high-skew workhorses or convex tail upside.
 
+Third exact-profile checkpoint:
+
+- Markets: `2,250`
+- PnL: `+$4,150.50`
+- Return: `+83.01%`
+- Max drawdown: `18.49%`
+- Fills: `1,058`
+- Active markets: `21.0%`
+- Attribution:
+  - `br2_late_confirm`: `+$2,623.97`
+  - `br2_late_favourite_load`: `+$1,410.50`
+  - `br2_high_skew_load`: `+$322.67`
+  - `br2_convex_tail`: `-$206.63`
+
+Interpretation: the range gate remains strongly positive, but the current
+10c-tail settings are again a drag by this prefix. Tail is still strategically
+valid as convex insurance, but this result supports testing a cheaper tail cap
+such as `tail_max_ask = 0.08` or reducing only the 8-10c rung.
+
 ### No-Tail Late-Confirm Range-Gated Isolation
 
 Run: `20260528T192139Z-portfolio-grid-37354`
@@ -418,6 +437,23 @@ version at this prefix, but drawdown is higher (`16.60%` versus `14.84%`).
 Given the strategic preference for convex reversal coverage, the tail version
 remains the stronger candidate unless later full-history results show the tail
 spend overwhelming path utility.
+
+Third exact-profile checkpoint:
+
+- Markets: `2,250`
+- PnL: `+$4,379.35`
+- Return: `+87.59%`
+- Max drawdown: `17.88%`
+- Fills: `952`
+- Active markets: `21.0%`
+- Attribution:
+  - `br2_late_confirm`: `+$2,627.91`
+  - `br2_late_favourite_load`: `+$1,429.21`
+  - `br2_high_skew_load`: `+$322.24`
+
+Interpretation: at this prefix, exact-profile no-tail range-gated is ahead of
+the 10c-tail version by `+$228.85` and has slightly lower drawdown. It is the
+cleaner current range-gated benchmark while a cheaper-tail variant is pending.
 
 ## Decision Rules
 
