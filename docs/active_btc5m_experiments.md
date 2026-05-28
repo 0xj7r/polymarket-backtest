@@ -525,6 +525,26 @@ Scaled 1K verification run:
 - Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
 - Binary: prebuilt `pm-app-al2023-x86_64-607c3156`
 - Instance: `i-06b79496ee1e34f04`
+- Status: stopped/replaced before first checkpoint. This was a no-tail
+  reproduction run; it is not the desired pilot profile because the current
+  candidate should keep convex tail coverage enabled.
+
+Scaled 1K range + tail verification run:
+
+- Run: `20260528T210817Z-portfolio-grid-43023`
+- Label: `clip_0p015_gross_250_expfrac_0p12_lat500ms_cap1k_btc_5m_tail08_lc_range50_exact`
+- Starting capital: `$1,000`
+- Gross cap: `$250`
+- Max clip: `$30`
+- Range gate: `br2_late_confirm_max_observed_range = 0.50`
+- Tails: enabled with `br2_tail_max_ask = 0.08`
+- Tail budget: `clip_frac = 0.10`, `max_clips = 6`,
+  `target_favourite_loss_coverage_frac = 0.50`,
+  `budget_favourite_spend_frac = 0.20`,
+  `budget_favourite_upside_frac = 0.25`
+- Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
+- Binary: prebuilt `pm-app-al2023-x86_64-607c3156`
+- Instance: `i-047b07c20f934e3ee`
 - Status: active
 
 ## Decision Rules
