@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-28 22:03 UTC.
+Last updated: 2026-05-28 22:33 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -11,24 +11,24 @@ These are active checkpoints, not final full-history results.
 
 1. `cap1k_btc_5m_tail08_lc_range50_exact_profile`
    - Run: `20260528T211443Z-portfolio-grid-55343`
-   - Markets: `7,250`
-   - PnL: `+$5,191.71`
-   - Return: `+519.17%`
+   - Markets: `11,000`
+   - PnL: `+$6,554.61`
+   - Return: `+655.46%`
    - Max drawdown: `23.70%`
    - Reason to keep: exact `$1,000` pilot sizing, range-gated, convex tails
      enabled, and strong compounded PnL so far.
 2. `cap3k_btc_5m_tail08_lc_range50_exact_profile`
    - Run: `20260528T212132Z-portfolio-grid-68579`
-   - Markets: `6,250`
-   - PnL: `+$9,775.21`
-   - Return: `+325.84%`
+   - Markets: `10,250`
+   - PnL: `+$12,059.89`
+   - Return: `+402.00%`
    - Max drawdown: `20.07%`
    - Reason to keep: exact profile scaled to the current wallet size.
 3. `cap5k_btc_5m_tail08_lc_range50_exact`
    - Run: `20260528T205238Z-portfolio-grid-12673`
-   - Markets: `10,250`
-   - PnL: `+$15,021.70`
-   - Return: `+300.43%`
+   - Markets: `12,250`
+   - PnL: `+$16,342.84`
+   - Return: `+326.86%`
    - Max drawdown: `17.94%`
    - Reason to keep: larger-capital validation of the same range + 8c-tail
      profile.
@@ -83,6 +83,26 @@ Capacity note: the no-tail 5K baseline runner was stopped at its latest S3
 checkpoint because it was no longer the preferred production candidate and had
 not advanced its uploaded checkpoint. Latest preserved no-tail checkpoint:
 `12,000` markets, `+$15,270.25`, max drawdown `17.88%`.
+
+First same-prefix checkpoint at `750` markets:
+
+- Baseline 1K tail08: `+$191.31`, max drawdown `11.11%`,
+  `br2_convex_tail = +$41.69`
+- Coverage variant: `+$212.33`, max drawdown `10.83%`,
+  `br2_convex_tail = +$62.15`
+- Tail spend:
+  - Baseline: `$8.72`, `145.5` tail shares
+  - Coverage variant: `$13.60`, `221.6` tail shares
+- Favourite-tail frequency:
+  - Baseline: `5 / 63` favourite positions, `7.9%`
+  - Coverage variant: `6 / 63` favourite positions, `9.5%`
+- Net favourite coverage across all favourite positions:
+  - Baseline: `7.9%`
+  - Coverage variant: `11.8%`
+
+Interpretation: too early to promote, but this is a clean positive first
+checkpoint. The broader-tail variant improved PnL, drawdown, tail PnL, and
+coverage frequency at the same prefix.
 
 ## Current Verified Leader
 
@@ -648,17 +668,17 @@ Scaled 1K range + tail exact-profile run:
 
 Latest checkpoint:
 
-- Markets: `7,250`
-- PnL: `+$5,191.71`
-- Return: `+519.17%`
+- Markets: `11,000`
+- PnL: `+$6,554.61`
+- Return: `+655.46%`
 - Max drawdown: `23.70%`
-- Fills: `2,276`
-- Active markets: `15.6%`
+- Fills: `2,671`
+- Active markets: `12.5%`
 - Attribution:
-  - `br2_late_confirm`: `+$2,556.44`
-  - `br2_late_favourite_load`: `+$2,312.29`
-  - `br2_high_skew_load`: `+$333.49`
-  - `br2_convex_tail`: `-$10.50`
+  - `br2_late_favourite_load`: `+$3,423.13`
+  - `br2_late_confirm`: `+$2,543.89`
+  - `br2_high_skew_load`: `+$638.50`
+  - `br2_convex_tail`: `-$50.90`
 - Config verification: matches the 5K tail08 exact profile outside scaled
   `starting_cash_usdc`, `max_clip_usdc`, and
   `max_per_market_exposure_usdc`.
@@ -682,17 +702,17 @@ Scaled 3K range + tail exact-profile run:
 
 Latest checkpoint:
 
-- Markets: `6,250`
-- PnL: `+$9,775.21`
-- Return: `+325.84%`
+- Markets: `10,250`
+- PnL: `+$12,059.89`
+- Return: `+402.00%`
 - Max drawdown: `20.07%`
-- Fills: `2,110`
-- Active markets: `16.6%`
+- Fills: `2,656`
+- Active markets: `13.0%`
 - Attribution:
-  - `br2_late_confirm`: `+$4,115.03`
-  - `br2_late_favourite_load`: `+$4,108.46`
-  - `br2_high_skew_load`: `+$1,513.74`
-  - `br2_convex_tail`: `+$37.98`
+  - `br2_late_favourite_load`: `+$5,931.97`
+  - `br2_late_confirm`: `+$4,675.26`
+  - `br2_high_skew_load`: `+$1,507.01`
+  - `br2_convex_tail`: `-$54.34`
 - Config verification: matches the 5K tail08 exact profile outside scaled
   `starting_cash_usdc`, `max_clip_usdc`, and
   `max_per_market_exposure_usdc`.
