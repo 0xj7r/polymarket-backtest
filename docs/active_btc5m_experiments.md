@@ -325,6 +325,23 @@ Interpretation: the range gate remains strongly positive, but the current
 valid as convex insurance, but this result supports testing a cheaper tail cap
 such as `tail_max_ask = 0.08` or reducing only the 8-10c rung.
 
+Fourth exact-profile checkpoint:
+
+- Markets: `4,000`
+- PnL: `+$7,587.21`
+- Return: `+151.74%`
+- Max drawdown: `18.49%`
+- Fills: `1,764`
+- Active markets: `19.9%`
+- Attribution:
+  - `br2_late_confirm`: `+$3,698.24`
+  - `br2_late_favourite_load`: `+$3,413.24`
+  - `br2_high_skew_load`: `+$787.44`
+  - `br2_convex_tail`: `-$311.71`
+
+Interpretation: 10c-tail remains behind no-tail range-gated. The range gate is
+working; the broad 8-10c tail spend is the main open issue.
+
 Cheaper-tail exact relaunches:
 
 - `8c` cap:
@@ -339,6 +356,16 @@ Cheaper-tail exact relaunches:
 Both reuse the frozen meta-calibrator and prebuilt Linux `pm-app` binary. The
 only intentional differences versus the 10c exact tail run are
 `br2_late_confirm_max_observed_range = 0.50` and `br2_tail_max_ask`.
+
+First cheaper-tail checkpoints:
+
+- `8c` cap: `250` markets, `+$222.86`, max drawdown `3.05%`, no convex-tail
+  fills yet.
+- `6c` cap: `250` markets, `+$220.99`, max drawdown `3.05%`,
+  `br2_convex_tail = -$1.79`.
+
+Config verification: both cheaper-tail runs match the 10c exact-tail run
+outside the allowed `br2_tail_max_ask` key.
 
 ### No-Tail Late-Confirm Range-Gated Isolation
 
@@ -469,6 +496,23 @@ Third exact-profile checkpoint:
 Interpretation: at this prefix, exact-profile no-tail range-gated is ahead of
 the 10c-tail version by `+$228.85` and has slightly lower drawdown. It is the
 cleaner current range-gated benchmark while a cheaper-tail variant is pending.
+
+Fourth exact-profile checkpoint:
+
+- Markets: `4,250`
+- PnL: `+$8,494.81`
+- Return: `+169.90%`
+- Max drawdown: `17.88%`
+- Fills: `1,640`
+- Active markets: `19.6%`
+- Attribution:
+  - `br2_late_confirm`: `+$3,829.50`
+  - `br2_late_favourite_load`: `+$3,840.94`
+  - `br2_high_skew_load`: `+$824.37`
+
+Interpretation: this is the current leading exact-profile candidate. It keeps
+the strong range-gated directional edge and avoids the broad-tail bleed. It
+must still complete full history before promotion.
 
 ## Decision Rules
 
