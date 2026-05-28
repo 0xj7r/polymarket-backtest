@@ -144,6 +144,20 @@ AWS_PROFILE=visumlabs ./scripts/launch_ec2_portfolio_grid.sh \
   --portfolio-checkpoint-every-markets 250
 ```
 
+For sizing/execution-only sweeps, reuse a frozen model from a previous AWS run
+instead of retraining:
+
+```bash
+AWS_PROFILE=visumlabs ./scripts/launch_ec2_portfolio_grid.sh \
+  --start-date 2026-02-12 \
+  --end-date 2026-05-20 \
+  --reuse-artifacts-run-id 20260528T103440Z-portfolio-grid-4432 \
+  --strategies bonereaper_v2 \
+  --starting-cash 1000 \
+  --gross-caps 500 \
+  --clip-fractions 0.02
+```
+
 ## Git Keep/Rollback Semantics
 
 Run experiments in isolated git worktrees. The active repo may have concurrent

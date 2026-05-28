@@ -117,6 +117,7 @@ PORTFOLIO_CHECKPOINT_EVERY_MARKETS="250"
 SYNC_SOURCE="1"
 SNAPSHOT_S3_URI=""
 META_TRAINING_SAMPLES_CACHE_S3_URI=""
+REUSE_ARTIFACTS_RUN_ID=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -213,6 +214,7 @@ while [ $# -gt 0 ]; do
         --root-volume-gb) ROOT_VOLUME_GB="$2"; shift 2 ;;
         --snapshot-s3-uri) SNAPSHOT_S3_URI="$2"; shift 2 ;;
         --meta-training-samples-cache-s3-uri) META_TRAINING_SAMPLES_CACHE_S3_URI="$2"; shift 2 ;;
+        --reuse-artifacts-run-id) REUSE_ARTIFACTS_RUN_ID="$2"; shift 2 ;;
         --no-source-sync) SYNC_SOURCE="0"; shift ;;
         *) echo "unknown arg: $1" >&2; exit 1 ;;
     esac
@@ -221,6 +223,15 @@ done
 if [ -z "$MARKETS_KEY" ] && { [ -z "$START_DATE" ] || [ -z "$END_DATE" ]; }; then
     echo "either --markets-key or both --start-date and --end-date are required" >&2
     exit 1
+fi
+
+if [ -n "$REUSE_ARTIFACTS_RUN_ID" ]; then
+    if [ -z "$SNAPSHOT_S3_URI" ]; then
+        SNAPSHOT_S3_URI="s3://${RESULTS_BUCKET}/results/${REUSE_ARTIFACTS_RUN_ID}/artifacts/meta-calibrator-snapshot.json"
+    fi
+    if [ -z "$META_TRAINING_SAMPLES_CACHE_S3_URI" ]; then
+        META_TRAINING_SAMPLES_CACHE_S3_URI="s3://${RESULTS_BUCKET}/results/${REUSE_ARTIFACTS_RUN_ID}/artifacts/meta-training-samples.json"
+    fi
 fi
 
 if [ "$SYNC_SOURCE" = "1" ]; then
@@ -242,6 +253,12 @@ AMI=$(aws ssm get-parameter \
 
 echo "AMI: $AMI"
 echo "Run ID: $RUN_ID"
+if [ -n "$SNAPSHOT_S3_URI" ]; then
+    echo "Meta snapshot in: $SNAPSHOT_S3_URI"
+fi
+if [ -n "$META_TRAINING_SAMPLES_CACHE_S3_URI" ]; then
+    echo "Meta samples cache in: $META_TRAINING_SAMPLES_CACHE_S3_URI"
+fi
 
 USER_DATA=$(cat <<EOF
 #!/bin/bash

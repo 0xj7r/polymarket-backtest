@@ -97,6 +97,23 @@ chronological validation, and only writes a non-empty snapshot if calibrated
 log loss improves and Brier score does not regress. For overfit runs, use
 lower epochs, lower learning rate, higher L2, or lower weight clip.
 
+Do not retrain the meta-calibrator for every sizing or execution sweep. After
+one training run has uploaded artifacts, reuse them:
+
+```bash
+AWS_PROFILE=visumlabs ./scripts/launch_ec2_portfolio_grid.sh \
+  --start-date 2026-02-12 \
+  --end-date 2026-05-20 \
+  --reuse-artifacts-run-id 20260528T103440Z-portfolio-grid-4432 \
+  --clip-fractions 0.015,0.02 \
+  --gross-caps 250,500
+```
+
+This expands to the prior run's
+`artifacts/meta-calibrator-snapshot.json` and
+`artifacts/meta-training-samples.json`. Use a fresh training run only when the
+training window, model features, or meta-calibrator hyperparameters changed.
+
 ## Tune late favourite loading
 
 These flags control Bonereaper v2's late/favourite lanes without code edits:
