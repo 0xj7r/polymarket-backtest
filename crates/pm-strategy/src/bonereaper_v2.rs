@@ -482,6 +482,8 @@ pub struct BonereaperV2 {
     late_fires: usize,
     last_late_ns: i64,
     directional_side: Option<Side>,
+    directional_shares_emitted: f64,
+    directional_notional_emitted: f64,
     high_skew_clips: usize,
     last_high_skew_ns: i64,
     late_favourite_clips: usize,
@@ -517,6 +519,8 @@ impl BonereaperV2 {
             late_fires: 0,
             last_late_ns: i64::MIN / 2,
             directional_side: None,
+            directional_shares_emitted: 0.0,
+            directional_notional_emitted: 0.0,
             high_skew_clips: 0,
             last_high_skew_ns: i64::MIN / 2,
             late_favourite_clips: 0,
@@ -551,6 +555,12 @@ impl BonereaperV2 {
 
     fn mark_directional_side(&mut self, side: Side) {
         self.directional_side = Some(side);
+    }
+
+    fn record_directional_exposure(&mut self, side: Side, shares: f64, px: f64) {
+        self.mark_directional_side(side);
+        self.directional_shares_emitted += shares;
+        self.directional_notional_emitted += shares * px;
     }
 
     fn model_support_for_side(
@@ -725,10 +735,13 @@ fn tail_favourite_unrealized_edge_allowed(
     avg_entry_px: f64,
     min_unrealized_edge: f32,
 ) -> bool {
-    let min_unrealized_edge = min_unrealized_edge.max(0.0) as f64;
-    current_bid.is_finite()
-        && avg_entry_px.is_finite()
-        && current_bid - avg_entry_px >= min_unrealized_edge
+    if !current_bid.is_finite() || !avg_entry_px.is_finite() {
+        return false;
+    }
+    if min_unrealized_edge <= 0.0 {
+        return true;
+    }
+    current_bid - avg_entry_px >= min_unrealized_edge as f64
 }
 
 fn range_throttle(range: f32, soft: f32, hard: f32) -> f32 {
@@ -1260,7 +1273,7 @@ impl Strategy for BonereaperV2 {
                         });
                         self.late_fires += 1;
                         self.last_late_ns = event.ts_ns;
-                        self.mark_directional_side(target);
+                        self.record_directional_exposure(target, shares, px);
                         self.gate_stats.late_confirm_emits += 1;
 
                         // Paired tail hedge: cheap-side bet, sized as a fraction of
@@ -1395,7 +1408,7 @@ impl Strategy for BonereaperV2 {
                                 });
                                 self.high_skew_clips += 1;
                                 self.last_high_skew_ns = event.ts_ns;
-                                self.mark_directional_side(side);
+                                self.record_directional_exposure(side, shares, px);
                                 self.gate_stats.high_skew_emits += 1;
                             } else {
                                 self.gate_stats.high_skew_shares_fail += 1;
@@ -1645,7 +1658,7 @@ impl Strategy for BonereaperV2 {
                                 });
                                 self.late_favourite_clips += levels;
                                 self.last_late_favourite_ns = event.ts_ns;
-                                self.mark_directional_side(side);
+                                self.record_directional_exposure(side, shares, px);
                                 if self.late_favourite_side != Some(side) {
                                     self.late_favourite_peak_entry_px = px;
                                     self.late_favourite_side_shares_emitted = shares;
@@ -1669,9 +1682,9 @@ impl Strategy for BonereaperV2 {
             }
         }
 
-        // ---- LANE 6: Cheap-tail ladder anchored to late favourite exposure ----
+        // ---- LANE 6: Cheap-tail ladder anchored to favourite-side exposure ----
         // This is not a standalone long-shot strategy. It only spends a small
-        // fraction of an existing favourite sleeve's spend/upside.
+        // fraction of existing directional favourite spend/upside.
         if self.tail_clips < self.cfg.tail_max_clips
             && (event.ts_ns - self.last_tail_ns) as f64 / 1e9 > self.cfg.tail_refresh_secs as f64
         {
@@ -1681,7 +1694,7 @@ impl Strategy for BonereaperV2 {
             let advanced = skew_mag - self.last_tail_skew_mag >= self.cfg.tail_min_skew_step;
             if skew_mag >= self.cfg.tail_extreme_threshold
                 && (starting_fresh || advanced)
-                && self.late_favourite_notional_emitted > 0.0
+                && self.directional_notional_emitted > 0.0
                 && tail_observed_range_allowed(
                     ctx.market_yes_range_so_far,
                     self.cfg.tail_min_observed_range,
@@ -1691,7 +1704,7 @@ impl Strategy for BonereaperV2 {
                     self.cfg.tail_min_seconds_to_close,
                 )
             {
-                let Some(favourite_side) = self.late_favourite_side else {
+                let Some(favourite_side) = self.directional_side else {
                     return StrategyOutput { orders };
                 };
                 let Some(tail_side) = opposite_buy_side(favourite_side) else {
@@ -1700,8 +1713,8 @@ impl Strategy for BonereaperV2 {
                 let Some((effective_favourite_shares, effective_favourite_notional)) =
                     effective_favourite_tail_exposure(
                         side_shares(ctx, favourite_side),
-                        self.late_favourite_shares_emitted,
-                        self.late_favourite_notional_emitted,
+                        self.directional_shares_emitted,
+                        self.directional_notional_emitted,
                     )
                 else {
                     return StrategyOutput { orders };
@@ -1710,7 +1723,7 @@ impl Strategy for BonereaperV2 {
                 let px32 = tail_px as f32;
                 if px32 >= self.cfg.tail_min_ask && px32 <= self.cfg.tail_max_ask {
                     let avg_favourite_px =
-                        self.late_favourite_notional_emitted / self.late_favourite_shares_emitted;
+                        self.directional_notional_emitted / self.directional_shares_emitted;
                     let favourite_bid = sell_px(event, favourite_side);
                     if tail_favourite_unrealized_edge_allowed(
                         favourite_bid,
@@ -2217,7 +2230,7 @@ mod tests {
             late_favourite_max_clips: 0,
             ..BonereaperV2Config::default()
         });
-        let mut ctx = test_ctx(close_ns, 0.9, 0.88);
+        let mut ctx = test_ctx(close_ns, 0.9, 0.98);
         ctx.market_yes_range_so_far = 0.62;
 
         let out = strat.on_event(
@@ -2233,6 +2246,57 @@ mod tests {
                 .all(|order| order.tag != "br2_late_confirm")
         );
         assert_eq!(strat.gate_stats().late_confirm_market_range_fail, 1);
+    }
+
+    #[test]
+    fn convex_tail_anchors_to_late_confirm_exposure() {
+        let close_ns = 300_000_000_000;
+        let mut ctx = test_ctx(close_ns, 0.9, 0.98);
+        ctx.yes_shares = 70.0;
+        let mut strat = BonereaperV2::new(BonereaperV2Config {
+            max_clip_usdc: 50.0,
+            late_clip_frac: 1.0,
+            late_max_fires: 1,
+            late_confirm_min_model_edge: 0.03,
+            late_confirm_min_model_confidence: 0.80,
+            late_confirm_min_model_side_p: 0.80,
+            late_confirm_min_book_skew: 0.05,
+            late_confirm_min_realized_vol_180s_bps: 0.0,
+            high_skew_max_clips: 0,
+            late_favourite_max_clips: 0,
+            tail_clip_frac: 0.10,
+            tail_max_clips: 1,
+            tail_min_ask: 0.01,
+            tail_max_ask: 0.20,
+            tail_min_seconds_to_close: 0.0,
+            tail_target_favourite_loss_coverage_frac: 0.50,
+            tail_budget_favourite_spend_frac: 1.0,
+            tail_budget_favourite_upside_frac: 1.0,
+            ..BonereaperV2Config::default()
+        });
+
+        let out = strat.on_event(
+            &test_event(250_000_000_000, 0.90, 0.89, 0.91),
+            &ctx,
+            &test_spot_uptrend(250_000_000_000),
+            &TradeHistory::default(),
+        );
+
+        assert!(
+            out.orders
+                .iter()
+                .any(|order| order.tag == "br2_late_confirm"),
+            "orders={:?} gates={:?}",
+            out.orders,
+            strat.gate_stats()
+        );
+        assert!(
+            out.orders
+                .iter()
+                .any(|order| order.tag == "br2_convex_tail" && order.side == Side::BuyNo),
+            "{:?}",
+            out.orders
+        );
     }
 
     #[test]
@@ -2273,7 +2337,7 @@ mod tests {
     fn tail_unrealized_edge_requires_favourite_profit() {
         assert!(tail_favourite_unrealized_edge_allowed(0.88, 0.84, 0.03));
         assert!(!tail_favourite_unrealized_edge_allowed(0.86, 0.84, 0.03));
-        assert!(!tail_favourite_unrealized_edge_allowed(0.82, 0.84, 0.0));
+        assert!(tail_favourite_unrealized_edge_allowed(0.82, 0.84, 0.0));
     }
 
     #[test]
