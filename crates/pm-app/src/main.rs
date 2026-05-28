@@ -354,6 +354,10 @@ enum Cmd {
         /// Example: 0.25 stops new sizing at 25% below peak.
         #[arg(long, default_value = "1.0")]
         clip_drawdown_hard_pct: f64,
+        /// Minimum clip multiplier after the hard drawdown threshold.
+        /// Example: 0.10 keeps recovery-sized trading instead of freezing.
+        #[arg(long, default_value = "0.0")]
+        clip_drawdown_min_multiplier: f64,
         /// Disable Bonereaper v2's internal model gates for pure heuristic strategy tests.
         #[arg(long, default_value_t = false)]
         br2_disable_internal_model_gates: bool,
@@ -1009,6 +1013,7 @@ async fn main() -> Result<()> {
             clip_fraction_of_equity,
             clip_drawdown_soft_pct,
             clip_drawdown_hard_pct,
+            clip_drawdown_min_multiplier,
             br2_disable_internal_model_gates,
             br2_min_composite_direction,
             br2_early_clip_frac,
@@ -1128,6 +1133,7 @@ async fn main() -> Result<()> {
                 clip_fraction_of_equity,
                 clip_drawdown_soft_pct,
                 clip_drawdown_hard_pct,
+                clip_drawdown_min_multiplier,
                 br2_disable_internal_model_gates,
                 br2_min_composite_direction,
                 br2_early_clip_frac,
@@ -1781,6 +1787,7 @@ async fn walk_forward(
     clip_fraction_of_equity: Option<f64>,
     clip_drawdown_soft_pct: f64,
     clip_drawdown_hard_pct: f64,
+    clip_drawdown_min_multiplier: f64,
     br2_disable_internal_model_gates: bool,
     br2_min_composite_direction: f32,
     br2_early_clip_frac: f32,
@@ -1969,6 +1976,7 @@ async fn walk_forward(
         clip_fraction_of_equity,
         clip_drawdown_soft_pct,
         clip_drawdown_hard_pct,
+        clip_drawdown_min_multiplier,
         br2_disable_internal_model_gates,
         br2_min_composite_direction,
         br2_early_clip_frac,

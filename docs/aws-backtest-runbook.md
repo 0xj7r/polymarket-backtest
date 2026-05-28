@@ -114,6 +114,16 @@ This expands to the prior run's
 `artifacts/meta-training-samples.json`. Use a fresh training run only when the
 training window, model features, or meta-calibrator hyperparameters changed.
 
+For drawdown-controlled sweeps, avoid a permanent hard freeze unless that is
+the explicit test. `--clip-drawdown-min-multiplier` keeps a small recovery lane
+open after the hard threshold:
+
+```bash
+--clip-drawdown-soft-pct 0.20 \
+--clip-drawdown-hard-pct 0.40 \
+--clip-drawdown-min-multiplier 0.10
+```
+
 ## Tune late favourite loading
 
 These flags control Bonereaper v2's late/favourite lanes without code edits:

@@ -364,6 +364,9 @@ pub struct WalkForwardConfig {
     /// Portfolio-level drawdown where clips scale to zero. Expressed as a
     /// fraction below peak equity, e.g. `0.25` for 25%.
     pub clip_drawdown_hard_pct: f64,
+    /// Minimum multiplier after the hard drawdown threshold. Default `0.0`
+    /// preserves hard-stop behavior; non-zero keeps a recovery-sized lane open.
+    pub clip_drawdown_min_multiplier: f64,
     pub br2_disable_internal_model_gates: bool,
     pub br2_min_composite_direction: f32,
     pub br2_early_clip_frac: f32,
@@ -513,6 +516,7 @@ impl Default for WalkForwardConfig {
             clip_fraction_of_equity: None,
             clip_drawdown_soft_pct: 1.0,
             clip_drawdown_hard_pct: 1.0,
+            clip_drawdown_min_multiplier: 0.0,
             br2_disable_internal_model_gates: false,
             br2_min_composite_direction: 0.10,
             br2_early_clip_frac: 0.00,
@@ -707,6 +711,7 @@ pub struct SummaryRunConfig {
     pub clip_fraction_of_equity: Option<f64>,
     pub clip_drawdown_soft_pct: f64,
     pub clip_drawdown_hard_pct: f64,
+    pub clip_drawdown_min_multiplier: f64,
     pub br2_disable_internal_model_gates: bool,
     pub br2_min_composite_direction: f32,
     pub br2_early_clip_frac: f32,
@@ -1099,7 +1104,12 @@ fn per_market_exposure_cap(cfg: &WalkForwardConfig, bankroll: f64) -> f64 {
     }
 }
 
-fn drawdown_clip_multiplier(drawdown_pct: f64, soft_pct: f64, hard_pct: f64) -> f64 {
+fn drawdown_clip_multiplier(
+    drawdown_pct: f64,
+    soft_pct: f64,
+    hard_pct: f64,
+    min_multiplier: f64,
+) -> f64 {
     if !drawdown_pct.is_finite()
         || !soft_pct.is_finite()
         || !hard_pct.is_finite()
@@ -1107,12 +1117,18 @@ fn drawdown_clip_multiplier(drawdown_pct: f64, soft_pct: f64, hard_pct: f64) -> 
     {
         return 1.0;
     }
+    let floor = if min_multiplier.is_finite() {
+        min_multiplier.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     if drawdown_pct <= soft_pct {
         1.0
     } else if drawdown_pct >= hard_pct {
-        0.0
+        floor
     } else {
-        1.0 - (drawdown_pct - soft_pct) / (hard_pct - soft_pct)
+        let progress = (drawdown_pct - soft_pct) / (hard_pct - soft_pct);
+        1.0 - progress * (1.0 - floor)
     }
 }
 
@@ -3363,6 +3379,7 @@ async fn run_portfolio(
                 drawdown_pct,
                 cfg.clip_drawdown_soft_pct,
                 cfg.clip_drawdown_hard_pct,
+                cfg.clip_drawdown_min_multiplier,
             );
             // Per-market clip: a fraction of current equity (compounds), else
             // static fallback. Hard floor + ceiling for sanity.
@@ -3878,6 +3895,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         clip_fraction_of_equity: cfg.clip_fraction_of_equity,
         clip_drawdown_soft_pct: cfg.clip_drawdown_soft_pct,
         clip_drawdown_hard_pct: cfg.clip_drawdown_hard_pct,
+        clip_drawdown_min_multiplier: cfg.clip_drawdown_min_multiplier,
         br2_disable_internal_model_gates: cfg.br2_disable_internal_model_gates,
         br2_min_composite_direction: cfg.br2_min_composite_direction,
         br2_early_clip_frac: cfg.br2_early_clip_frac,
@@ -4472,6 +4490,18 @@ model_btc_whipsaw_risk_weight = 0.31
         assert_eq!(quality.whipsaw_lt_035.fills, 1);
         assert_eq!(quality.market_samples, 2);
         assert!((quality.market_majority_side_accuracy - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn drawdown_clip_multiplier_can_keep_recovery_floor() {
+        assert!((drawdown_clip_multiplier(0.10, 0.20, 0.40, 0.10) - 1.0).abs() < 1e-12);
+        assert!((drawdown_clip_multiplier(0.30, 0.20, 0.40, 0.10) - 0.55).abs() < 1e-12);
+        assert!((drawdown_clip_multiplier(0.50, 0.20, 0.40, 0.10) - 0.10).abs() < 1e-12);
+    }
+
+    #[test]
+    fn drawdown_clip_multiplier_preserves_zero_hard_stop_by_default() {
+        assert!((drawdown_clip_multiplier(0.50, 0.20, 0.40, 0.0) - 0.0).abs() < 1e-12);
     }
 
     #[test]
