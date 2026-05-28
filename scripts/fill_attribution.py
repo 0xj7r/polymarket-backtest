@@ -4,16 +4,41 @@
 import argparse
 import datetime as dt
 import json
+import os
+import subprocess
+import tempfile
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, TextIO
 
 
-def open_input(path: str) -> TextIO:
+AWS_PROFILE: str | None = None
+
+
+def materialize(path: str) -> tuple[Path, bool]:
+    if not path.startswith("s3://"):
+        return Path(path), False
+    tmp = tempfile.NamedTemporaryFile(prefix="pm-markets-", suffix=".jsonl", delete=False)
+    tmp.close()
+    cmd = ["aws", "s3", "cp", path, tmp.name]
+    env = os.environ.copy()
+    if AWS_PROFILE:
+        env["AWS_PROFILE"] = AWS_PROFILE
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True, env=env)
+    except subprocess.CalledProcessError as exc:
+        Path(tmp.name).unlink(missing_ok=True)
+        stderr = exc.stderr.strip()
+        raise RuntimeError(f"aws s3 cp failed for {path}: {stderr}") from exc
+    return Path(tmp.name), True
+
+
+def open_input(path: str) -> tuple[TextIO, bool]:
     if path == "-":
-        return sys.stdin
-    return Path(path).open()
+        return sys.stdin, False
+    materialized, should_delete = materialize(path)
+    return materialized.open(), should_delete
 
 
 def iter_rows(f: Iterable[str]) -> Iterable[Dict[str, Any]]:
@@ -40,8 +65,16 @@ def fill_won(row: Dict[str, Any], side: str) -> bool | None:
 
 
 def price_bucket(price: float) -> str:
+    if price < 0.01:
+        return "<1c"
+    if price < 0.04:
+        return "1-4c"
+    if price < 0.06:
+        return "4-6c"
+    if price < 0.08:
+        return "6-8c"
     if price < 0.10:
-        return "<10c"
+        return "8-10c"
     if price < 0.20:
         return "10-20c"
     if price < 0.50:
@@ -66,21 +99,39 @@ def fmt(value: float, decimals: int = 2) -> str:
     return f"{value:.{decimals}f}"
 
 
+def settled_fill_pnl(row: Dict[str, Any], fill: Dict[str, Any]) -> float | None:
+    won = fill_won(row, str(fill.get("side") or "unknown"))
+    if won is None:
+        return None
+    shares = float(fill.get("shares") or 0.0)
+    notional = float(fill.get("notional") or 0.0)
+    return (shares if won else 0.0) - notional
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("markets_jsonl", help="per-market walk-forward JSONL, or '-' for stdin")
     parser.add_argument("--strategy", default="bonereaper_v2")
     parser.add_argument("--recent", type=int, default=12)
+    parser.add_argument("--aws-profile", help="AWS profile for s3:// inputs")
     args = parser.parse_args()
+    global AWS_PROFILE
+    AWS_PROFILE = args.aws_profile
 
     rows = 0
     fills = []
-    with open_input(args.markets_jsonl) as f:
-        for row in iter_rows(f):
-            rows += 1
-            strat = strategy_result(row, args.strategy)
-            for fill in strat.get("fills_detail") or []:
-                fills.append((row, fill))
+    f, should_delete = open_input(args.markets_jsonl)
+    path_to_delete = Path(f.name) if should_delete else None
+    try:
+        with f:
+            for row in iter_rows(f):
+                rows += 1
+                strat = strategy_result(row, args.strategy)
+                for fill in strat.get("fills_detail") or []:
+                    fills.append((row, fill))
+    finally:
+        if path_to_delete is not None:
+            path_to_delete.unlink(missing_ok=True)
 
     by_tag: Dict[str, Dict[str, Any]] = defaultdict(
         lambda: {
@@ -92,6 +143,11 @@ def main() -> int:
             "no": 0,
             "wins": 0,
             "losses": 0,
+            "settled_pnl": 0.0,
+            "settled_count": 0,
+            "buckets": defaultdict(
+                lambda: {"fills": 0, "notional": 0.0, "wins": 0, "losses": 0, "settled_pnl": 0.0}
+            ),
         }
     )
     side_counts: Counter[str] = Counter()
@@ -121,6 +177,18 @@ def main() -> int:
             stat["wins"] += 1
         elif won is False:
             stat["losses"] += 1
+        settled_pnl = settled_fill_pnl(row, fill)
+        if settled_pnl is not None:
+            stat["settled_pnl"] += settled_pnl
+            stat["settled_count"] += 1
+            bucket_stat = stat["buckets"][price_bucket(price)]
+            bucket_stat["fills"] += 1
+            bucket_stat["notional"] += notional
+            bucket_stat["settled_pnl"] += settled_pnl
+            if won is True:
+                bucket_stat["wins"] += 1
+            elif won is False:
+                bucket_stat["losses"] += 1
 
     print(f"markets={rows} fills={len(fills)}")
     print(f"side_counts={dict(side_counts)}")
@@ -134,8 +202,16 @@ def main() -> int:
         print(
             f"  {tag}: fills={stat['fills']} yes={stat['yes']} no={stat['no']} "
             f"notional=${fmt(stat['notional'])} shares={fmt(stat['shares'], 1)} "
-            f"avg_px={fmt(avg_px, 3)} side_wr={fmt(hit_rate * 100.0, 1)}%"
+            f"avg_px={fmt(avg_px, 3)} side_wr={fmt(hit_rate * 100.0, 1)}% "
+            f"settled_pnl=${fmt(stat['settled_pnl'])}"
         )
+        for bucket, bucket_stat in sorted(stat["buckets"].items()):
+            bucket_resolved = bucket_stat["wins"] + bucket_stat["losses"]
+            bucket_hit = bucket_stat["wins"] / bucket_resolved if bucket_resolved else 0.0
+            print(
+                f"    {bucket}: fills={bucket_stat['fills']} notional=${fmt(bucket_stat['notional'])} "
+                f"wr={fmt(bucket_hit * 100.0, 1)}% settled_pnl=${fmt(bucket_stat['settled_pnl'])}"
+            )
 
     if fills and args.recent > 0:
         print("recent:")

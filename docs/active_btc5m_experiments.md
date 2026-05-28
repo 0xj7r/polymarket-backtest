@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-28 19:10 UTC.
+Last updated: 2026-05-28 20:00 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -59,21 +59,22 @@ Purpose: reproduce the old BTC5m no-tail leader at `$5,000` starting capital.
 
 Latest checkpoint observed:
 
-- Markets: `750`
-- PnL: `-$256.10`
-- Return: `-5.12%`
-- Max drawdown: `11.35%`
-- Fills: `356`
-- Markets with orders: `179`
+- Markets: `8,250`
+- PnL: `+$13,954.45`
+- Return: `+279.09%`
+- Max drawdown: `27.57%`
+- Fills: `3,695`
+- Markets with orders: `1,821`
+- Fill log loss: `0.5354`
 
-Early attribution:
+Latest attribution:
 
-- `br2_late_favourite_load`: `+$302.34`
-- `br2_high_skew_load`: `+$149.78`
-- `br2_late_confirm`: `-$708.22`
+- `br2_late_favourite_load`: `+$5,188.66`
+- `br2_high_skew_load`: `+$1,621.74`
+- `br2_late_confirm`: `+$7,144.05`
 
-Interpretation: early loss is concentrated in `late_confirm`; favourite and
-high-skew lanes are positive in the same checkpoint.
+Interpretation: the scaled no-tail reproduction has recovered strongly and is
+currently the clean active benchmark. It still has no convex tail insurance.
 
 ### Pre-Fix Tail Variant
 
@@ -115,39 +116,41 @@ anchored to all directional exposure rather than only `late_favourite_load`.
 
 Latest checkpoint observed:
 
-- Markets: `3,000`
-- PnL: `+$3,990.27`
-- Return: `+79.81%`
+- Markets: `7,500`
+- PnL: `+$11,881.35`
+- Return: `+237.63%`
 - Max drawdown: `26.73%`
-- Fills: `1,993`
-- Markets with orders: `851`
+- Fills: `3,969`
+- Markets with orders: `1,715`
+- Fill log loss: `0.5026`
 
 Attribution:
 
-- `br2_late_confirm`: `+$1,977.59`
-- `br2_late_favourite_load`: `+$2,119.26`
-- `br2_high_skew_load`: `+$489.97`
-- `br2_convex_tail`: `-$596.56`
+- `br2_late_confirm`: `+$7,229.11`
+- `br2_late_favourite_load`: `+$4,536.35`
+- `br2_high_skew_load`: `+$1,106.83`
+- `br2_convex_tail`: `-$990.93`
 
 Comparable checkpoint versus no-tail:
 
-- Through the first `2,500` markets, fixed-tail was `-$299.15` behind no-tail:
-  `+$1,957.17` versus `+$2,256.31`.
-- Directional lanes were roughly comparable; the gap was almost entirely
-  convex-tail insurance spend (`br2_convex_tail = -$314.30`).
+- Through the first `7,250` markets, fixed-tail was `-$1,127.07` behind no-tail:
+  `+$10,934.62` versus `+$12,061.70`.
+- Directional lanes were roughly comparable; the gap was mostly convex-tail
+  insurance spend (`br2_convex_tail = -$793.26` at the `7,250` checkpoint).
 - Max drawdown was slightly lower with tails (`26.73%` versus `27.57%`).
 
-Tail price buckets through `2,500` markets:
+Tail price buckets through the latest downloaded fixed-tail market file:
 
-- `4-6c`: `13` fills, `2` wins, `+$151.99`
-- `6-8c`: `25` fills, `2` wins, `+$53.98`
-- `8-10c`: `124` fills, `5` wins, `-$520.26`
+- `4-6c`: `25` fills, `8.0%` hit rate, `+$101.62` raw binary settlement PnL
+- `6-8c`: `83` fills, `4.8%` hit rate, `-$74.66` raw binary settlement PnL
+- `8-10c`: `334` fills, `5.7%` hit rate, `-$1,107.79` raw binary settlement PnL
 
 Interpretation: cheap tails should be judged as portfolio insurance, not as a
-standalone alpha lane. The current evidence says `4-8c` tails fill and have
-positive convex payoff in this slice, while `8-10c` dominates the bleed. A
-future candidate should test `tail_max_ask = 0.08` or a much smaller 8-10c
-size, but only after the active full-history runs complete.
+standalone alpha lane. The current evidence says the insurance cost is
+acceptable only if it reduces path damage in later reversal regimes. So far it
+slightly reduces max drawdown, but `8-10c` dominates the bleed. A future
+candidate should keep convex coverage but test `tail_max_ask = 0.08` or a much
+smaller 8-10c size, rather than disabling tails outright.
 
 ### Late-Confirm Range-Gated Variant
 
@@ -183,6 +186,21 @@ Evidence from the 750-market no-tail checkpoint:
 
 This post-hoc result is a hypothesis generator only. Promotion requires a clean
 full-history replay with the gate applied during order generation.
+
+Latest checkpoint observed:
+
+- Markets: `250`
+- PnL: `-$162.17`
+- Return: `-3.24%`
+- Max drawdown: `4.57%`
+- Fills: `11`
+- Markets with orders: `8`
+
+Interpretation: this blunt `late_confirm` range gate materially reduces early
+loss versus the no-tail/tail baselines over the first `250` markets, but it also
+starves participation. It should not be promoted unless it continues to improve
+path risk without suppressing the profitable favourite/high-skew lanes over a
+much larger prefix.
 
 ### No-Tail Late-Confirm Range-Gated Isolation
 
