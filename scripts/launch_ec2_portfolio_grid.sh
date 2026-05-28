@@ -162,6 +162,7 @@ SYNC_SOURCE="1"
 SNAPSHOT_S3_URI=""
 META_TRAINING_SAMPLES_CACHE_S3_URI=""
 REUSE_ARTIFACTS_RUN_ID=""
+PM_APP_BINARY_S3_URI=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -300,6 +301,7 @@ while [ $# -gt 0 ]; do
         --snapshot-s3-uri) SNAPSHOT_S3_URI="$2"; shift 2 ;;
         --meta-training-samples-cache-s3-uri) META_TRAINING_SAMPLES_CACHE_S3_URI="$2"; shift 2 ;;
         --reuse-artifacts-run-id) REUSE_ARTIFACTS_RUN_ID="$2"; shift 2 ;;
+        --pm-app-binary-s3-uri) PM_APP_BINARY_S3_URI="$2"; shift 2 ;;
         --no-source-sync) SYNC_SOURCE="0"; shift ;;
         *) echo "unknown arg: $1" >&2; exit 1 ;;
     esac
@@ -355,6 +357,9 @@ fi
 if [ -n "$META_TRAINING_SAMPLES_CACHE_S3_URI" ]; then
     echo "Meta samples cache in: $META_TRAINING_SAMPLES_CACHE_S3_URI"
 fi
+if [ -n "$PM_APP_BINARY_S3_URI" ]; then
+    echo "pm-app binary in: $PM_APP_BINARY_S3_URI"
+fi
 
 USER_DATA=$(cat <<EOF
 #!/bin/bash
@@ -372,7 +377,14 @@ aws s3 sync "s3://${SOURCE_BUCKET}/${SOURCE_PREFIX}/" /opt/pm/ \
     --exclude "target/*" --exclude "data/*" --exclude ".git/*"
 cd /opt/pm
 export PM_SOURCE_GIT_SHA="${SOURCE_GIT_SHA}"
-cargo build --release -p pm-app
+if [ -n "${PM_APP_BINARY_S3_URI}" ]; then
+  mkdir -p /opt/pm/target/release
+  aws s3 cp "${PM_APP_BINARY_S3_URI}" /opt/pm/target/release/pm-app
+  chmod +x /opt/pm/target/release/pm-app
+  echo "[\$(date -u)] using prebuilt pm-app from ${PM_APP_BINARY_S3_URI}"
+else
+  cargo build --release -p pm-app
+fi
 
 if [ -n "${MARKETS_KEY}" ]; then
   aws s3 cp "s3://${SOURCE_BUCKET}/markets/${MARKETS_KEY}" /opt/pm/markets.jsonl
