@@ -567,6 +567,23 @@ Scaled 1K range + tail exact-profile run:
 - Instance: `i-026438638670e3522`
 - Status: active
 
+Latest checkpoint:
+
+- Markets: `1,500`
+- PnL: `+$667.10`
+- Return: `+66.71%`
+- Max drawdown: `18.23%`
+- Fills: `716`
+- Active markets: `21.9%`
+- Attribution:
+  - `br2_late_confirm`: `+$392.93`
+  - `br2_late_favourite_load`: `+$167.54`
+  - `br2_high_skew_load`: `+$88.63`
+  - `br2_convex_tail`: `+$18.00`
+- Config verification: matches the 5K tail08 exact profile outside scaled
+  `starting_cash_usdc`, `max_clip_usdc`, and
+  `max_per_market_exposure_usdc`.
+
 Scaled 3K range + tail exact-profile run:
 
 - Run: `20260528T212132Z-portfolio-grid-68579`
@@ -583,6 +600,23 @@ Scaled 3K range + tail exact-profile run:
 - Binary: prebuilt `pm-app-al2023-x86_64-607c3156`
 - Instance: `i-0b97808c7b58a5dda`
 - Status: active
+
+Latest checkpoint:
+
+- Markets: `750`
+- PnL: `+$603.00`
+- Return: `+20.10%`
+- Max drawdown: `8.58%`
+- Fills: `238`
+- Active markets: `15.3%`
+- Attribution:
+  - `br2_late_favourite_load`: `+$214.25`
+  - `br2_late_confirm`: `+$155.97`
+  - `br2_convex_tail`: `+$125.95`
+  - `br2_high_skew_load`: `+$106.83`
+- Config verification: matches the 5K tail08 exact profile outside scaled
+  `starting_cash_usdc`, `max_clip_usdc`, and
+  `max_per_market_exposure_usdc`.
 
 Stopped cheaper-tail branch:
 
