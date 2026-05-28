@@ -135,6 +135,18 @@ For sizing, fill, latency, drawdown, and strategy-rule sweeps, pass
 `--forbid-meta-training`; the launcher will fail before creating an instance
 unless a frozen snapshot is supplied.
 
+For fast follow-up sweeps that do not change Rust code, reuse a prebuilt Linux
+`pm-app` binary to avoid spending several minutes compiling on every EC2
+instance:
+
+```bash
+--pm-app-binary-s3-uri s3://pm-research-backtest-prod/artifacts/binaries/pm-app-al2023-x86_64-607c3156
+```
+
+Only reuse a binary when the Rust crates are unchanged from the binary's source
+revision. Strategy-rule and sizing sweeps are fine; model or execution code
+changes require a fresh build and a new uploaded binary.
+
 For drawdown-controlled sweeps, avoid a permanent hard freeze unless that is
 the explicit test. `--clip-drawdown-min-multiplier` keeps a small recovery lane
 open after the hard threshold:
