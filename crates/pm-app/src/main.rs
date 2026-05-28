@@ -2201,24 +2201,32 @@ async fn walk_forward(
         write_summary_json_atomic(&p, &summary)?;
         tracing::info!(?p, "wrote summary");
 
-        // Write a basic run manifest for reproducibility (especially useful with --profile)
-        if profile.is_some() || bonereaper_profile.is_some() {
-            let manifest_path = p.with_file_name("run_manifest.json");
-            let manifest = serde_json::json!({
-                "profile_path": profile.as_ref().map(|p| p.to_string_lossy()),
-                "git_sha": std::process::Command::new("git").args(["rev-parse", "HEAD"]).output().ok().and_then(|o| String::from_utf8(o.stdout).ok()).map(|s| s.trim().to_string()),
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-                "command": std::env::args().collect::<Vec<_>>(),
-                "effective_config": effective_config,
+        let git_sha = std::env::var("PM_SOURCE_GIT_SHA")
+            .ok()
+            .filter(|sha| !sha.trim().is_empty())
+            .or_else(|| {
+                std::process::Command::new("git")
+                    .args(["rev-parse", "HEAD"])
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| s.trim().to_string())
             });
-            if let Ok(mut f) = std::fs::File::create(&manifest_path) {
-                let _ = writeln!(
-                    f,
-                    "{}",
-                    serde_json::to_string_pretty(&manifest).unwrap_or_default()
-                );
-                tracing::info!(?manifest_path, "wrote run_manifest.json");
-            }
+        let manifest_path = p.with_file_name("run_manifest.json");
+        let manifest = serde_json::json!({
+            "profile_path": profile.as_ref().map(|p| p.to_string_lossy()),
+            "git_sha": git_sha,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "command": std::env::args().collect::<Vec<_>>(),
+            "effective_config": effective_config,
+        });
+        if let Ok(mut f) = std::fs::File::create(&manifest_path) {
+            let _ = writeln!(
+                f,
+                "{}",
+                serde_json::to_string_pretty(&manifest).unwrap_or_default()
+            );
+            tracing::info!(?manifest_path, "wrote run_manifest.json");
         }
     }
     Ok(())

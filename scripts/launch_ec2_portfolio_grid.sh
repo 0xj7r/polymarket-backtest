@@ -302,6 +302,8 @@ if [ "$SYNC_SOURCE" = "1" ]; then
     [ -d docs ] && aws s3 sync docs "s3://${SOURCE_BUCKET}/${SOURCE_PREFIX}/docs/" --delete --quiet
 fi
 
+SOURCE_GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+
 AMI=$(aws ssm get-parameter \
     --region "$REGION" \
     --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
@@ -309,6 +311,7 @@ AMI=$(aws ssm get-parameter \
 
 echo "AMI: $AMI"
 echo "Run ID: $RUN_ID"
+echo "Source git SHA: $SOURCE_GIT_SHA"
 if [ -n "$SNAPSHOT_S3_URI" ]; then
     echo "Meta snapshot in: $SNAPSHOT_S3_URI"
 fi
@@ -334,6 +337,7 @@ mkdir -p /opt/pm/artifacts /opt/pm/results
 aws s3 sync "s3://${SOURCE_BUCKET}/${SOURCE_PREFIX}/" /opt/pm/ \
     --exclude "target/*" --exclude "data/*" --exclude ".git/*"
 cd /opt/pm
+export PM_SOURCE_GIT_SHA="${SOURCE_GIT_SHA}"
 cargo build --release -p pm-app
 
 if [ -n "${MARKETS_KEY}" ]; then
@@ -441,6 +445,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
         sleep 180
         [ -f "\${OUT_DIR}/markets.jsonl" ] && aws s3 cp "\${OUT_DIR}/markets.jsonl" "s3://${RESULTS_BUCKET}/results/${RUN_ID}/\${LABEL}/markets.jsonl" || true
         [ -f "\${OUT_DIR}/summary.json" ] && aws s3 cp "\${OUT_DIR}/summary.json" "s3://${RESULTS_BUCKET}/results/${RUN_ID}/\${LABEL}/summary.json" || true
+        [ -f "\${OUT_DIR}/run_manifest.json" ] && aws s3 cp "\${OUT_DIR}/run_manifest.json" "s3://${RESULTS_BUCKET}/results/${RUN_ID}/\${LABEL}/run_manifest.json" || true
       done
     ) &
     UPLOADER_PID="\$!"
@@ -563,6 +568,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
 
     aws s3 cp "\${OUT_DIR}/markets.jsonl" "s3://${RESULTS_BUCKET}/results/${RUN_ID}/\${LABEL}/markets.jsonl"
     aws s3 cp "\${OUT_DIR}/summary.json" "s3://${RESULTS_BUCKET}/results/${RUN_ID}/\${LABEL}/summary.json"
+    aws s3 cp "\${OUT_DIR}/run_manifest.json" "s3://${RESULTS_BUCKET}/results/${RUN_ID}/\${LABEL}/run_manifest.json" || true
     aws s3 cp "\${OUT_DIR}/run.log" "s3://${RESULTS_BUCKET}/results/${RUN_ID}/\${LABEL}/run.log"
   done
 done
