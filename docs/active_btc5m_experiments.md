@@ -70,6 +70,8 @@ Active memory-safe full-history candidates:
    - Instance type: `r7i.4xlarge`
    - Memory-safety change: `max_concurrent_fetches = 8`, larger memory host.
    - Strategy logic: same 1K exact profile and frozen meta-calibrator.
+   - First checkpoint: `250` markets, `+$60.01`, max drawdown `3.04%`,
+     `33` fills.
 2. Broader tail-coverage variant
    - Run: `20260528T225904Z-portfolio-grid-53933`
    - Label:
@@ -82,6 +84,8 @@ Active memory-safe full-history candidates:
      `tail_min_skew_step = 0.01`, `tail_extreme_threshold = 0.25`,
      `budget_favourite_spend_frac = 0.30`, and
      `budget_favourite_upside_frac = 0.40`.
+   - First checkpoint: `250` markets, `+$59.98`, max drawdown `3.04%`,
+     `34` fills.
 
 Selection rule: once both memory-safe runners finish, promote the better 1K
 path unless the coverage variant improves hedge/reversal protection at an
