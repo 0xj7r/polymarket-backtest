@@ -113,9 +113,41 @@ Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_directional_tai
 Purpose: same tail variant after commit `df968bcf`, where convex tails are
 anchored to all directional exposure rather than only `late_favourite_load`.
 
-Status at last observation: training completed through `4,500/4,500` markets
-and portfolio replay was about to start. No summary checkpoint had uploaded
-yet.
+Latest checkpoint observed:
+
+- Markets: `3,000`
+- PnL: `+$3,990.27`
+- Return: `+79.81%`
+- Max drawdown: `26.73%`
+- Fills: `1,993`
+- Markets with orders: `851`
+
+Attribution:
+
+- `br2_late_confirm`: `+$1,977.59`
+- `br2_late_favourite_load`: `+$2,119.26`
+- `br2_high_skew_load`: `+$489.97`
+- `br2_convex_tail`: `-$596.56`
+
+Comparable checkpoint versus no-tail:
+
+- Through the first `2,500` markets, fixed-tail was `-$299.15` behind no-tail:
+  `+$1,957.17` versus `+$2,256.31`.
+- Directional lanes were roughly comparable; the gap was almost entirely
+  convex-tail insurance spend (`br2_convex_tail = -$314.30`).
+- Max drawdown was slightly lower with tails (`26.73%` versus `27.57%`).
+
+Tail price buckets through `2,500` markets:
+
+- `4-6c`: `13` fills, `2` wins, `+$151.99`
+- `6-8c`: `25` fills, `2` wins, `+$53.98`
+- `8-10c`: `124` fills, `5` wins, `-$520.26`
+
+Interpretation: cheap tails should be judged as portfolio insurance, not as a
+standalone alpha lane. The current evidence says `4-8c` tails fill and have
+positive convex payoff in this slice, while `8-10c` dominates the bleed. A
+future candidate should test `tail_max_ask = 0.08` or a much smaller 8-10c
+size, but only after the active full-history runs complete.
 
 ### Late-Confirm Range-Gated Variant
 
