@@ -514,6 +514,19 @@ Interpretation: this is the current leading exact-profile candidate. It keeps
 the strong range-gated directional edge and avoids the broad-tail bleed. It
 must still complete full history before promotion.
 
+Scaled 1K verification run:
+
+- Run: `20260528T210327Z-portfolio-grid-33677`
+- Label: `clip_0p015_gross_250_expfrac_0p12_lat500ms_cap1k_btc_5m_notail_lc_range50_exact`
+- Starting capital: `$1,000`
+- Gross cap: `$250`
+- Max clip: `$30`
+- Tails: disabled
+- Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
+- Binary: prebuilt `pm-app-al2023-x86_64-607c3156`
+- Instance: `i-06b79496ee1e34f04`
+- Status: active
+
 ## Decision Rules
 
 Promote a BTC5m candidate only if it beats the verified no-tail leader on a
