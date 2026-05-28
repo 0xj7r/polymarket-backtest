@@ -90,6 +90,10 @@ The launcher now writes partial `markets.jsonl` and `summary.json` every 250
 evaluated markets and syncs them to S3 every 180 seconds while each variant is
 running.
 
+When prewarming the local Telonex cache, keep `--prep-cache-max-concurrent`
+moderate. The launcher defaults to `64`; higher values can trigger S3 503
+retries and make parallel runners slower rather than faster.
+
 Use `--label-suffix` whenever two sweeps share the same clip/gross/latency
 settings but differ in strategy gates. The suffix is appended to the S3 result
 directory, which keeps full-history comparisons readable:

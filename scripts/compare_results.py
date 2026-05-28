@@ -47,10 +47,13 @@ def main(paths: List[str]):
             rows.append(
                 {
                     "path": str(path),
-                    "markets": s.get("markets_succeeded", 0),
+                    "markets": s.get("markets_attempted") or s.get("markets_succeeded", 0),
+                    "pnl": br.get("total_pnl_usdc"),
                     "compounded_return_pct": br.get("compounded_return_pct"),
                     "max_drawdown_pct": br.get("path_max_drawdown_pct"),
                     "sharpe": br.get("sharpe_ratio"),
+                    "fills": br.get("total_orders_filled"),
+                    "log_loss": ((br.get("model_fill_quality") or {}).get("all") or {}).get("log_loss"),
                     "profile": manifest.get("profile_path"),
                     "git_sha": (manifest.get("git_sha") or "")[:8],
                 }
@@ -62,15 +65,19 @@ def main(paths: List[str]):
     rows.sort(key=lambda r: (r["compounded_return_pct"] or -999), reverse=True)
 
     print(
-        f"{'Path':<45} {'Markets':>8} {'Return%':>10} {'MaxDD%':>9} {'Sharpe':>8} {'Profile':<30} {'SHA'}"
+        f"{'Path':<45} {'Markets':>8} {'PnL':>10} {'Return%':>10} {'MaxDD%':>9} "
+        f"{'Sharpe':>8} {'Fills':>8} {'LogLoss':>8} {'Profile':<30} {'SHA'}"
     )
-    print("-" * 130)
+    print("-" * 160)
     for r in rows:
         print(
             f"{r['path']:<45} {r['markets']:>8} "
+            f"{fmt_num(r['pnl']):>10} "
             f"{fmt_num(r['compounded_return_pct']):>10} "
             f"{fmt_num(r['max_drawdown_pct']):>9} "
             f"{fmt_num(r['sharpe']):>8} "
+            f"{fmt_num(r['fills'], 0):>8} "
+            f"{fmt_num(r['log_loss'], 4):>8} "
             f"{str(r['profile'] or ''):<30} {r['git_sha']}"
         )
 
