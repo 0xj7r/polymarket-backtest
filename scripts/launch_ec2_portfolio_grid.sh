@@ -95,6 +95,13 @@ BR2_TAIL_CLIP_FRAC="0.10"
 BR2_TAIL_MAX_CLIPS="3"
 BR2_TAIL_MIN_ASK="0.01"
 BR2_TAIL_MAX_ASK="0.10"
+BR2_TAIL_MIN_SECONDS_TO_CLOSE="10.0"
+BR2_TAIL_MIN_OBSERVED_RANGE="0.0"
+BR2_TAIL_TARGET_FAVOURITE_LOSS_COVERAGE_FRAC="0.00"
+BR2_TAIL_REVERSAL_COVERAGE_FRAC="0.00"
+BR2_TAIL_REVERSAL_MIN_SECONDS_TO_CLOSE="10.0"
+BR2_TAIL_REVERSAL_MAX_SECONDS_TO_CLOSE="35.0"
+BR2_TAIL_REVERSAL_MIN_FAVOURITE_ASK="0.85"
 BR2_TAIL_EXTREME_THRESHOLD="0.30"
 BR2_TAIL_MIN_SKEW_STEP="0.02"
 BR2_TAIL_BUDGET_FAVOURITE_SPEND_FRAC="0.05"
@@ -196,6 +203,13 @@ while [ $# -gt 0 ]; do
         --br2-tail-max-clips) BR2_TAIL_MAX_CLIPS="$2"; shift 2 ;;
         --br2-tail-min-ask) BR2_TAIL_MIN_ASK="$2"; shift 2 ;;
         --br2-tail-max-ask) BR2_TAIL_MAX_ASK="$2"; shift 2 ;;
+        --br2-tail-min-seconds-to-close) BR2_TAIL_MIN_SECONDS_TO_CLOSE="$2"; shift 2 ;;
+        --br2-tail-min-observed-range) BR2_TAIL_MIN_OBSERVED_RANGE="$2"; shift 2 ;;
+        --br2-tail-target-favourite-loss-coverage-frac) BR2_TAIL_TARGET_FAVOURITE_LOSS_COVERAGE_FRAC="$2"; shift 2 ;;
+        --br2-tail-reversal-coverage-frac) BR2_TAIL_REVERSAL_COVERAGE_FRAC="$2"; shift 2 ;;
+        --br2-tail-reversal-min-seconds-to-close) BR2_TAIL_REVERSAL_MIN_SECONDS_TO_CLOSE="$2"; shift 2 ;;
+        --br2-tail-reversal-max-seconds-to-close) BR2_TAIL_REVERSAL_MAX_SECONDS_TO_CLOSE="$2"; shift 2 ;;
+        --br2-tail-reversal-min-favourite-ask) BR2_TAIL_REVERSAL_MIN_FAVOURITE_ASK="$2"; shift 2 ;;
         --br2-tail-extreme-threshold) BR2_TAIL_EXTREME_THRESHOLD="$2"; shift 2 ;;
         --br2-tail-min-skew-step) BR2_TAIL_MIN_SKEW_STEP="$2"; shift 2 ;;
         --br2-tail-budget-favourite-spend-frac) BR2_TAIL_BUDGET_FAVOURITE_SPEND_FRAC="$2"; shift 2 ;;
@@ -481,6 +495,13 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-tail-max-clips "${BR2_TAIL_MAX_CLIPS}" \\
       --br2-tail-min-ask "${BR2_TAIL_MIN_ASK}" \\
       --br2-tail-max-ask "${BR2_TAIL_MAX_ASK}" \\
+      --br2-tail-min-seconds-to-close "${BR2_TAIL_MIN_SECONDS_TO_CLOSE}" \\
+      --br2-tail-min-observed-range "${BR2_TAIL_MIN_OBSERVED_RANGE}" \\
+      --br2-tail-target-favourite-loss-coverage-frac "${BR2_TAIL_TARGET_FAVOURITE_LOSS_COVERAGE_FRAC}" \\
+      --br2-tail-reversal-coverage-frac "${BR2_TAIL_REVERSAL_COVERAGE_FRAC}" \\
+      --br2-tail-reversal-min-seconds-to-close "${BR2_TAIL_REVERSAL_MIN_SECONDS_TO_CLOSE}" \\
+      --br2-tail-reversal-max-seconds-to-close "${BR2_TAIL_REVERSAL_MAX_SECONDS_TO_CLOSE}" \\
+      --br2-tail-reversal-min-favourite-ask "${BR2_TAIL_REVERSAL_MIN_FAVOURITE_ASK}" \\
       --br2-tail-extreme-threshold "${BR2_TAIL_EXTREME_THRESHOLD}" \\
       --br2-tail-min-skew-step "${BR2_TAIL_MIN_SKEW_STEP}" \\
       --br2-tail-budget-favourite-spend-frac "${BR2_TAIL_BUDGET_FAVOURITE_SPEND_FRAC}" \\
