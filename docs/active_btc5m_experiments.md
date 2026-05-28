@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-28 20:00 UTC.
+Last updated: 2026-05-28 20:07 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -161,6 +161,10 @@ Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_tail_fix_lc_ran
 Purpose: test the post-hoc failure isolation from the 750-market no-tail
 checkpoint using a clean forward replay.
 
+Status: stopped after preserving artifacts because it was launched with
+`replay_sample_ms = 0`, while the leader comparisons use `replay_sample_ms =
+1000`. The early checkpoint is useful only as a non-comparable smoke result.
+
 Only intentional strategy change versus the fixed-tail run:
 
 ```text
@@ -196,11 +200,19 @@ Latest checkpoint observed:
 - Fills: `11`
 - Markets with orders: `8`
 
-Interpretation: this blunt `late_confirm` range gate materially reduces early
+Interpretation: this blunt `late_confirm` range gate materially reduced early
 loss versus the no-tail/tail baselines over the first `250` markets, but it also
-starves participation. It should not be promoted unless it continues to improve
-path risk without suppressing the profitable favourite/high-skew lanes over a
-much larger prefix.
+starved participation. Because the replay cadence differed from the leaders,
+promotion requires the corrected `sample1000` relaunch below.
+
+Corrected relaunch:
+
+- Run: `20260528T200616Z-portfolio-grid-23412`
+- Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_tail_fix_lc_range50_sample1000`
+- Replay sample: `1000ms`
+- Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
+- Meta retraining: forbidden
+- Status: active on instance `i-0574c5824b44bd339`
 
 ### No-Tail Late-Confirm Range-Gated Isolation
 
@@ -212,6 +224,9 @@ Purpose: isolate the `late_confirm_max_observed_range = 0.50` change without
 convex tails. This should be compared directly against the scaled no-tail
 reproduction run.
 
+Status: stopped after preserving artifacts because it shared the same
+`replay_sample_ms = 0` comparability issue as the tail range-gated variant.
+
 Only intentional strategy changes versus the scaled no-tail reproduction:
 
 ```text
@@ -220,7 +235,14 @@ Only intentional strategy changes versus the scaled no-tail reproduction:
 --br2-tail-max-clips 0
 ```
 
-Status at launch: active on instance `i-0924b2f000a266257`.
+Corrected relaunch:
+
+- Run: `20260528T200646Z-portfolio-grid-24376`
+- Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_notail_lc_range50_sample1000`
+- Replay sample: `1000ms`
+- Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
+- Meta retraining: forbidden
+- Status: active on instance `i-01e76f14cfabc5f39`
 
 ## Decision Rules
 
