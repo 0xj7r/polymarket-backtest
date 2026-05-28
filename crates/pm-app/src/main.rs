@@ -567,6 +567,27 @@ enum Cmd {
         /// Bonereaper v2 tail budget cap as fraction of favourite upside.
         #[arg(long, default_value = "0.25")]
         br2_tail_budget_favourite_upside_frac: f32,
+        /// Bonereaper v2 boosted tail coverage target in choppy/reversal regimes.
+        #[arg(long, default_value = "0.0")]
+        br2_tail_regime_boost_coverage_frac: f32,
+        /// Bonereaper v2 boosted tail spend cap as fraction of favourite spend.
+        #[arg(long, default_value = "0.0")]
+        br2_tail_regime_boost_budget_spend_frac: f32,
+        /// Bonereaper v2 boosted tail spend cap as fraction of favourite upside.
+        #[arg(long, default_value = "0.0")]
+        br2_tail_regime_boost_budget_upside_frac: f32,
+        /// Bonereaper v2 minimum whipsaw score for boosted tail coverage.
+        #[arg(long, default_value = "1.0")]
+        br2_tail_regime_boost_min_whipsaw_score: f32,
+        /// Bonereaper v2 minimum reversal pressure for boosted tail coverage.
+        #[arg(long, default_value = "1.0")]
+        br2_tail_regime_boost_min_reversal_pressure: f32,
+        /// Bonereaper v2 minimum 180s realized vol for boosted tail coverage.
+        #[arg(long, default_value = "1000000000.0")]
+        br2_tail_regime_boost_min_realized_vol_180s_bps: f32,
+        /// Bonereaper v2 maximum path efficiency for boosted tail coverage.
+        #[arg(long, default_value = "-1.0")]
+        br2_tail_regime_boost_max_path_efficiency: f32,
         /// Enable the runner-level model gate after strategy emission.
         #[arg(long, default_value_t = true)]
         enforce_model_gate: bool,
@@ -1106,6 +1127,13 @@ async fn main() -> Result<()> {
             br2_tail_min_skew_step,
             br2_tail_budget_favourite_spend_frac,
             br2_tail_budget_favourite_upside_frac,
+            br2_tail_regime_boost_coverage_frac,
+            br2_tail_regime_boost_budget_spend_frac,
+            br2_tail_regime_boost_budget_upside_frac,
+            br2_tail_regime_boost_min_whipsaw_score,
+            br2_tail_regime_boost_min_reversal_pressure,
+            br2_tail_regime_boost_min_realized_vol_180s_bps,
+            br2_tail_regime_boost_max_path_efficiency,
             enforce_model_gate,
             disable_model_gate,
             model_gate_min_confidence,
@@ -1233,6 +1261,13 @@ async fn main() -> Result<()> {
                 br2_tail_min_skew_step,
                 br2_tail_budget_favourite_spend_frac,
                 br2_tail_budget_favourite_upside_frac,
+                br2_tail_regime_boost_coverage_frac,
+                br2_tail_regime_boost_budget_spend_frac,
+                br2_tail_regime_boost_budget_upside_frac,
+                br2_tail_regime_boost_min_whipsaw_score,
+                br2_tail_regime_boost_min_reversal_pressure,
+                br2_tail_regime_boost_min_realized_vol_180s_bps,
+                br2_tail_regime_boost_max_path_efficiency,
                 enforce_model_gate && !disable_model_gate,
                 model_gate_min_confidence,
                 model_gate_max_risk,
@@ -1894,6 +1929,13 @@ async fn walk_forward(
     br2_tail_min_skew_step: f32,
     br2_tail_budget_favourite_spend_frac: f32,
     br2_tail_budget_favourite_upside_frac: f32,
+    br2_tail_regime_boost_coverage_frac: f32,
+    br2_tail_regime_boost_budget_spend_frac: f32,
+    br2_tail_regime_boost_budget_upside_frac: f32,
+    br2_tail_regime_boost_min_whipsaw_score: f32,
+    br2_tail_regime_boost_min_reversal_pressure: f32,
+    br2_tail_regime_boost_min_realized_vol_180s_bps: f32,
+    br2_tail_regime_boost_max_path_efficiency: f32,
     enforce_model_gate: bool,
     model_gate_min_confidence: f32,
     model_gate_max_risk: f32,
@@ -2090,6 +2132,13 @@ async fn walk_forward(
         br2_tail_min_skew_step,
         br2_tail_budget_favourite_spend_frac,
         br2_tail_budget_favourite_upside_frac,
+        br2_tail_regime_boost_coverage_frac,
+        br2_tail_regime_boost_budget_spend_frac,
+        br2_tail_regime_boost_budget_upside_frac,
+        br2_tail_regime_boost_min_whipsaw_score,
+        br2_tail_regime_boost_min_reversal_pressure,
+        br2_tail_regime_boost_min_realized_vol_180s_bps,
+        br2_tail_regime_boost_max_path_efficiency,
         enforce_model_gate,
         model_gate_min_confidence,
         model_gate_max_risk,
@@ -2172,6 +2221,13 @@ async fn walk_forward(
         "br2_tail_min_observed_range": wf_cfg.br2_tail_min_observed_range,
         "br2_tail_budget_favourite_spend_frac": wf_cfg.br2_tail_budget_favourite_spend_frac,
         "br2_tail_budget_favourite_upside_frac": wf_cfg.br2_tail_budget_favourite_upside_frac,
+        "br2_tail_regime_boost_coverage_frac": wf_cfg.br2_tail_regime_boost_coverage_frac,
+        "br2_tail_regime_boost_budget_spend_frac": wf_cfg.br2_tail_regime_boost_budget_spend_frac,
+        "br2_tail_regime_boost_budget_upside_frac": wf_cfg.br2_tail_regime_boost_budget_upside_frac,
+        "br2_tail_regime_boost_min_whipsaw_score": wf_cfg.br2_tail_regime_boost_min_whipsaw_score,
+        "br2_tail_regime_boost_min_reversal_pressure": wf_cfg.br2_tail_regime_boost_min_reversal_pressure,
+        "br2_tail_regime_boost_min_realized_vol_180s_bps": wf_cfg.br2_tail_regime_boost_min_realized_vol_180s_bps,
+        "br2_tail_regime_boost_max_path_efficiency": wf_cfg.br2_tail_regime_boost_max_path_efficiency,
         "br2_tail_target_favourite_loss_coverage_frac": wf_cfg.br2_tail_target_favourite_loss_coverage_frac,
         "model_gate_min_edge": wf_cfg.model_gate_min_edge,
         "model_btc_whipsaw_risk_weight": wf_cfg.model_btc_whipsaw_risk_weight,

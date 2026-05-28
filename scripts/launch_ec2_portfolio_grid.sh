@@ -112,6 +112,13 @@ BR2_TAIL_EXTREME_THRESHOLD="0.30"
 BR2_TAIL_MIN_SKEW_STEP="0.02"
 BR2_TAIL_BUDGET_FAVOURITE_SPEND_FRAC="0.20"
 BR2_TAIL_BUDGET_FAVOURITE_UPSIDE_FRAC="0.25"
+BR2_TAIL_REGIME_BOOST_COVERAGE_FRAC="0.0"
+BR2_TAIL_REGIME_BOOST_BUDGET_SPEND_FRAC="0.0"
+BR2_TAIL_REGIME_BOOST_BUDGET_UPSIDE_FRAC="0.0"
+BR2_TAIL_REGIME_BOOST_MIN_WHIPSAW_SCORE="1.0"
+BR2_TAIL_REGIME_BOOST_MIN_REVERSAL_PRESSURE="1.0"
+BR2_TAIL_REGIME_BOOST_MIN_REALIZED_VOL_180S_BPS="1000000000.0"
+BR2_TAIL_REGIME_BOOST_MAX_PATH_EFFICIENCY="-1.0"
 ENFORCE_MODEL_GATE="true"
 MODEL_GATE_MIN_CONFIDENCE="0.68"
 MODEL_GATE_MAX_RISK="0.72"
@@ -227,6 +234,13 @@ while [ $# -gt 0 ]; do
         --br2-tail-min-skew-step) BR2_TAIL_MIN_SKEW_STEP="$2"; shift 2 ;;
         --br2-tail-budget-favourite-spend-frac) BR2_TAIL_BUDGET_FAVOURITE_SPEND_FRAC="$2"; shift 2 ;;
         --br2-tail-budget-favourite-upside-frac) BR2_TAIL_BUDGET_FAVOURITE_UPSIDE_FRAC="$2"; shift 2 ;;
+        --br2-tail-regime-boost-coverage-frac) BR2_TAIL_REGIME_BOOST_COVERAGE_FRAC="$2"; shift 2 ;;
+        --br2-tail-regime-boost-budget-spend-frac) BR2_TAIL_REGIME_BOOST_BUDGET_SPEND_FRAC="$2"; shift 2 ;;
+        --br2-tail-regime-boost-budget-upside-frac) BR2_TAIL_REGIME_BOOST_BUDGET_UPSIDE_FRAC="$2"; shift 2 ;;
+        --br2-tail-regime-boost-min-whipsaw-score) BR2_TAIL_REGIME_BOOST_MIN_WHIPSAW_SCORE="$2"; shift 2 ;;
+        --br2-tail-regime-boost-min-reversal-pressure) BR2_TAIL_REGIME_BOOST_MIN_REVERSAL_PRESSURE="$2"; shift 2 ;;
+        --br2-tail-regime-boost-min-realized-vol-180s-bps) BR2_TAIL_REGIME_BOOST_MIN_REALIZED_VOL_180S_BPS="$2"; shift 2 ;;
+        --br2-tail-regime-boost-max-path-efficiency) BR2_TAIL_REGIME_BOOST_MAX_PATH_EFFICIENCY="$2"; shift 2 ;;
         --enforce-model-gate) ENFORCE_MODEL_GATE="$2"; shift 2 ;;
         --model-gate-min-confidence) MODEL_GATE_MIN_CONFIDENCE="$2"; shift 2 ;;
         --model-gate-max-risk) MODEL_GATE_MAX_RISK="$2"; shift 2 ;;
@@ -534,6 +548,13 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-tail-min-skew-step "${BR2_TAIL_MIN_SKEW_STEP}" \\
       --br2-tail-budget-favourite-spend-frac "${BR2_TAIL_BUDGET_FAVOURITE_SPEND_FRAC}" \\
       --br2-tail-budget-favourite-upside-frac "${BR2_TAIL_BUDGET_FAVOURITE_UPSIDE_FRAC}" \\
+      --br2-tail-regime-boost-coverage-frac "${BR2_TAIL_REGIME_BOOST_COVERAGE_FRAC}" \\
+      --br2-tail-regime-boost-budget-spend-frac "${BR2_TAIL_REGIME_BOOST_BUDGET_SPEND_FRAC}" \\
+      --br2-tail-regime-boost-budget-upside-frac "${BR2_TAIL_REGIME_BOOST_BUDGET_UPSIDE_FRAC}" \\
+      --br2-tail-regime-boost-min-whipsaw-score "${BR2_TAIL_REGIME_BOOST_MIN_WHIPSAW_SCORE}" \\
+      --br2-tail-regime-boost-min-reversal-pressure "${BR2_TAIL_REGIME_BOOST_MIN_REVERSAL_PRESSURE}" \\
+      --br2-tail-regime-boost-min-realized-vol-180s-bps "${BR2_TAIL_REGIME_BOOST_MIN_REALIZED_VOL_180S_BPS}" \\
+      --br2-tail-regime-boost-max-path-efficiency "${BR2_TAIL_REGIME_BOOST_MAX_PATH_EFFICIENCY}" \\
       "\${MODEL_GATE_ARGS[@]}" \\
       --model-gate-min-confidence "${MODEL_GATE_MIN_CONFIDENCE}" \\
       --model-gate-max-risk "${MODEL_GATE_MAX_RISK}" \\

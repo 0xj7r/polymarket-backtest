@@ -112,6 +112,13 @@ pub struct BonereaperV2Profile {
     pub tail_reversal_min_seconds_to_close: Option<f32>,
     pub tail_reversal_max_seconds_to_close: Option<f32>,
     pub tail_reversal_min_favourite_ask: Option<f32>,
+    pub tail_regime_boost_coverage_frac: Option<f32>,
+    pub tail_regime_boost_budget_spend_frac: Option<f32>,
+    pub tail_regime_boost_budget_upside_frac: Option<f32>,
+    pub tail_regime_boost_min_whipsaw_score: Option<f32>,
+    pub tail_regime_boost_min_reversal_pressure: Option<f32>,
+    pub tail_regime_boost_min_realized_vol_180s_bps: Option<f32>,
+    pub tail_regime_boost_max_path_efficiency: Option<f32>,
     pub model_btc_whipsaw_risk_weight: Option<f32>,
     pub model_btc_path_inefficiency_risk_weight: Option<f32>,
     pub model_btc_reversal_pressure_risk_weight: Option<f32>,
@@ -283,6 +290,34 @@ impl BonereaperV2Profile {
         apply!(
             tail_reversal_min_favourite_ask,
             br2_tail_reversal_min_favourite_ask
+        );
+        apply!(
+            tail_regime_boost_coverage_frac,
+            br2_tail_regime_boost_coverage_frac
+        );
+        apply!(
+            tail_regime_boost_budget_spend_frac,
+            br2_tail_regime_boost_budget_spend_frac
+        );
+        apply!(
+            tail_regime_boost_budget_upside_frac,
+            br2_tail_regime_boost_budget_upside_frac
+        );
+        apply!(
+            tail_regime_boost_min_whipsaw_score,
+            br2_tail_regime_boost_min_whipsaw_score
+        );
+        apply!(
+            tail_regime_boost_min_reversal_pressure,
+            br2_tail_regime_boost_min_reversal_pressure
+        );
+        apply!(
+            tail_regime_boost_min_realized_vol_180s_bps,
+            br2_tail_regime_boost_min_realized_vol_180s_bps
+        );
+        apply!(
+            tail_regime_boost_max_path_efficiency,
+            br2_tail_regime_boost_max_path_efficiency
         );
         apply!(model_btc_whipsaw_risk_weight, model_btc_whipsaw_risk_weight);
         apply!(
@@ -463,6 +498,13 @@ pub struct WalkForwardConfig {
     pub br2_tail_min_skew_step: f32,
     pub br2_tail_budget_favourite_spend_frac: f32,
     pub br2_tail_budget_favourite_upside_frac: f32,
+    pub br2_tail_regime_boost_coverage_frac: f32,
+    pub br2_tail_regime_boost_budget_spend_frac: f32,
+    pub br2_tail_regime_boost_budget_upside_frac: f32,
+    pub br2_tail_regime_boost_min_whipsaw_score: f32,
+    pub br2_tail_regime_boost_min_reversal_pressure: f32,
+    pub br2_tail_regime_boost_min_realized_vol_180s_bps: f32,
+    pub br2_tail_regime_boost_max_path_efficiency: f32,
     pub enforce_model_gate: bool,
     pub model_gate_min_confidence: f32,
     pub model_gate_max_risk: f32,
@@ -621,6 +663,13 @@ impl Default for WalkForwardConfig {
             br2_tail_min_skew_step: 0.02,
             br2_tail_budget_favourite_spend_frac: 0.20,
             br2_tail_budget_favourite_upside_frac: 0.25,
+            br2_tail_regime_boost_coverage_frac: 0.0,
+            br2_tail_regime_boost_budget_spend_frac: 0.0,
+            br2_tail_regime_boost_budget_upside_frac: 0.0,
+            br2_tail_regime_boost_min_whipsaw_score: 1.0,
+            br2_tail_regime_boost_min_reversal_pressure: 1.0,
+            br2_tail_regime_boost_min_realized_vol_180s_bps: 1.0e9,
+            br2_tail_regime_boost_max_path_efficiency: -1.0,
             enforce_model_gate: true,
             model_gate_min_confidence: 0.68,
             model_gate_max_risk: 0.72,
@@ -823,6 +872,13 @@ pub struct SummaryRunConfig {
     pub br2_tail_min_skew_step: f32,
     pub br2_tail_budget_favourite_spend_frac: f32,
     pub br2_tail_budget_favourite_upside_frac: f32,
+    pub br2_tail_regime_boost_coverage_frac: f32,
+    pub br2_tail_regime_boost_budget_spend_frac: f32,
+    pub br2_tail_regime_boost_budget_upside_frac: f32,
+    pub br2_tail_regime_boost_min_whipsaw_score: f32,
+    pub br2_tail_regime_boost_min_reversal_pressure: f32,
+    pub br2_tail_regime_boost_min_realized_vol_180s_bps: f32,
+    pub br2_tail_regime_boost_max_path_efficiency: f32,
     pub enforce_model_gate: bool,
     pub model_gate_min_confidence: f32,
     pub model_gate_max_risk: f32,
@@ -3251,6 +3307,16 @@ fn run_one_strategy(
                 tail_min_skew_step: cfg.br2_tail_min_skew_step,
                 tail_budget_favourite_spend_frac: cfg.br2_tail_budget_favourite_spend_frac,
                 tail_budget_favourite_upside_frac: cfg.br2_tail_budget_favourite_upside_frac,
+                tail_regime_boost_coverage_frac: cfg.br2_tail_regime_boost_coverage_frac,
+                tail_regime_boost_budget_spend_frac: cfg.br2_tail_regime_boost_budget_spend_frac,
+                tail_regime_boost_budget_upside_frac: cfg.br2_tail_regime_boost_budget_upside_frac,
+                tail_regime_boost_min_whipsaw_score: cfg.br2_tail_regime_boost_min_whipsaw_score,
+                tail_regime_boost_min_reversal_pressure: cfg
+                    .br2_tail_regime_boost_min_reversal_pressure,
+                tail_regime_boost_min_realized_vol_180s_bps: cfg
+                    .br2_tail_regime_boost_min_realized_vol_180s_bps,
+                tail_regime_boost_max_path_efficiency: cfg
+                    .br2_tail_regime_boost_max_path_efficiency,
                 ..BonereaperV2Config::default()
             });
             let report = run_backtest(events, spot, trades, &mut s, runner_cfg)?;
@@ -4035,6 +4101,15 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_tail_min_skew_step: cfg.br2_tail_min_skew_step,
         br2_tail_budget_favourite_spend_frac: cfg.br2_tail_budget_favourite_spend_frac,
         br2_tail_budget_favourite_upside_frac: cfg.br2_tail_budget_favourite_upside_frac,
+        br2_tail_regime_boost_coverage_frac: cfg.br2_tail_regime_boost_coverage_frac,
+        br2_tail_regime_boost_budget_spend_frac: cfg.br2_tail_regime_boost_budget_spend_frac,
+        br2_tail_regime_boost_budget_upside_frac: cfg.br2_tail_regime_boost_budget_upside_frac,
+        br2_tail_regime_boost_min_whipsaw_score: cfg.br2_tail_regime_boost_min_whipsaw_score,
+        br2_tail_regime_boost_min_reversal_pressure: cfg
+            .br2_tail_regime_boost_min_reversal_pressure,
+        br2_tail_regime_boost_min_realized_vol_180s_bps: cfg
+            .br2_tail_regime_boost_min_realized_vol_180s_bps,
+        br2_tail_regime_boost_max_path_efficiency: cfg.br2_tail_regime_boost_max_path_efficiency,
         enforce_model_gate: cfg.enforce_model_gate,
         model_gate_min_confidence: cfg.model_gate_min_confidence,
         model_gate_max_risk: cfg.model_gate_max_risk,

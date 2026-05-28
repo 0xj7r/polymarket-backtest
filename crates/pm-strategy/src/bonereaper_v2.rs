@@ -301,6 +301,15 @@ pub struct BonereaperV2Config {
     pub tail_reversal_min_favourite_ask: f32,
     pub tail_budget_favourite_spend_frac: f32,
     pub tail_budget_favourite_upside_frac: f32,
+    /// Optional regime-driven higher tail coverage target. This only applies
+    /// after favourite exposure exists; it never opens standalone tails.
+    pub tail_regime_boost_coverage_frac: f32,
+    pub tail_regime_boost_budget_spend_frac: f32,
+    pub tail_regime_boost_budget_upside_frac: f32,
+    pub tail_regime_boost_min_whipsaw_score: f32,
+    pub tail_regime_boost_min_reversal_pressure: f32,
+    pub tail_regime_boost_min_realized_vol_180s_bps: f32,
+    pub tail_regime_boost_max_path_efficiency: f32,
 }
 
 impl Default for BonereaperV2Config {
@@ -428,6 +437,13 @@ impl Default for BonereaperV2Config {
             tail_reversal_min_favourite_ask: 0.895,
             tail_budget_favourite_spend_frac: 0.20,
             tail_budget_favourite_upside_frac: 0.25,
+            tail_regime_boost_coverage_frac: 0.0,
+            tail_regime_boost_budget_spend_frac: 0.0,
+            tail_regime_boost_budget_upside_frac: 0.0,
+            tail_regime_boost_min_whipsaw_score: 1.0,
+            tail_regime_boost_min_reversal_pressure: 1.0,
+            tail_regime_boost_min_realized_vol_180s_bps: 1.0e9,
+            tail_regime_boost_max_path_efficiency: -1.0,
         }
     }
 }
@@ -909,6 +925,20 @@ fn tail_coverage_for_regime(
     } else {
         base_coverage_frac
     }
+}
+
+fn tail_regime_boost_active(
+    whipsaw: WhipsawRiskSnapshot,
+    min_whipsaw_score: f32,
+    min_reversal_pressure: f32,
+    min_realized_vol_180s_bps: f32,
+    max_path_efficiency: f32,
+) -> bool {
+    (min_whipsaw_score < 1.0 && whipsaw.score >= min_whipsaw_score)
+        || (min_reversal_pressure < 1.0 && whipsaw.reversal_pressure >= min_reversal_pressure)
+        || (min_realized_vol_180s_bps.is_finite()
+            && whipsaw.realized_vol_180s_bps >= min_realized_vol_180s_bps)
+        || (max_path_efficiency >= 0.0 && whipsaw.path_efficiency <= max_path_efficiency)
 }
 
 fn effective_favourite_tail_exposure(
@@ -1571,15 +1601,36 @@ impl Strategy for BonereaperV2 {
                         avg_favourite_px,
                         self.cfg.tail_min_favourite_unrealized_edge,
                     ) {
+                        let regime_boost = tail_regime_boost_active(
+                            whipsaw,
+                            self.cfg.tail_regime_boost_min_whipsaw_score,
+                            self.cfg.tail_regime_boost_min_reversal_pressure,
+                            self.cfg.tail_regime_boost_min_realized_vol_180s_bps,
+                            self.cfg.tail_regime_boost_max_path_efficiency,
+                        );
                         let favourite_win_upside =
                             effective_favourite_shares * (1.0 - avg_favourite_px);
-                        let cap_by_fav_spend = effective_favourite_notional
-                            * self.cfg.tail_budget_favourite_spend_frac as f64;
-                        let cap_by_win_upside = favourite_win_upside
-                            * self.cfg.tail_budget_favourite_upside_frac as f64;
+                        let tail_budget_favourite_spend_frac = if regime_boost {
+                            self.cfg
+                                .tail_budget_favourite_spend_frac
+                                .max(self.cfg.tail_regime_boost_budget_spend_frac)
+                        } else {
+                            self.cfg.tail_budget_favourite_spend_frac
+                        };
+                        let tail_budget_favourite_upside_frac = if regime_boost {
+                            self.cfg
+                                .tail_budget_favourite_upside_frac
+                                .max(self.cfg.tail_regime_boost_budget_upside_frac)
+                        } else {
+                            self.cfg.tail_budget_favourite_upside_frac
+                        };
+                        let cap_by_fav_spend =
+                            effective_favourite_notional * tail_budget_favourite_spend_frac as f64;
+                        let cap_by_win_upside =
+                            favourite_win_upside * tail_budget_favourite_upside_frac as f64;
                         let remaining_tail_budget =
                             cap_by_fav_spend.min(cap_by_win_upside) - self.tail_notional_emitted;
-                        let coverage_frac = tail_coverage_for_regime(
+                        let mut coverage_frac = tail_coverage_for_regime(
                             self.cfg.tail_target_favourite_loss_coverage_frac,
                             avg_favourite_px,
                             seconds_to_close,
@@ -1588,6 +1639,10 @@ impl Strategy for BonereaperV2 {
                             self.cfg.tail_reversal_max_seconds_to_close,
                             self.cfg.tail_reversal_min_favourite_ask,
                         );
+                        if regime_boost {
+                            coverage_frac =
+                                coverage_frac.max(self.cfg.tail_regime_boost_coverage_frac);
+                        }
                         let clip = tail_clip_notional(
                             self.cfg.max_clip_usdc,
                             self.cfg.tail_clip_frac,
@@ -2082,6 +2137,57 @@ mod tests {
             tail_coverage_for_regime(0.50, 0.88, 20.0, 1.00, 10.0, 35.0, 0.895),
             0.50
         );
+    }
+
+    #[test]
+    fn tail_regime_boost_is_disabled_until_thresholds_are_set() {
+        let whipsaw = WhipsawRiskSnapshot {
+            score: 0.80,
+            reversal_pressure: 0.70,
+            path_efficiency: 0.05,
+            realized_vol_180s_bps: 3.0,
+            ..WhipsawRiskSnapshot::default()
+        };
+        assert!(!tail_regime_boost_active(
+            whipsaw,
+            1.0,
+            1.0,
+            f32::INFINITY,
+            -1.0
+        ));
+        assert!(tail_regime_boost_active(
+            whipsaw,
+            0.75,
+            1.0,
+            f32::INFINITY,
+            -1.0
+        ));
+        assert!(tail_regime_boost_active(
+            whipsaw,
+            1.0,
+            0.65,
+            f32::INFINITY,
+            -1.0
+        ));
+        assert!(tail_regime_boost_active(whipsaw, 1.0, 1.0, 2.5, -1.0));
+        assert!(tail_regime_boost_active(
+            whipsaw,
+            1.0,
+            1.0,
+            f32::INFINITY,
+            0.10
+        ));
+    }
+
+    #[test]
+    fn tail_regime_boost_can_expand_coverage_budget() {
+        let base_budget = (240.0_f64 * 0.20).min(50.0 * 0.25);
+        let boosted_budget = (240.0_f64 * 0.35).min(50.0 * 0.50);
+        let base_clip = tail_clip_notional(40.0, 0.10, 240.0, 0.0, 0.08, 0.50, base_budget);
+        let boosted_clip = tail_clip_notional(40.0, 0.10, 240.0, 0.0, 0.08, 1.00, boosted_budget);
+        assert!(boosted_clip > base_clip);
+        assert!((base_clip - 9.6).abs() < 1e-6);
+        assert!((boosted_clip - 19.2).abs() < 1e-6);
     }
 
     #[test]
