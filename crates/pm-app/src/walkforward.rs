@@ -56,6 +56,9 @@ const DEFAULT_META_MAX_SAMPLES_PER_MARKET: usize = 64;
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct BonereaperV2Profile {
+    /// Run-level research speed knob. 0 preserves every raw book event; values
+    /// such as 1000 keep one event per second plus first/last event.
+    pub replay_sample_ms: Option<u64>,
     pub disable_internal_model_gates: Option<bool>,
     pub min_composite_direction: Option<f32>,
     pub late_clip_frac: Option<f32>,
@@ -132,6 +135,7 @@ impl BonereaperV2Profile {
             disable_internal_model_gates,
             br2_disable_internal_model_gates
         );
+        apply!(replay_sample_ms, replay_sample_ms);
         apply!(min_composite_direction, br2_min_composite_direction);
         apply!(late_clip_frac, br2_late_clip_frac);
         apply!(late_max_fires, br2_late_max_fires);
@@ -2456,6 +2460,7 @@ async fn collect_training_samples(
             };
             let use_outcome_label = cfg.use_outcome_label;
             let starting_cash_usdc = cfg.starting_cash_usdc;
+            let replay_sample_ms = cfg.replay_sample_ms;
             let replay_event_cache_dir = cfg.replay_event_cache_dir.clone();
             let completed = completed.clone();
             async move {
@@ -2467,6 +2472,7 @@ async fn collect_training_samples(
                     spot,
                     use_outcome_label,
                     starting_cash_usdc,
+                    replay_sample_ms,
                     replay_event_cache_dir.as_deref(),
                 )
                 .await;
@@ -2497,6 +2503,7 @@ async fn collect_training_samples_for_market(
     spot: Arc<SpotHistory>,
     use_outcome_label: bool,
     starting_cash_usdc: f64,
+    replay_sample_ms: u64,
     replay_event_cache_dir: Option<&Path>,
 ) -> Vec<MetaTrainingSample> {
     let events = match load_replay_events_for_market(
@@ -2513,6 +2520,13 @@ async fn collect_training_samples_for_market(
             tracing::warn!(market = %m.slug, error = %e, "training tape load failed");
             return Vec::new();
         }
+    };
+    let sampled_events;
+    let events_for_run = if replay_sample_ms > 0 {
+        sampled_events = sample_replay_events(&events, replay_sample_ms);
+        sampled_events.as_slice()
+    } else {
+        events.as_slice()
     };
     let resolved_yes = if use_outcome_label {
         Some(matches!(m.outcome.as_str(), "Up" | "Yes" | "yes" | "UP"))
@@ -2548,7 +2562,7 @@ async fn collect_training_samples_for_market(
     };
     let mut strat = NoopStrategy;
     match run_backtest(
-        &events,
+        events_for_run,
         &spot,
         &TradeHistory::default(),
         &mut strat,
@@ -3924,6 +3938,7 @@ mod tests {
 name = "bonereaper_v2"
 
 [bonereaper_v2]
+replay_sample_ms = 1000
 late_favourite_max_clips = 8
 tail_budget_favourite_spend_frac = 0.20
 model_btc_whipsaw_risk_weight = 0.31
@@ -3938,6 +3953,7 @@ model_btc_whipsaw_risk_weight = 0.31
         let _ = std::fs::remove_dir_all(&root);
 
         assert_eq!(cfg.br2_late_favourite_max_clips, 8);
+        assert_eq!(cfg.replay_sample_ms, 1000);
         assert!((cfg.br2_tail_budget_favourite_spend_frac - 0.20).abs() < f32::EPSILON);
         assert!((cfg.model_btc_whipsaw_risk_weight - 0.31).abs() < f32::EPSILON);
         assert!((cfg.br2_late_favourite_min_ask - 0.77).abs() < f32::EPSILON);

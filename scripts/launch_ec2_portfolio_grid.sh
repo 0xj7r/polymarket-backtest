@@ -35,6 +35,7 @@ MARKETS_KEY=""
 START_DATE=""
 END_DATE=""
 STRATEGIES="bonereaper_v2"
+PROFILE_PATH=""
 STARTING_CASH="1000"
 MAX_CLIP="100"
 MAX_ORDER_CLIP_MULTIPLIER="6.0"
@@ -119,6 +120,7 @@ while [ $# -gt 0 ]; do
         --start-date) START_DATE="$2"; shift 2 ;;
         --end-date) END_DATE="$2"; shift 2 ;;
         --strategies) STRATEGIES="$2"; shift 2 ;;
+        --profile) PROFILE_PATH="$2"; shift 2 ;;
         --starting-cash) STARTING_CASH="$2"; shift 2 ;;
         --max-clip) MAX_CLIP="$2"; shift 2 ;;
         --max-order-clip-multiplier) MAX_ORDER_CLIP_MULTIPLIER="$2"; shift 2 ;;
@@ -293,6 +295,10 @@ BR2_INTERNAL_MODEL_GATE_ARGS=()
 if [ "${BR2_DISABLE_INTERNAL_MODEL_GATES}" = "1" ]; then
   BR2_INTERNAL_MODEL_GATE_ARGS=(--br2-disable-internal-model-gates)
 fi
+PROFILE_ARGS=()
+if [ -n "${PROFILE_PATH}" ]; then
+  PROFILE_ARGS=(--profile "${PROFILE_PATH}")
+fi
 
 IFS=',' read -r -a CLIPS <<< "${CLIP_FRACTIONS}"
 IFS=',' read -r -a GROSS_CAPS <<< "${GROSS_CAPS}"
@@ -339,6 +345,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
     PM_TELONEX_REGION="${REGION}" ./target/release/pm-app walk-forward \\
       --markets /opt/pm/markets.jsonl \\
       --strategies "${STRATEGIES}" \\
+      "\${PROFILE_ARGS[@]}" \\
       --starting-cash "${STARTING_CASH}" \\
       --max-clip-usdc "${MAX_CLIP}" \\
       --max-order-clip-multiplier "${MAX_ORDER_CLIP_MULTIPLIER}" \\

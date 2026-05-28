@@ -21,6 +21,42 @@ Use `$1,000` starting capital and clip fractions of equity. `max-clip-usdc`
 is a safety ceiling; `clip-fraction-of-equity` is the primary compounding
 control.
 
+## Fast local research vs fidelity runs
+
+Use `configs/bonereaper_v2_fast_research.toml` for local iteration and broad
+AWS grids where the goal is ranking variants quickly. It sets
+`replay_sample_ms = 1000`, preserving the first/last event and one latest book
+event per second. On the local 2026-05-14 BTC 5m day, raw replay took 581s and
+ran 15.3M BonereaperV2 gate checks. The sampled profile reduced the same day
+to tens of thousands of gate checks; wall-clock time varies heavily with local
+machine load, so use AWS for reliable grid timing.
+
+Use `configs/bonereaper_v2_leader.toml` or `--replay-sample-ms 0` for final
+high-fidelity validation. Do not compare raw PnL and sampled PnL as identical
+execution evidence; use sampled runs to rank candidates, then promote only
+after raw replay confirms the lane attribution and drawdown profile.
+
+Example local one-day fast research run:
+
+```bash
+target/fast/pm-app walk-forward \
+  --markets /private/tmp/markets-2026-05-14-fixed-input.jsonl \
+  --local-cache-dir data/cache \
+  --profile configs/bonereaper_v2_fast_research.toml \
+  --strategies bonereaper_v2 \
+  --portfolio-mode \
+  --use-outcome-label \
+  --starting-cash 1000 \
+  --clip-fraction-of-equity 0.03 \
+  --max-clip-usdc 30 \
+  --max-order-clip-multiplier 10 \
+  --max-per-market-exposure-frac 0.25 \
+  --min-train-markets 30 \
+  --meta-epochs 10 \
+  --out-markets /tmp/pm-fast/markets.jsonl \
+  --out-summary /tmp/pm-fast/summary.json
+```
+
 ```bash
 AWS_PROFILE=visumlabs \
 INSTANCE_TYPE=c7i.4xlarge \
@@ -35,6 +71,7 @@ ROOT_VOLUME_GB=250 \
   --meta-weight-clip 1.50 \
   --strategies bonereaper_v2 \
   --starting-cash 1000 \
+  --profile configs/bonereaper_v2_fast_research.toml \
   --max-clip 100 \
   --max-order-clip-multiplier 6.0 \
   --gross-caps 250,500,750 \
