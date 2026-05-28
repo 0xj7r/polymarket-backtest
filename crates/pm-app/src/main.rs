@@ -634,6 +634,9 @@ enum Cmd {
         /// Write the trained meta-calibrator snapshot to this path.
         #[arg(long)]
         meta_calibrator_snapshot_out: Option<PathBuf>,
+        /// Fail instead of fitting a meta-calibrator when no snapshot is loaded.
+        #[arg(long, default_value_t = false)]
+        forbid_meta_training: bool,
         /// Disable the ML/meta-calibrator probability adjustment while keeping
         /// the hand-crafted model and strategy gates active.
         #[arg(long, default_value_t = false)]
@@ -1103,6 +1106,7 @@ async fn main() -> Result<()> {
             meta_training_samples_cache,
             meta_calibrator_snapshot_in,
             meta_calibrator_snapshot_out,
+            forbid_meta_training,
             disable_meta_calibration,
             portfolio_checkpoint_every_markets,
             local_cache_dir,
@@ -1222,6 +1226,7 @@ async fn main() -> Result<()> {
                 meta_training_samples_cache,
                 meta_calibrator_snapshot_in,
                 meta_calibrator_snapshot_out,
+                forbid_meta_training,
                 disable_meta_calibration,
                 portfolio_checkpoint_every_markets,
                 local_cache_dir,
@@ -1876,6 +1881,7 @@ async fn walk_forward(
     meta_training_samples_cache: Option<PathBuf>,
     meta_calibrator_snapshot_in: Option<PathBuf>,
     meta_calibrator_snapshot_out: Option<PathBuf>,
+    forbid_meta_training: bool,
     disable_meta_calibration: bool,
     portfolio_checkpoint_every_markets: usize,
     local_cache_dir: Option<PathBuf>,
@@ -2069,6 +2075,7 @@ async fn walk_forward(
         meta_training_samples_cache,
         meta_calibrator_snapshot_in,
         meta_calibrator_snapshot_out,
+        forbid_meta_training,
         enable_meta_calibration: !disable_meta_calibration,
         portfolio_checkpoint_every_markets,
         checkpoint_markets_out: out_markets.clone(),
@@ -2112,6 +2119,9 @@ async fn walk_forward(
         "model_btc_whipsaw_risk_weight": wf_cfg.model_btc_whipsaw_risk_weight,
         "model_btc_path_inefficiency_risk_weight": wf_cfg.model_btc_path_inefficiency_risk_weight,
         "model_btc_reversal_pressure_risk_weight": wf_cfg.model_btc_reversal_pressure_risk_weight,
+        "forbid_meta_training": wf_cfg.forbid_meta_training,
+        "meta_calibrator_snapshot_in": wf_cfg.meta_calibrator_snapshot_in.as_ref().map(|p| p.to_string_lossy()),
+        "meta_calibrator_snapshot_out": wf_cfg.meta_calibrator_snapshot_out.as_ref().map(|p| p.to_string_lossy()),
     });
     tracing::info!(
         br2_late_confirm_min_model_edge = wf_cfg.br2_late_confirm_min_model_edge,

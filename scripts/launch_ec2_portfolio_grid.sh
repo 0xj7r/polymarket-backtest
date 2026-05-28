@@ -331,6 +331,10 @@ MODEL_GATE_ARGS=()
 if [ "${ENFORCE_MODEL_GATE}" != "true" ]; then
   MODEL_GATE_ARGS=(--disable-model-gate)
 fi
+FORBID_META_TRAINING_ARGS=()
+if [ "${FORBID_META_TRAINING}" = "1" ]; then
+  FORBID_META_TRAINING_ARGS=(--forbid-meta-training)
+fi
 BR2_INTERNAL_MODEL_GATE_ARGS=()
 if [ "${BR2_DISABLE_INTERNAL_MODEL_GATES}" = "1" ]; then
   BR2_INTERNAL_MODEL_GATE_ARGS=(--br2-disable-internal-model-gates)
@@ -471,6 +475,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --taker-latency-ms "${TAKER_LATENCY_MS}" \\
       --portfolio-checkpoint-every-markets "${PORTFOLIO_CHECKPOINT_EVERY_MARKETS}" \\
       "\${LOCAL_CACHE_ARGS[@]}" \\
+      "\${FORBID_META_TRAINING_ARGS[@]}" \\
       "\${EXTRA_MODEL_ARGS[@]}" \\
       --out-markets "\${OUT_DIR}/markets.jsonl" \\
       --out-summary "\${OUT_DIR}/summary.json" \\

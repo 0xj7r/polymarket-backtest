@@ -482,6 +482,8 @@ pub struct WalkForwardConfig {
     pub meta_calibrator_snapshot_in: Option<PathBuf>,
     /// Optional path to write the trained meta-calibrator snapshot.
     pub meta_calibrator_snapshot_out: Option<PathBuf>,
+    /// If true, error rather than fitting a meta-calibrator without a snapshot.
+    pub forbid_meta_training: bool,
     /// Disable to run strategy logic against the hand-crafted model only.
     pub enable_meta_calibration: bool,
     /// In portfolio mode, write partial outputs every N evaluated markets.
@@ -603,6 +605,7 @@ impl Default for WalkForwardConfig {
             meta_training_samples_cache: None,
             meta_calibrator_snapshot_in: None,
             meta_calibrator_snapshot_out: None,
+            forbid_meta_training: false,
             enable_meta_calibration: true,
             portfolio_checkpoint_every_markets: 0,
             checkpoint_markets_out: None,
@@ -1639,6 +1642,10 @@ pub async fn run_walkforward(
                     top_feature_weights: snapshot.top_feature_weights(12),
                 });
                 Some(snapshot)
+            } else if cfg.forbid_meta_training {
+                return Err(anyhow!(
+                    "meta training is forbidden but no meta-calibrator snapshot was loaded"
+                ));
             } else {
                 let training_samples = load_or_collect_training_samples(
                     store,
