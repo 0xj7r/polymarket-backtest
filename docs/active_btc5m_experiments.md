@@ -225,6 +225,25 @@ Corrected relaunch retry:
 - Meta retraining: forbidden
 - Status: active on instance `i-08407b3d72d607bac`
 
+First corrected checkpoint:
+
+- Markets: `250`
+- PnL: `+$1,292.74`
+- Return: `+25.85%`
+- Max drawdown: `17.12%`
+- Fills: `430`
+- Active markets: `48.0%`
+- Attribution:
+  - `br2_late_favourite_load`: `+$940.62`
+  - `br2_high_skew_load`: `+$328.91`
+  - `br2_late_confirm`: `+$86.45`
+  - `br2_convex_tail`: `-$63.24`
+
+Interpretation: the corrected replay cadence reverses the earlier concern about
+participation starvation. With the same `1000ms` sampling as the leaders, the
+range gate is active in `48.0%` of markets at the first checkpoint and strongly
+outperforms the old early baseline.
+
 ### No-Tail Late-Confirm Range-Gated Isolation
 
 Run: `20260528T192139Z-portfolio-grid-37354`
@@ -265,6 +284,24 @@ Corrected relaunch retry:
   manually uploading active leader artifacts
 - Meta retraining: forbidden
 - Status: active on instance `i-0f3b6876adcd46c6f`
+
+First corrected checkpoint:
+
+- Markets: `250`
+- PnL: `+$1,347.13`
+- Return: `+26.94%`
+- Max drawdown: `18.46%`
+- Fills: `393`
+- Active markets: `48.0%`
+- Attribution:
+  - `br2_late_favourite_load`: `+$933.02`
+  - `br2_high_skew_load`: `+$326.45`
+  - `br2_late_confirm`: `+$87.66`
+
+Interpretation: this isolates the range gate without tail insurance. It is
+slightly ahead of the tail variant at the first checkpoint because tails cost
+`$63.24`, but its drawdown is worse (`18.46%` versus `17.12%`), so the tail
+variant remains strategically relevant as insurance.
 
 ## Decision Rules
 
