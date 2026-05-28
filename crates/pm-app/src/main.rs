@@ -318,6 +318,9 @@ enum Cmd {
         /// Research-speed replay thinning in milliseconds. 0 keeps every raw event.
         #[arg(long, default_value = "0")]
         replay_sample_ms: u64,
+        /// Simulated delay before taker orders execute against the book.
+        #[arg(long, default_value = "0")]
+        taker_latency_ms: u64,
         /// Directory for on-disk cache of raw ReplayEvents (JSONL). Huge win on AWS
         /// for repeated runs on the same dates — avoids re-downloading parquets from S3.
         #[arg(long)]
@@ -997,6 +1000,7 @@ async fn main() -> Result<()> {
             strategies,
             max_concurrent_fetches,
             replay_sample_ms,
+            taker_latency_ms,
             replay_event_cache_dir,
             disable_pm_trades,
             use_outcome_label,
@@ -1115,6 +1119,7 @@ async fn main() -> Result<()> {
                 strategies,
                 max_concurrent_fetches,
                 replay_sample_ms,
+                taker_latency_ms,
                 replay_event_cache_dir,
                 !disable_pm_trades,
                 use_outcome_label,
@@ -1767,6 +1772,7 @@ async fn walk_forward(
     strategies_csv: String,
     max_concurrent_fetches: usize,
     replay_sample_ms: u64,
+    taker_latency_ms: u64,
     replay_event_cache_dir: Option<PathBuf>,
     load_pm_trades: bool,
     use_outcome_label: bool,
@@ -1953,6 +1959,7 @@ async fn walk_forward(
         strategies,
         max_concurrent_fetches,
         replay_sample_ms,
+        taker_latency_ms,
         replay_event_cache_dir,
         load_pm_trades,
         use_outcome_label,
@@ -2068,6 +2075,7 @@ async fn walk_forward(
 
     let effective_config = serde_json::json!({
         "replay_sample_ms": wf_cfg.replay_sample_ms,
+        "taker_latency_ms": wf_cfg.taker_latency_ms,
         "starting_cash_usdc": wf_cfg.starting_cash_usdc,
         "clip_fraction_of_equity": wf_cfg.clip_fraction_of_equity,
         "max_clip_usdc": wf_cfg.max_clip_usdc,
@@ -2411,6 +2419,7 @@ async fn run_market_backtest(
         taker_fee_bps: 0.0,
         max_inventory_imbalance_shares: 1.5,
         taker_slippage_bps: 15.0,
+        taker_latency_ms: 0,
         decision_log_jsonl: decision_log,
         decision_log_parquet: None,
         shared_model_state: None,

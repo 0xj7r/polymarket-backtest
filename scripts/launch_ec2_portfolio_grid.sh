@@ -108,6 +108,7 @@ GROSS_CAPS="250,500,750"
 SPOT_SYMBOL="BTCUSDT"
 MAX_CONCURRENT_FETCHES="32"
 REPLAY_SAMPLE_MS="0"
+TAKER_LATENCY_MS="0"
 USE_LOCAL_CACHE="0"
 LOCAL_CACHE_DIR="/opt/pm/cache"
 PREP_CACHE_MAX_CONCURRENT="128"
@@ -196,6 +197,7 @@ while [ $# -gt 0 ]; do
         --spot-symbol) SPOT_SYMBOL="$2"; shift 2 ;;
         --max-concurrent-fetches) MAX_CONCURRENT_FETCHES="$2"; shift 2 ;;
         --replay-sample-ms) REPLAY_SAMPLE_MS="$2"; shift 2 ;;
+        --taker-latency-ms) TAKER_LATENCY_MS="$2"; shift 2 ;;
         --use-local-cache) USE_LOCAL_CACHE="1"; shift ;;
         --local-cache-dir) LOCAL_CACHE_DIR="$2"; shift 2 ;;
         --prep-cache-max-concurrent) PREP_CACHE_MAX_CONCURRENT="$2"; shift 2 ;;
@@ -320,6 +322,9 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
     if [ -n "${MAX_PER_MARKET_EXPOSURE_FRAC}" ]; then
       LABEL="\${LABEL}_expfrac_${MAX_PER_MARKET_EXPOSURE_FRAC//./p}"
     fi
+    if [ "${TAKER_LATENCY_MS}" != "0" ]; then
+      LABEL="\${LABEL}_lat${TAKER_LATENCY_MS}ms"
+    fi
     OUT_DIR="/opt/pm/results/\${LABEL}"
     mkdir -p "\${OUT_DIR}"
     echo "[\$(date -u)] running \${LABEL}"
@@ -432,6 +437,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --meta-train-min-mid-distance "${META_TRAIN_MIN_MID_DISTANCE}" \\
       --max-concurrent-fetches "${MAX_CONCURRENT_FETCHES}" \\
       --replay-sample-ms "${REPLAY_SAMPLE_MS}" \\
+      --taker-latency-ms "${TAKER_LATENCY_MS}" \\
       --portfolio-checkpoint-every-markets "${PORTFOLIO_CHECKPOINT_EVERY_MARKETS}" \\
       "\${LOCAL_CACHE_ARGS[@]}" \\
       "\${EXTRA_MODEL_ARGS[@]}" \\

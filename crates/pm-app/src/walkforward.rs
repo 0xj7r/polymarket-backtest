@@ -345,6 +345,7 @@ pub struct WalkForwardConfig {
     pub use_outcome_label: bool,
     pub maker_rebate_bps: f64,
     pub taker_fee_bps: f64,
+    pub taker_latency_ms: u64,
     /// **Portfolio mode**: process markets in chronological order, compound
     /// equity from one market into the next. Disables parallelism (each
     /// market's starting cash depends on the previous market's end cash).
@@ -507,6 +508,7 @@ impl Default for WalkForwardConfig {
             use_outcome_label: false,
             maker_rebate_bps: 0.0,
             taker_fee_bps: 0.0,
+            taker_latency_ms: 0,
             portfolio_mode: false,
             clip_fraction_of_equity: None,
             clip_drawdown_soft_pct: 1.0,
@@ -699,6 +701,7 @@ pub struct SummaryRunConfig {
     pub max_per_market_exposure_frac: Option<f64>,
     pub max_concurrent_fetches: usize,
     pub replay_sample_ms: u64,
+    pub taker_latency_ms: u64,
     pub replay_event_cache_dir: Option<String>,
     pub load_pm_trades: bool,
     pub clip_fraction_of_equity: Option<f64>,
@@ -2567,6 +2570,7 @@ async fn collect_training_samples_for_market(
         decision_log_every_n: 1_000_000,
         max_inventory_imbalance_shares: 1.5,
         taker_slippage_bps: 0.0,
+        taker_latency_ms: 0,
         enforce_model_gate: false,
         model_gate_min_confidence: 0.68,
         model_gate_max_risk: 0.72,
@@ -2705,6 +2709,7 @@ async fn run_markets(
                 decision_log_every_n: 1_000_000,
                 max_inventory_imbalance_shares: 1.5,
                 taker_slippage_bps: 15.0,
+                taker_latency_ms: cfg_arc.taker_latency_ms,
                 enforce_model_gate: cfg_arc.enforce_model_gate,
                 model_gate_min_confidence: cfg_arc.model_gate_min_confidence,
                 model_gate_max_risk: cfg_arc.model_gate_max_risk,
@@ -3250,6 +3255,7 @@ async fn run_portfolio(
                 decision_log_every_n: 1_000_000,
                 max_inventory_imbalance_shares: 1.5,
                 taker_slippage_bps: 15.0,
+                taker_latency_ms: cfg.taker_latency_ms,
                 enforce_model_gate: cfg.enforce_model_gate,
                 model_gate_min_confidence: cfg.model_gate_min_confidence,
                 model_gate_max_risk: cfg.model_gate_max_risk,
@@ -3703,6 +3709,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         max_per_market_exposure_frac: cfg.max_per_market_exposure_frac,
         max_concurrent_fetches: cfg.max_concurrent_fetches,
         replay_sample_ms: cfg.replay_sample_ms,
+        taker_latency_ms: cfg.taker_latency_ms,
         replay_event_cache_dir: cfg
             .replay_event_cache_dir
             .as_ref()

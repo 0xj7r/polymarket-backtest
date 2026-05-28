@@ -1,7 +1,7 @@
 //! In-process backtest runner with maker + taker matcher.
 //!
-//! - Orders with `limit_price = None` are TAKER fills against the opposite
-//!   top of book (immediate, pay the spread).
+//! - Orders with `limit_price = None` are TAKER fills against displayed depth
+//!   after the configured execution latency.
 //! - Orders with `limit_price = Some(L)` enter the resting book. On each
 //!   subsequent event, the runner checks whether the book crossed the limit
 //!   (BuyYes fills when `event.yes_ask <= L_yes`; SellYes when
@@ -291,6 +291,9 @@ pub struct RunnerConfig {
     /// pays more, seller gets less). Approximates queue / latency cost
     /// between strategy decision and venue execution. Default 0.
     pub taker_slippage_bps: f64,
+    /// Delay between strategy decision and taker execution. A non-zero value
+    /// executes against the first later book snapshot at or after this delay.
+    pub taker_latency_ms: u64,
     /// Optional per-decision log (JSONL). Useful for attribution and
     /// post-hoc analysis of every strategy callback.
     pub decision_log_jsonl: Option<PathBuf>,
@@ -340,6 +343,7 @@ impl Default for RunnerConfig {
             taker_fee_bps: 0.0,
             max_inventory_imbalance_shares: f64::INFINITY,
             taker_slippage_bps: 0.0,
+            taker_latency_ms: 0,
             decision_log_jsonl: None,
             decision_log_parquet: None,
             shared_model_state: None,
@@ -372,6 +376,13 @@ struct RestingOrder {
     model_context: Option<FillModelContext>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PendingTakerOrder {
+    execute_after_ns: i64,
+    req: OrderRequest,
+    model_context: Option<FillModelContext>,
+}
+
 pub fn run_backtest<S: Strategy>(
     events: &[ReplayEvent],
     spot: &SpotHistory,
@@ -394,6 +405,7 @@ pub fn run_backtest<S: Strategy>(
     // All hot-path scans now touch roughly half as many elements.
     let mut resting_buy_yes_sell_no: Vec<RestingOrder> = Vec::new();
     let mut resting_sell_yes_buy_no: Vec<RestingOrder> = Vec::new();
+    let mut pending_takers: Vec<PendingTakerOrder> = Vec::new();
 
     let mut trade_cursor = 0usize;
     let mut events_processed = 0usize;
@@ -403,6 +415,7 @@ pub fn run_backtest<S: Strategy>(
     // Capacity hints for hot path on large days.
     resting_buy_yes_sell_no.reserve(1024);
     resting_sell_yes_buy_no.reserve(1024);
+    pending_takers.reserve(128);
     fills.reserve(8192);
     let mut model_state = ModelState::new();
     if let Some(snapshot) = cfg.meta_calibrator_snapshot.clone() {
@@ -530,6 +543,20 @@ pub fn run_backtest<S: Strategy>(
                 cfg.maker_rebate_bps,
             );
         }
+        if !pending_takers.is_empty() {
+            process_pending_takers(
+                event,
+                &mut pending_takers,
+                &mut cash,
+                &mut yes_shares,
+                &mut no_shares,
+                &mut portfolio,
+                &mut counters,
+                &mut fills,
+                cfg.taker_fee_bps,
+                cfg.taker_slippage_bps,
+            );
+        }
 
         // Inventory imbalance circuit-breaker (applied to both lists).
         let imbalance = yes_shares - no_shares;
@@ -643,7 +670,7 @@ pub fn run_backtest<S: Strategy>(
             ));
             match req.limit_price {
                 None => {
-                    apply_taker_order(
+                    submit_taker_order(
                         event,
                         &req,
                         &mut cash,
@@ -654,6 +681,8 @@ pub fn run_backtest<S: Strategy>(
                         &mut fills,
                         cfg.taker_fee_bps,
                         cfg.taker_slippage_bps,
+                        cfg.taker_latency_ms,
+                        &mut pending_takers,
                         fill_context,
                     );
                 }
@@ -678,6 +707,8 @@ pub fn run_backtest<S: Strategy>(
                         cfg.maker_rebate_bps,
                         cfg.taker_fee_bps,
                         cfg.taker_slippage_bps,
+                        cfg.taker_latency_ms,
+                        &mut pending_takers,
                         fill_context,
                     );
                 }
@@ -919,8 +950,10 @@ pub fn run_backtest<S: Strategy>(
 
     counters.resting_orders_cancelled_eom =
         resting_buy_yes_sell_no.len() + resting_sell_yes_buy_no.len();
+    counters.orders_rejected_no_liquidity += pending_takers.len();
     resting_buy_yes_sell_no.clear();
     resting_sell_yes_buy_no.clear();
+    pending_takers.clear();
 
     let yes_resolved = cfg.resolved_yes.unwrap_or(last_mid >= 0.5);
     let settlement_cash = if yes_resolved { yes_shares } else { no_shares };
@@ -1744,6 +1777,8 @@ fn submit_maker_order(
     maker_rebate_bps: f64,
     taker_fee_bps: f64,
     taker_slippage_bps: f64,
+    taker_latency_ms: u64,
+    pending_takers: &mut Vec<PendingTakerOrder>,
     model_context: Option<FillModelContext>,
 ) {
     let limit_yes = limit_to_yes_terms(req.side, limit);
@@ -1763,7 +1798,7 @@ fn submit_maker_order(
             limit_price: Some(limit),
             tag: req.tag,
         };
-        apply_taker_order(
+        submit_taker_order(
             event,
             &synthetic,
             cash,
@@ -1774,6 +1809,8 @@ fn submit_maker_order(
             fills,
             taker_fee_bps,
             taker_slippage_bps,
+            taker_latency_ms,
+            pending_takers,
             model_context,
         );
         return;
@@ -1807,6 +1844,82 @@ fn submit_maker_order(
         tag: req.tag,
         model_context,
     });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn submit_taker_order(
+    event: &ReplayEvent,
+    req: &OrderRequest,
+    cash: &mut f64,
+    yes_shares: &mut f64,
+    no_shares: &mut f64,
+    portfolio: &mut PortfolioState,
+    counters: &mut StrategyCounters,
+    fills: &mut Vec<Fill>,
+    taker_fee_bps: f64,
+    taker_slippage_bps: f64,
+    taker_latency_ms: u64,
+    pending_takers: &mut Vec<PendingTakerOrder>,
+    model_context: Option<FillModelContext>,
+) {
+    if taker_latency_ms == 0 {
+        apply_taker_order(
+            event,
+            req,
+            cash,
+            yes_shares,
+            no_shares,
+            portfolio,
+            counters,
+            fills,
+            taker_fee_bps,
+            taker_slippage_bps,
+            model_context,
+        );
+        return;
+    }
+    let delay_ns = (taker_latency_ms as i64).saturating_mul(1_000_000);
+    pending_takers.push(PendingTakerOrder {
+        execute_after_ns: event.ts_ns.saturating_add(delay_ns),
+        req: *req,
+        model_context,
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_pending_takers(
+    event: &ReplayEvent,
+    pending_takers: &mut Vec<PendingTakerOrder>,
+    cash: &mut f64,
+    yes_shares: &mut f64,
+    no_shares: &mut f64,
+    portfolio: &mut PortfolioState,
+    counters: &mut StrategyCounters,
+    fills: &mut Vec<Fill>,
+    taker_fee_bps: f64,
+    taker_slippage_bps: f64,
+) {
+    let mut i = 0;
+    while i < pending_takers.len() {
+        if pending_takers[i].execute_after_ns > event.ts_ns {
+            i += 1;
+            continue;
+        }
+        let pending = pending_takers.swap_remove(i);
+        apply_taker_order(
+            event,
+            &pending.req,
+            cash,
+            yes_shares,
+            no_shares,
+            portfolio,
+            counters,
+            fills,
+            taker_fee_bps,
+            taker_slippage_bps,
+            pending.model_context,
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2217,6 +2330,65 @@ mod tests {
         assert_eq!(fills.len(), 1);
         assert_eq!(fills[0].shares, 5.0);
         assert!((fills[0].price - 0.91).abs() < 1e-6);
+    }
+
+    #[test]
+    fn taker_latency_executes_on_later_book_snapshot() {
+        struct OneShot(bool);
+        impl Strategy for OneShot {
+            fn on_event(
+                &mut self,
+                _event: &ReplayEvent,
+                _ctx: &Ctx,
+                _spot: &SpotHistory,
+                _trades: &TradeHistory,
+            ) -> StrategyOutput {
+                if self.0 {
+                    return StrategyOutput::hold();
+                }
+                self.0 = true;
+                StrategyOutput::one(OrderRequest {
+                    side: Side::BuyYes,
+                    shares: 2.0,
+                    max_depth: 1,
+                    limit_price: None,
+                    tag: "latency",
+                })
+            }
+        }
+
+        let mut events = vec![
+            evt(1_000_000_000, 0.49, 0.50, 10.0),
+            evt(1_500_000_000, 0.59, 0.60, 10.0),
+            evt(2_000_000_000, 0.69, 0.70, 10.0),
+        ];
+        events[0].market_id = MarketId(7);
+        events[1].market_id = MarketId(7);
+        events[2].market_id = MarketId(7);
+
+        let cfg = RunnerConfig {
+            starting_cash_usdc: 100.0,
+            market_open_ns: 1_000_000_000,
+            market_close_ns: 3_000_000_000,
+            resolved_yes: Some(true),
+            taker_latency_ms: 750,
+            ..RunnerConfig::default()
+        };
+        let mut strat = OneShot(false);
+        let rep = run_backtest(
+            &events,
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+            &mut strat,
+            &cfg,
+        )
+        .unwrap();
+
+        assert_eq!(rep.counters.orders_submitted, 1);
+        assert_eq!(rep.counters.orders_filled_taker, 1);
+        assert_eq!(rep.fills.len(), 1);
+        assert_eq!(rep.fills[0].ts_ns, 2_000_000_000);
+        assert!((rep.fills[0].price - 0.70).abs() < 1e-6);
     }
 
     #[test]
