@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-28 22:59 UTC.
+Last updated: 2026-05-28 23:26 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -72,6 +72,8 @@ Active memory-safe full-history candidates:
    - Strategy logic: same 1K exact profile and frozen meta-calibrator.
    - First checkpoint: `250` markets, `+$60.01`, max drawdown `3.04%`,
      `33` fills.
+   - Latest S3 checkpoint: `3,750` markets, `+$2,888.91`, max drawdown
+     `18.23%`, `1,550` fills.
 2. Broader tail-coverage variant
    - Run: `20260528T225904Z-portfolio-grid-53933`
    - Label:
@@ -86,6 +88,25 @@ Active memory-safe full-history candidates:
      `budget_favourite_upside_frac = 0.40`.
    - First checkpoint: `250` markets, `+$59.98`, max drawdown `3.04%`,
      `34` fills.
+   - Latest S3 checkpoint: `3,750` markets, `+$2,919.67`, max drawdown
+     `18.28%`, `1,552` fills.
+
+Common-prefix memory-safe comparisons:
+
+- `1,250` markets:
+  - Base: `+$390.23`, max drawdown `16.38%`, tail `+$32.77`
+  - Cov75: `+$409.53`, max drawdown `16.18%`, tail `+$48.69`
+- `2,750` markets:
+  - Base: `+$1,963.16`, max drawdown `18.23%`, tail `+$13.33`
+  - Cov75: `+$1,988.33`, max drawdown `18.28%`, tail `+$21.36`
+- `3,750` markets:
+  - Base: `+$2,888.91`, max drawdown `18.23%`, tail `+$23.69`
+  - Cov75: `+$2,919.67`, max drawdown `18.28%`, tail `+$37.31`
+
+Interim read: cov75 remains slightly ahead on PnL and tail contribution with
+no meaningful drawdown penalty, but this is still early history. Selection is
+not made until the runs finish full history or at minimum pass the previous
+OOM point around `12,500` markets.
 
 Selection rule: once both memory-safe runners finish, promote the better 1K
 path unless the coverage variant improves hedge/reversal protection at an
