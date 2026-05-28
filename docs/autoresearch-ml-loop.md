@@ -152,6 +152,7 @@ AWS_PROFILE=visumlabs ./scripts/launch_ec2_portfolio_grid.sh \
   --start-date 2026-02-12 \
   --end-date 2026-05-20 \
   --reuse-artifacts-run-id 20260528T103440Z-portfolio-grid-4432 \
+  --forbid-meta-training \
   --strategies bonereaper_v2 \
   --starting-cash 1000 \
   --gross-caps 500 \

@@ -15,6 +15,9 @@
 #     --train-markets 20000 \
 #     --clip-fractions 0.003,0.005,0.0075,0.01 \
 #     --gross-caps 500,750,1000
+#
+# Add --forbid-meta-training when launching sizing/execution sweeps that must
+# reuse a frozen meta-calibrator snapshot.
 set -euo pipefail
 
 REGION="${AWS_REGION:-us-east-1}"
@@ -104,6 +107,7 @@ META_TRAIN_MIN_BASE_P="0.0"
 META_TRAIN_MAX_EARLY_PENALTY="1.0"
 META_TRAIN_MIN_MID_DISTANCE="0.0"
 DISABLE_META_CALIBRATION="0"
+FORBID_META_TRAINING="0"
 CLIP_FRACTIONS="0.015,0.02,0.03"
 GROSS_CAPS="250,500,750"
 SPOT_SYMBOL="BTCUSDT"
@@ -195,6 +199,7 @@ while [ $# -gt 0 ]; do
         --meta-train-max-early-penalty) META_TRAIN_MAX_EARLY_PENALTY="$2"; shift 2 ;;
         --meta-train-min-mid-distance) META_TRAIN_MIN_MID_DISTANCE="$2"; shift 2 ;;
         --disable-meta-calibration) DISABLE_META_CALIBRATION="1"; shift ;;
+        --forbid-meta-training) FORBID_META_TRAINING="1"; shift ;;
         --clip-fractions) CLIP_FRACTIONS="$2"; shift 2 ;;
         --gross-caps) GROSS_CAPS="$2"; shift 2 ;;
         --spot-symbol) SPOT_SYMBOL="$2"; shift 2 ;;
@@ -236,6 +241,11 @@ if [ -n "$REUSE_ARTIFACTS_RUN_ID" ]; then
     fi
 fi
 
+if [ "$FORBID_META_TRAINING" = "1" ] && [ "$DISABLE_META_CALIBRATION" != "1" ] && [ -z "$SNAPSHOT_S3_URI" ]; then
+    echo "--forbid-meta-training requires --reuse-artifacts-run-id or --snapshot-s3-uri" >&2
+    exit 1
+fi
+
 if [ "$SYNC_SOURCE" = "1" ]; then
     echo "Syncing source to s3://${SOURCE_BUCKET}/${SOURCE_PREFIX}/"
     aws s3 rm "s3://${SOURCE_BUCKET}/${SOURCE_PREFIX}/" --recursive --quiet
@@ -257,6 +267,9 @@ echo "AMI: $AMI"
 echo "Run ID: $RUN_ID"
 if [ -n "$SNAPSHOT_S3_URI" ]; then
     echo "Meta snapshot in: $SNAPSHOT_S3_URI"
+fi
+if [ "$FORBID_META_TRAINING" = "1" ]; then
+    echo "Meta training forbidden: true"
 fi
 if [ -n "$META_TRAINING_SAMPLES_CACHE_S3_URI" ]; then
     echo "Meta samples cache in: $META_TRAINING_SAMPLES_CACHE_S3_URI"

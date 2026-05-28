@@ -105,6 +105,7 @@ AWS_PROFILE=visumlabs ./scripts/launch_ec2_portfolio_grid.sh \
   --start-date 2026-02-12 \
   --end-date 2026-05-20 \
   --reuse-artifacts-run-id 20260528T103440Z-portfolio-grid-4432 \
+  --forbid-meta-training \
   --clip-fractions 0.015,0.02 \
   --gross-caps 250,500
 ```
@@ -113,6 +114,9 @@ This expands to the prior run's
 `artifacts/meta-calibrator-snapshot.json` and
 `artifacts/meta-training-samples.json`. Use a fresh training run only when the
 training window, model features, or meta-calibrator hyperparameters changed.
+For sizing, fill, latency, drawdown, and strategy-rule sweeps, pass
+`--forbid-meta-training`; the launcher will fail before creating an instance
+unless a frozen snapshot is supplied.
 
 For drawdown-controlled sweeps, avoid a permanent hard freeze unless that is
 the explicit test. `--clip-drawdown-min-multiplier` keeps a small recovery lane
