@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-28 22:33 UTC.
+Last updated: 2026-05-28 22:45 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -11,17 +11,17 @@ These are active checkpoints, not final full-history results.
 
 1. `cap1k_btc_5m_tail08_lc_range50_exact_profile`
    - Run: `20260528T211443Z-portfolio-grid-55343`
-   - Markets: `11,000`
-   - PnL: `+$6,554.61`
-   - Return: `+655.46%`
+   - Markets: `12,250`
+   - PnL: `+$7,121.84`
+   - Return: `+712.18%`
    - Max drawdown: `23.70%`
    - Reason to keep: exact `$1,000` pilot sizing, range-gated, convex tails
      enabled, and strong compounded PnL so far.
 2. `cap3k_btc_5m_tail08_lc_range50_exact_profile`
    - Run: `20260528T212132Z-portfolio-grid-68579`
-   - Markets: `10,250`
-   - PnL: `+$12,059.89`
-   - Return: `+402.00%`
+   - Markets: `11,750`
+   - PnL: `+$12,806.39`
+   - Return: `+426.88%`
    - Max drawdown: `20.07%`
    - Reason to keep: exact profile scaled to the current wallet size.
 3. `cap5k_btc_5m_tail08_lc_range50_exact`
@@ -103,6 +103,26 @@ First same-prefix checkpoint at `750` markets:
 Interpretation: too early to promote, but this is a clean positive first
 checkpoint. The broader-tail variant improved PnL, drawdown, tail PnL, and
 coverage frequency at the same prefix.
+
+Second same-prefix checkpoint at `2,500` markets:
+
+- Baseline 1K tail08: `+$1,436.68`, max drawdown `18.23%`,
+  `br2_convex_tail = +$16.77`
+- Coverage variant: `+$1,459.91`, max drawdown `18.28%`,
+  `br2_convex_tail = +$26.67`
+- Tail spend:
+  - Baseline: `$65.65`, `1,033.7` tail shares
+  - Coverage variant: `$98.64`, `1,533.9` tail shares
+- Favourite-tail frequency:
+  - Baseline: `28 / 250` favourite positions, `11.2%`
+  - Coverage variant: `29 / 250` favourite positions, `11.6%`
+- Net favourite coverage across all favourite positions:
+  - Baseline: `8.2%`
+  - Coverage variant: `11.9%`
+
+Interpretation: still a small positive comparison. The coverage variant is not
+decisively better yet, but it increases hedge coverage without hurting PnL or
+drawdown through this prefix.
 
 ## Current Verified Leader
 
@@ -668,17 +688,17 @@ Scaled 1K range + tail exact-profile run:
 
 Latest checkpoint:
 
-- Markets: `11,000`
-- PnL: `+$6,554.61`
-- Return: `+655.46%`
+- Markets: `12,250`
+- PnL: `+$7,121.84`
+- Return: `+712.18%`
 - Max drawdown: `23.70%`
-- Fills: `2,671`
-- Active markets: `12.5%`
+- Fills: `2,866`
+- Active markets: `12.1%`
 - Attribution:
-  - `br2_late_favourite_load`: `+$3,423.13`
-  - `br2_late_confirm`: `+$2,543.89`
-  - `br2_high_skew_load`: `+$638.50`
-  - `br2_convex_tail`: `-$50.90`
+  - `br2_late_favourite_load`: `+$3,899.21`
+  - `br2_late_confirm`: `+$1,930.91`
+  - `br2_high_skew_load`: `+$1,363.21`
+  - `br2_convex_tail`: `-$71.49`
 - Config verification: matches the 5K tail08 exact profile outside scaled
   `starting_cash_usdc`, `max_clip_usdc`, and
   `max_per_market_exposure_usdc`.
@@ -702,17 +722,17 @@ Scaled 3K range + tail exact-profile run:
 
 Latest checkpoint:
 
-- Markets: `10,250`
-- PnL: `+$12,059.89`
-- Return: `+402.00%`
+- Markets: `11,750`
+- PnL: `+$12,806.39`
+- Return: `+426.88%`
 - Max drawdown: `20.07%`
-- Fills: `2,656`
-- Active markets: `13.0%`
+- Fills: `2,843`
+- Active markets: `12.2%`
 - Attribution:
-  - `br2_late_favourite_load`: `+$5,931.97`
-  - `br2_late_confirm`: `+$4,675.26`
-  - `br2_high_skew_load`: `+$1,507.01`
-  - `br2_convex_tail`: `-$54.34`
+  - `br2_late_favourite_load`: `+$5,781.39`
+  - `br2_late_confirm`: `+$4,812.43`
+  - `br2_high_skew_load`: `+$2,315.12`
+  - `br2_convex_tail`: `-$102.55`
 - Config verification: matches the 5K tail08 exact profile outside scaled
   `starting_cash_usdc`, `max_clip_usdc`, and
   `max_per_market_exposure_usdc`.
