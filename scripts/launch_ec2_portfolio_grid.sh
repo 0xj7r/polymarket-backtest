@@ -67,19 +67,28 @@ BR2_LATE_FAVOURITE_THRESHOLD="0.22"
 BR2_LATE_FAVOURITE_MIN_ASK="0.70"
 BR2_LATE_FAVOURITE_MAX_ASK="0.97"
 BR2_LATE_FAVOURITE_CLIP_FRAC="1.00"
+BR2_LATE_FAVOURITE_HIGH_CERT_CLIP_FRAC="1.00"
 BR2_LATE_FAVOURITE_HIGH_CERT_FULL_CLIP_EDGE="0.04"
 BR2_LATE_FAVOURITE_MAX_CLIPS="12"
 BR2_LATE_FAVOURITE_MIN_SUSTAIN_SECS="0.0"
 BR2_LATE_FAVOURITE_SWEEP_DEPTH="7"
+BR2_LATE_FAVOURITE_MIN_MODEL_DIRECTION_ABS="0.0"
 BR2_LATE_FAVOURITE_MIN_MODEL_CONFIDENCE="0.68"
 BR2_LATE_FAVOURITE_MAX_MODEL_RISK="0.72"
 BR2_LATE_FAVOURITE_MIN_MODEL_SIDE_P="0.62"
 BR2_LATE_FAVOURITE_MIN_MODEL_EDGE="0.03"
 BR2_LATE_FAVOURITE_HIGH_CERT_MIN_MODEL_EDGE="0.02"
+BR2_LATE_FAVOURITE_HIGH_CERT_BYPASS_MODEL_EDGE="0"
 BR2_LATE_FAVOURITE_MAX_WHIPSAW_SCORE="0.75"
 BR2_LATE_FAVOURITE_MAX_REVERSAL_PRESSURE="1.0"
 BR2_LATE_FAVOURITE_MIN_PATH_EFFICIENCY="0.0"
+BR2_LATE_FAVOURITE_MAX_OBSERVED_RANGE="1.0"
+BR2_LATE_FAVOURITE_RANGE_SOFT_THROTTLE="0.78"
+BR2_LATE_FAVOURITE_RANGE_HARD_THROTTLE="0.98"
+BR2_LATE_FAVOURITE_RANGE_EXTRA_EDGE="0.03"
+BR2_LATE_FAVOURITE_RANGE_EXTRA_CONFIDENCE="0.08"
 BR2_LATE_FAVOURITE_MAX_ADVERSE_FAST_MOMENTUM="1.0"
+BR2_LATE_FAVOURITE_MAX_ADVERSE_BROAD_MOMENTUM="1.0"
 BR2_LATE_FAVOURITE_MAX_ENTRY_PULLBACK="1.0"
 BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN="1.0"
 BR2_TAIL_CLIP_FRAC="0.10"
@@ -159,19 +168,28 @@ while [ $# -gt 0 ]; do
         --br2-late-favourite-min-ask) BR2_LATE_FAVOURITE_MIN_ASK="$2"; shift 2 ;;
         --br2-late-favourite-max-ask) BR2_LATE_FAVOURITE_MAX_ASK="$2"; shift 2 ;;
         --br2-late-favourite-clip-frac) BR2_LATE_FAVOURITE_CLIP_FRAC="$2"; shift 2 ;;
+        --br2-late-favourite-high-cert-clip-frac) BR2_LATE_FAVOURITE_HIGH_CERT_CLIP_FRAC="$2"; shift 2 ;;
         --br2-late-favourite-high-cert-full-clip-edge) BR2_LATE_FAVOURITE_HIGH_CERT_FULL_CLIP_EDGE="$2"; shift 2 ;;
         --br2-late-favourite-max-clips) BR2_LATE_FAVOURITE_MAX_CLIPS="$2"; shift 2 ;;
         --br2-late-favourite-min-sustain-secs) BR2_LATE_FAVOURITE_MIN_SUSTAIN_SECS="$2"; shift 2 ;;
         --br2-late-favourite-sweep-depth) BR2_LATE_FAVOURITE_SWEEP_DEPTH="$2"; shift 2 ;;
         --br2-late-favourite-min-model-confidence) BR2_LATE_FAVOURITE_MIN_MODEL_CONFIDENCE="$2"; shift 2 ;;
+        --br2-late-favourite-min-model-direction-abs) BR2_LATE_FAVOURITE_MIN_MODEL_DIRECTION_ABS="$2"; shift 2 ;;
         --br2-late-favourite-max-model-risk) BR2_LATE_FAVOURITE_MAX_MODEL_RISK="$2"; shift 2 ;;
         --br2-late-favourite-min-model-side-p) BR2_LATE_FAVOURITE_MIN_MODEL_SIDE_P="$2"; shift 2 ;;
         --br2-late-favourite-min-model-edge) BR2_LATE_FAVOURITE_MIN_MODEL_EDGE="$2"; shift 2 ;;
         --br2-late-favourite-high-cert-min-model-edge) BR2_LATE_FAVOURITE_HIGH_CERT_MIN_MODEL_EDGE="$2"; shift 2 ;;
+        --br2-late-favourite-high-cert-bypass-model-edge) BR2_LATE_FAVOURITE_HIGH_CERT_BYPASS_MODEL_EDGE="1"; shift ;;
         --br2-late-favourite-max-whipsaw-score) BR2_LATE_FAVOURITE_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
         --br2-late-favourite-max-reversal-pressure) BR2_LATE_FAVOURITE_MAX_REVERSAL_PRESSURE="$2"; shift 2 ;;
         --br2-late-favourite-min-path-efficiency) BR2_LATE_FAVOURITE_MIN_PATH_EFFICIENCY="$2"; shift 2 ;;
+        --br2-late-favourite-max-observed-range) BR2_LATE_FAVOURITE_MAX_OBSERVED_RANGE="$2"; shift 2 ;;
+        --br2-late-favourite-range-soft-throttle) BR2_LATE_FAVOURITE_RANGE_SOFT_THROTTLE="$2"; shift 2 ;;
+        --br2-late-favourite-range-hard-throttle) BR2_LATE_FAVOURITE_RANGE_HARD_THROTTLE="$2"; shift 2 ;;
+        --br2-late-favourite-range-extra-edge) BR2_LATE_FAVOURITE_RANGE_EXTRA_EDGE="$2"; shift 2 ;;
+        --br2-late-favourite-range-extra-confidence) BR2_LATE_FAVOURITE_RANGE_EXTRA_CONFIDENCE="$2"; shift 2 ;;
         --br2-late-favourite-max-adverse-fast-momentum) BR2_LATE_FAVOURITE_MAX_ADVERSE_FAST_MOMENTUM="$2"; shift 2 ;;
+        --br2-late-favourite-max-adverse-broad-momentum) BR2_LATE_FAVOURITE_MAX_ADVERSE_BROAD_MOMENTUM="$2"; shift 2 ;;
         --br2-late-favourite-max-entry-pullback) BR2_LATE_FAVOURITE_MAX_ENTRY_PULLBACK="$2"; shift 2 ;;
         --br2-late-favourite-max-avg-entry-drawdown) BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN="$2"; shift 2 ;;
         --br2-tail-clip-frac) BR2_TAIL_CLIP_FRAC="$2"; shift 2 ;;
@@ -339,6 +357,10 @@ BR2_INTERNAL_MODEL_GATE_ARGS=()
 if [ "${BR2_DISABLE_INTERNAL_MODEL_GATES}" = "1" ]; then
   BR2_INTERNAL_MODEL_GATE_ARGS=(--br2-disable-internal-model-gates)
 fi
+BR2_LATE_FAVOURITE_HIGH_CERT_BYPASS_MODEL_EDGE_ARGS=()
+if [ "${BR2_LATE_FAVOURITE_HIGH_CERT_BYPASS_MODEL_EDGE}" = "1" ]; then
+  BR2_LATE_FAVOURITE_HIGH_CERT_BYPASS_MODEL_EDGE_ARGS=(--br2-late-favourite-high-cert-bypass-model-edge)
+fi
 if [ -n "${PROFILE_PATH}" ]; then
   echo "[\$(date -u)] ignoring --profile ${PROFILE_PATH}; launcher CLI knobs are authoritative for sweeps"
 fi
@@ -431,19 +453,28 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-favourite-min-ask "${BR2_LATE_FAVOURITE_MIN_ASK}" \\
       --br2-late-favourite-max-ask "${BR2_LATE_FAVOURITE_MAX_ASK}" \\
       --br2-late-favourite-clip-frac "${BR2_LATE_FAVOURITE_CLIP_FRAC}" \\
+      --br2-late-favourite-high-cert-clip-frac "${BR2_LATE_FAVOURITE_HIGH_CERT_CLIP_FRAC}" \\
       --br2-late-favourite-high-cert-full-clip-edge "${BR2_LATE_FAVOURITE_HIGH_CERT_FULL_CLIP_EDGE}" \\
       --br2-late-favourite-max-clips "${BR2_LATE_FAVOURITE_MAX_CLIPS}" \\
       --br2-late-favourite-min-sustain-secs "${BR2_LATE_FAVOURITE_MIN_SUSTAIN_SECS}" \\
       --br2-late-favourite-sweep-depth "${BR2_LATE_FAVOURITE_SWEEP_DEPTH}" \\
       --br2-late-favourite-min-model-confidence "${BR2_LATE_FAVOURITE_MIN_MODEL_CONFIDENCE}" \\
+      --br2-late-favourite-min-model-direction-abs "${BR2_LATE_FAVOURITE_MIN_MODEL_DIRECTION_ABS}" \\
       --br2-late-favourite-max-model-risk "${BR2_LATE_FAVOURITE_MAX_MODEL_RISK}" \\
       --br2-late-favourite-min-model-side-p "${BR2_LATE_FAVOURITE_MIN_MODEL_SIDE_P}" \\
       --br2-late-favourite-min-model-edge "${BR2_LATE_FAVOURITE_MIN_MODEL_EDGE}" \\
       --br2-late-favourite-high-cert-min-model-edge "${BR2_LATE_FAVOURITE_HIGH_CERT_MIN_MODEL_EDGE}" \\
+      "\${BR2_LATE_FAVOURITE_HIGH_CERT_BYPASS_MODEL_EDGE_ARGS[@]}" \\
       --br2-late-favourite-max-whipsaw-score "${BR2_LATE_FAVOURITE_MAX_WHIPSAW_SCORE}" \\
       --br2-late-favourite-max-reversal-pressure "${BR2_LATE_FAVOURITE_MAX_REVERSAL_PRESSURE}" \\
       --br2-late-favourite-min-path-efficiency "${BR2_LATE_FAVOURITE_MIN_PATH_EFFICIENCY}" \\
+      --br2-late-favourite-max-observed-range "${BR2_LATE_FAVOURITE_MAX_OBSERVED_RANGE}" \\
+      --br2-late-favourite-range-soft-throttle "${BR2_LATE_FAVOURITE_RANGE_SOFT_THROTTLE}" \\
+      --br2-late-favourite-range-hard-throttle "${BR2_LATE_FAVOURITE_RANGE_HARD_THROTTLE}" \\
+      --br2-late-favourite-range-extra-edge "${BR2_LATE_FAVOURITE_RANGE_EXTRA_EDGE}" \\
+      --br2-late-favourite-range-extra-confidence "${BR2_LATE_FAVOURITE_RANGE_EXTRA_CONFIDENCE}" \\
       --br2-late-favourite-max-adverse-fast-momentum "${BR2_LATE_FAVOURITE_MAX_ADVERSE_FAST_MOMENTUM}" \\
+      --br2-late-favourite-max-adverse-broad-momentum "${BR2_LATE_FAVOURITE_MAX_ADVERSE_BROAD_MOMENTUM}" \\
       --br2-late-favourite-max-entry-pullback "${BR2_LATE_FAVOURITE_MAX_ENTRY_PULLBACK}" \\
       --br2-late-favourite-max-avg-entry-drawdown "${BR2_LATE_FAVOURITE_MAX_AVG_ENTRY_DRAWDOWN}" \\
       --br2-tail-clip-frac "${BR2_TAIL_CLIP_FRAC}" \\
