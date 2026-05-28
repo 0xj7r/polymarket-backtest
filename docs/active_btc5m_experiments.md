@@ -205,14 +205,25 @@ loss versus the no-tail/tail baselines over the first `250` markets, but it also
 starved participation. Because the replay cadence differed from the leaders,
 promotion requires the corrected `sample1000` relaunch below.
 
-Corrected relaunch:
+Corrected relaunch attempt:
 
 - Run: `20260528T200616Z-portfolio-grid-23412`
 - Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_tail_fix_lc_range50_sample1000`
 - Replay sample: `1000ms`
 - Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
 - Meta retraining: forbidden
-- Status: active on instance `i-0574c5824b44bd339`
+- Status: stopped. The leader artifacts had not been uploaded yet, so the
+  instance failed on a missing `meta-calibrator-snapshot.json`.
+
+Corrected relaunch retry:
+
+- Run: `20260528T201231Z-portfolio-grid-34818`
+- Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_tail_fix_lc_range50_sample1000_retry`
+- Replay sample: `1000ms`
+- Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610` after
+  manually uploading active leader artifacts
+- Meta retraining: forbidden
+- Status: active on instance `i-08407b3d72d607bac`
 
 ### No-Tail Late-Confirm Range-Gated Isolation
 
@@ -235,14 +246,25 @@ Only intentional strategy changes versus the scaled no-tail reproduction:
 --br2-tail-max-clips 0
 ```
 
-Corrected relaunch:
+Corrected relaunch attempt:
 
 - Run: `20260528T200646Z-portfolio-grid-24376`
 - Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_notail_lc_range50_sample1000`
 - Replay sample: `1000ms`
 - Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610`
 - Meta retraining: forbidden
-- Status: active on instance `i-01e76f14cfabc5f39`
+- Status: stopped for the same missing-snapshot issue as the tail corrected
+  relaunch attempt.
+
+Corrected relaunch retry:
+
+- Run: `20260528T201244Z-portfolio-grid-35890`
+- Label: `clip_0p015_gross_1250_expfrac_0p12_lat500ms_cap5k_btc_5m_notail_lc_range50_sample1000_retry`
+- Replay sample: `1000ms`
+- Meta calibrator: reused from `20260528T185235Z-portfolio-grid-79610` after
+  manually uploading active leader artifacts
+- Meta retraining: forbidden
+- Status: active on instance `i-0f3b6876adcd46c6f`
 
 ## Decision Rules
 
