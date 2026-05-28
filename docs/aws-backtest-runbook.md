@@ -71,7 +71,6 @@ ROOT_VOLUME_GB=250 \
   --meta-weight-clip 1.50 \
   --strategies bonereaper_v2 \
   --starting-cash 1000 \
-  --profile configs/bonereaper_v2_fast_research.toml \
   --max-clip 100 \
   --max-order-clip-multiplier 6.0 \
   --gross-caps 250,500,750 \
@@ -88,10 +87,16 @@ ROOT_VOLUME_GB=250 \
 ```
 
 The launcher now writes partial `markets.jsonl` and `summary.json` every 250
-evaluated markets and syncs them to S3 every 180 seconds while each profile is
+evaluated markets and syncs them to S3 every 180 seconds while each variant is
 running.
 
-The meta-calibrator is validation-gated. The first profile trains on the
+The EC2 launcher intentionally does not pass `--profile` through to
+`pm-app walk-forward`. Profile files are useful for direct local named-variant
+runs, but `pm-app` applies profile values after CLI defaults. For AWS sweeps,
+the launcher keeps CLI knobs authoritative and passes `--replay-sample-ms`
+explicitly.
+
+The meta-calibrator is validation-gated. The first variant trains on the
 configured train window, holds out the last 20% of training samples for
 chronological validation, and only writes a non-empty snapshot if calibrated
 log loss improves and Brier score does not regress. For overfit runs, use

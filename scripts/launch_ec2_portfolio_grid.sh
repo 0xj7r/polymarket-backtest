@@ -335,9 +335,8 @@ BR2_INTERNAL_MODEL_GATE_ARGS=()
 if [ "${BR2_DISABLE_INTERNAL_MODEL_GATES}" = "1" ]; then
   BR2_INTERNAL_MODEL_GATE_ARGS=(--br2-disable-internal-model-gates)
 fi
-PROFILE_ARGS=()
 if [ -n "${PROFILE_PATH}" ]; then
-  PROFILE_ARGS=(--profile "${PROFILE_PATH}")
+  echo "[\$(date -u)] ignoring --profile ${PROFILE_PATH}; launcher CLI knobs are authoritative for sweeps"
 fi
 PER_MARKET_EXPOSURE_FRAC_ARGS=()
 if [ -n "${MAX_PER_MARKET_EXPOSURE_FRAC}" ]; then
@@ -395,7 +394,6 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
     PM_TELONEX_REGION="${REGION}" ./target/release/pm-app walk-forward \\
       --markets /opt/pm/markets.jsonl \\
       --strategies "${STRATEGIES}" \\
-      "\${PROFILE_ARGS[@]}" \\
       --starting-cash "${STARTING_CASH}" \\
       --max-clip-usdc "${MAX_CLIP}" \\
       --max-order-clip-multiplier "${MAX_ORDER_CLIP_MULTIPLIER}" \\
