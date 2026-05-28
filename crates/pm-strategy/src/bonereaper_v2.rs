@@ -50,6 +50,7 @@ pub struct BonereaperV2GateStats {
     pub late_confirm_model_side_p_fail: u64,
     pub late_confirm_model_edge_fail: u64,
     pub late_confirm_whipsaw_fail: u64,
+    pub late_confirm_low_vol_fail: u64,
     pub late_confirm_side_lock_fail: u64,
     pub late_confirm_shares_fail: u64,
     pub late_confirm_emits: u64,
@@ -67,6 +68,7 @@ pub struct BonereaperV2GateStats {
     pub high_skew_model_side_p_fail: u64,
     pub high_skew_model_edge_fail: u64,
     pub high_skew_whipsaw_fail: u64,
+    pub high_skew_low_vol_fail: u64,
     pub high_skew_side_lock_fail: u64,
     pub high_skew_shares_fail: u64,
     pub high_skew_emits: u64,
@@ -89,6 +91,7 @@ pub struct BonereaperV2GateStats {
     pub late_favourite_whipsaw_fail: u64,
     pub late_favourite_reversal_pressure_fail: u64,
     pub late_favourite_path_efficiency_fail: u64,
+    pub late_favourite_low_vol_fail: u64,
     pub late_favourite_market_range_fail: u64,
     pub late_favourite_adverse_momentum_fail: u64,
     pub late_favourite_entry_pullback_fail: u64,
@@ -111,6 +114,7 @@ impl BonereaperV2GateStats {
         self.late_confirm_model_side_p_fail += other.late_confirm_model_side_p_fail;
         self.late_confirm_model_edge_fail += other.late_confirm_model_edge_fail;
         self.late_confirm_whipsaw_fail += other.late_confirm_whipsaw_fail;
+        self.late_confirm_low_vol_fail += other.late_confirm_low_vol_fail;
         self.late_confirm_side_lock_fail += other.late_confirm_side_lock_fail;
         self.late_confirm_shares_fail += other.late_confirm_shares_fail;
         self.late_confirm_emits += other.late_confirm_emits;
@@ -128,6 +132,7 @@ impl BonereaperV2GateStats {
         self.high_skew_model_side_p_fail += other.high_skew_model_side_p_fail;
         self.high_skew_model_edge_fail += other.high_skew_model_edge_fail;
         self.high_skew_whipsaw_fail += other.high_skew_whipsaw_fail;
+        self.high_skew_low_vol_fail += other.high_skew_low_vol_fail;
         self.high_skew_side_lock_fail += other.high_skew_side_lock_fail;
         self.high_skew_shares_fail += other.high_skew_shares_fail;
         self.high_skew_emits += other.high_skew_emits;
@@ -150,6 +155,7 @@ impl BonereaperV2GateStats {
         self.late_favourite_whipsaw_fail += other.late_favourite_whipsaw_fail;
         self.late_favourite_reversal_pressure_fail += other.late_favourite_reversal_pressure_fail;
         self.late_favourite_path_efficiency_fail += other.late_favourite_path_efficiency_fail;
+        self.late_favourite_low_vol_fail += other.late_favourite_low_vol_fail;
         self.late_favourite_market_range_fail += other.late_favourite_market_range_fail;
         self.late_favourite_adverse_momentum_fail += other.late_favourite_adverse_momentum_fail;
         self.late_favourite_entry_pullback_fail += other.late_favourite_entry_pullback_fail;
@@ -186,6 +192,7 @@ pub struct BonereaperV2Config {
     pub late_confirm_min_model_edge: f32,
     pub late_confirm_min_book_skew: f32,
     pub late_confirm_max_whipsaw_score: f32,
+    pub late_confirm_min_realized_vol_180s_bps: f32,
 
     // High-skew load lane with whipsaw guards
     pub high_skew_threshold: f32,
@@ -198,6 +205,7 @@ pub struct BonereaperV2Config {
     pub high_skew_min_spot_alignment: f32,
     pub high_skew_skip_whipsaw: bool,
     pub high_skew_max_whipsaw_score: f32,
+    pub high_skew_min_realized_vol_180s_bps: f32,
 
     // Late favourite loading: heavier than generic high-skew, but only after
     // the market has a clear favourite and book/spot direction agree.
@@ -235,6 +243,7 @@ pub struct BonereaperV2Config {
     pub late_favourite_max_whipsaw_score: f32,
     pub late_favourite_max_reversal_pressure: f32,
     pub late_favourite_min_path_efficiency: f32,
+    pub late_favourite_min_realized_vol_180s_bps: f32,
     pub late_favourite_max_observed_range: f32,
     /// Start scaling down late-favourite size once the live market has already
     /// traversed this much YES-mid range. Disabled when >= hard range.
@@ -319,6 +328,7 @@ impl Default for BonereaperV2Config {
             late_confirm_min_model_edge: 0.02,
             late_confirm_min_book_skew: 0.06,
             late_confirm_max_whipsaw_score: 0.85,
+            late_confirm_min_realized_vol_180s_bps: 0.0,
             // Favourite-loading lane. Keep this stricter than the old probe
             // defaults: the looser settings overtraded early skew and paid
             // taker spread before the market had a durable favourite.
@@ -332,6 +342,7 @@ impl Default for BonereaperV2Config {
             high_skew_min_spot_alignment: 0.02,
             high_skew_skip_whipsaw: true,
             high_skew_max_whipsaw_score: 0.75,
+            high_skew_min_realized_vol_180s_bps: 0.0,
             late_favourite_start_secs: 180.0,
             late_favourite_threshold: 0.22, // yes_mid >= 0.72 or <= 0.28
             late_favourite_min_ask: 0.70,
@@ -363,6 +374,7 @@ impl Default for BonereaperV2Config {
             late_favourite_max_whipsaw_score: 0.75,
             late_favourite_max_reversal_pressure: 1.0,
             late_favourite_min_path_efficiency: 0.0,
+            late_favourite_min_realized_vol_180s_bps: 0.0,
             // Full-history slices showed the largest drawdowns came from
             // oversized favourite loads after the market had already traversed
             // a wide YES-mid range. Scale size and require more model support
@@ -1062,6 +1074,10 @@ impl Strategy for BonereaperV2 {
                 self.gate_stats.late_confirm_book_skew_fail += 1;
             } else if whipsaw.score > self.cfg.late_confirm_max_whipsaw_score {
                 self.gate_stats.late_confirm_whipsaw_fail += 1;
+            } else if whipsaw.realized_vol_180s_bps
+                < self.cfg.late_confirm_min_realized_vol_180s_bps
+            {
+                self.gate_stats.late_confirm_low_vol_fail += 1;
             } else {
                 let model_support = self.model_support_for_side(
                     ctx,
@@ -1155,6 +1171,8 @@ impl Strategy for BonereaperV2 {
                 if whipsaw.score > self.cfg.high_skew_max_whipsaw_score {
                     self.gate_stats.high_skew_whipsaw_fail += 1;
                 }
+            } else if whipsaw.realized_vol_180s_bps < self.cfg.high_skew_min_realized_vol_180s_bps {
+                self.gate_stats.high_skew_low_vol_fail += 1;
             } else if skew_mag < self.cfg.high_skew_threshold {
                 self.gate_stats.high_skew_threshold_fail += 1;
             } else {
@@ -1298,6 +1316,10 @@ impl Strategy for BonereaperV2 {
                     self.gate_stats.late_favourite_reversal_pressure_fail += 1;
                 } else if whipsaw.path_efficiency < self.cfg.late_favourite_min_path_efficiency {
                     self.gate_stats.late_favourite_path_efficiency_fail += 1;
+                } else if whipsaw.realized_vol_180s_bps
+                    < self.cfg.late_favourite_min_realized_vol_180s_bps
+                {
+                    self.gate_stats.late_favourite_low_vol_fail += 1;
                 } else if ctx.market_yes_range_so_far > self.cfg.late_favourite_max_observed_range {
                     self.gate_stats.late_favourite_market_range_fail += 1;
                 } else {

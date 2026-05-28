@@ -25,6 +25,9 @@ late_favourite_range_soft_throttle = 0.78
 model_btc_whipsaw_risk_weight = 0.16
 model_btc_path_inefficiency_risk_weight = 0.10
 model_btc_reversal_pressure_risk_weight = 0.12
+late_confirm_min_realized_vol_180s_bps = 0.0
+high_skew_min_realized_vol_180s_bps = 0.0
+late_favourite_min_realized_vol_180s_bps = 0.0
 
 # Conservative tail for smoke
 tail_min_favourite_unrealized_edge = 0.0

@@ -59,9 +59,11 @@ BR2_LATE_CONFIRM_MIN_MODEL_SIDE_P="0.58"
 BR2_LATE_CONFIRM_MIN_MODEL_EDGE="0.02"
 BR2_LATE_CONFIRM_MIN_BOOK_SKEW="0.06"
 BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE="0.85"
+BR2_LATE_CONFIRM_MIN_REALIZED_VOL_180S_BPS="0.0"
 BR2_HIGH_SKEW_CLIP_FRAC="0.60"
 BR2_HIGH_SKEW_MAX_CLIPS="5"
 BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE="0.75"
+BR2_HIGH_SKEW_MIN_REALIZED_VOL_180S_BPS="0.0"
 BR2_LATE_FAVOURITE_START_SECS="180.0"
 BR2_LATE_FAVOURITE_THRESHOLD="0.22"
 BR2_LATE_FAVOURITE_MIN_ASK="0.70"
@@ -82,6 +84,7 @@ BR2_LATE_FAVOURITE_HIGH_CERT_BYPASS_MODEL_EDGE="0"
 BR2_LATE_FAVOURITE_MAX_WHIPSAW_SCORE="0.75"
 BR2_LATE_FAVOURITE_MAX_REVERSAL_PRESSURE="1.0"
 BR2_LATE_FAVOURITE_MIN_PATH_EFFICIENCY="0.0"
+BR2_LATE_FAVOURITE_MIN_REALIZED_VOL_180S_BPS="0.0"
 BR2_LATE_FAVOURITE_MAX_OBSERVED_RANGE="1.0"
 BR2_LATE_FAVOURITE_RANGE_SOFT_THROTTLE="0.78"
 BR2_LATE_FAVOURITE_RANGE_HARD_THROTTLE="0.98"
@@ -169,9 +172,11 @@ while [ $# -gt 0 ]; do
         --br2-late-confirm-min-model-edge) BR2_LATE_CONFIRM_MIN_MODEL_EDGE="$2"; shift 2 ;;
         --br2-late-confirm-min-book-skew) BR2_LATE_CONFIRM_MIN_BOOK_SKEW="$2"; shift 2 ;;
         --br2-late-confirm-max-whipsaw-score) BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
+        --br2-late-confirm-min-realized-vol-180s-bps) BR2_LATE_CONFIRM_MIN_REALIZED_VOL_180S_BPS="$2"; shift 2 ;;
         --br2-high-skew-clip-frac) BR2_HIGH_SKEW_CLIP_FRAC="$2"; shift 2 ;;
         --br2-high-skew-max-clips) BR2_HIGH_SKEW_MAX_CLIPS="$2"; shift 2 ;;
         --br2-high-skew-max-whipsaw-score) BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
+        --br2-high-skew-min-realized-vol-180s-bps) BR2_HIGH_SKEW_MIN_REALIZED_VOL_180S_BPS="$2"; shift 2 ;;
         --br2-late-favourite-start-secs) BR2_LATE_FAVOURITE_START_SECS="$2"; shift 2 ;;
         --br2-late-favourite-threshold) BR2_LATE_FAVOURITE_THRESHOLD="$2"; shift 2 ;;
         --br2-late-favourite-min-ask) BR2_LATE_FAVOURITE_MIN_ASK="$2"; shift 2 ;;
@@ -192,6 +197,7 @@ while [ $# -gt 0 ]; do
         --br2-late-favourite-max-whipsaw-score) BR2_LATE_FAVOURITE_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
         --br2-late-favourite-max-reversal-pressure) BR2_LATE_FAVOURITE_MAX_REVERSAL_PRESSURE="$2"; shift 2 ;;
         --br2-late-favourite-min-path-efficiency) BR2_LATE_FAVOURITE_MIN_PATH_EFFICIENCY="$2"; shift 2 ;;
+        --br2-late-favourite-min-realized-vol-180s-bps) BR2_LATE_FAVOURITE_MIN_REALIZED_VOL_180S_BPS="$2"; shift 2 ;;
         --br2-late-favourite-max-observed-range) BR2_LATE_FAVOURITE_MAX_OBSERVED_RANGE="$2"; shift 2 ;;
         --br2-late-favourite-range-soft-throttle) BR2_LATE_FAVOURITE_RANGE_SOFT_THROTTLE="$2"; shift 2 ;;
         --br2-late-favourite-range-hard-throttle) BR2_LATE_FAVOURITE_RANGE_HARD_THROTTLE="$2"; shift 2 ;;
@@ -463,9 +469,11 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-confirm-min-model-edge "${BR2_LATE_CONFIRM_MIN_MODEL_EDGE}" \\
       --br2-late-confirm-min-book-skew "${BR2_LATE_CONFIRM_MIN_BOOK_SKEW}" \\
       --br2-late-confirm-max-whipsaw-score "${BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE}" \\
+      --br2-late-confirm-min-realized-vol-180s-bps "${BR2_LATE_CONFIRM_MIN_REALIZED_VOL_180S_BPS}" \\
       --br2-high-skew-clip-frac "${BR2_HIGH_SKEW_CLIP_FRAC}" \\
       --br2-high-skew-max-clips "${BR2_HIGH_SKEW_MAX_CLIPS}" \\
       --br2-high-skew-max-whipsaw-score "${BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE}" \\
+      --br2-high-skew-min-realized-vol-180s-bps "${BR2_HIGH_SKEW_MIN_REALIZED_VOL_180S_BPS}" \\
       --br2-late-favourite-start-secs "${BR2_LATE_FAVOURITE_START_SECS}" \\
       --br2-late-favourite-threshold "${BR2_LATE_FAVOURITE_THRESHOLD}" \\
       --br2-late-favourite-min-ask "${BR2_LATE_FAVOURITE_MIN_ASK}" \\
@@ -486,6 +494,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-favourite-max-whipsaw-score "${BR2_LATE_FAVOURITE_MAX_WHIPSAW_SCORE}" \\
       --br2-late-favourite-max-reversal-pressure "${BR2_LATE_FAVOURITE_MAX_REVERSAL_PRESSURE}" \\
       --br2-late-favourite-min-path-efficiency "${BR2_LATE_FAVOURITE_MIN_PATH_EFFICIENCY}" \\
+      --br2-late-favourite-min-realized-vol-180s-bps "${BR2_LATE_FAVOURITE_MIN_REALIZED_VOL_180S_BPS}" \\
       --br2-late-favourite-max-observed-range "${BR2_LATE_FAVOURITE_MAX_OBSERVED_RANGE}" \\
       --br2-late-favourite-range-soft-throttle "${BR2_LATE_FAVOURITE_RANGE_SOFT_THROTTLE}" \\
       --br2-late-favourite-range-hard-throttle "${BR2_LATE_FAVOURITE_RANGE_HARD_THROTTLE}" \\

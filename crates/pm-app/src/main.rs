@@ -396,6 +396,9 @@ enum Cmd {
         /// Bonereaper v2 maximum continuous whipsaw score for late confirmation entries.
         #[arg(long, default_value = "0.85")]
         br2_late_confirm_max_whipsaw_score: f32,
+        /// Bonereaper v2 minimum BTC 180s realized volatility for late confirmation entries.
+        #[arg(long, default_value = "0.0")]
+        br2_late_confirm_min_realized_vol_180s_bps: f32,
         /// Bonereaper v2 high-skew clip multiplier.
         #[arg(long, default_value = "0.60")]
         br2_high_skew_clip_frac: f32,
@@ -405,6 +408,9 @@ enum Cmd {
         /// Bonereaper v2 maximum continuous whipsaw score for high-skew loads.
         #[arg(long, default_value = "0.75")]
         br2_high_skew_max_whipsaw_score: f32,
+        /// Bonereaper v2 minimum BTC 180s realized volatility for high-skew loads.
+        #[arg(long, default_value = "0.0")]
+        br2_high_skew_min_realized_vol_180s_bps: f32,
         /// Bonereaper v2 seconds into market before late-favourite loads begin.
         #[arg(long, default_value = "180.0")]
         br2_late_favourite_start_secs: f32,
@@ -477,6 +483,9 @@ enum Cmd {
         /// Bonereaper v2 minimum spot path efficiency for late-favourite loads.
         #[arg(long, default_value = "0.0")]
         br2_late_favourite_min_path_efficiency: f32,
+        /// Bonereaper v2 minimum BTC 180s realized volatility for late-favourite loads.
+        #[arg(long, default_value = "0.0")]
+        br2_late_favourite_min_realized_vol_180s_bps: f32,
         /// Bonereaper v2 maximum live-observed YES-mid range before late-favourite loads.
         #[arg(long, default_value = "1.0")]
         br2_late_favourite_max_observed_range: f32,
@@ -1037,9 +1046,11 @@ async fn main() -> Result<()> {
             br2_late_confirm_min_model_edge,
             br2_late_confirm_min_book_skew,
             br2_late_confirm_max_whipsaw_score,
+            br2_late_confirm_min_realized_vol_180s_bps,
             br2_high_skew_clip_frac,
             br2_high_skew_max_clips,
             br2_high_skew_max_whipsaw_score,
+            br2_high_skew_min_realized_vol_180s_bps,
             br2_late_favourite_start_secs,
             br2_late_favourite_threshold,
             br2_late_favourite_min_ask,
@@ -1064,6 +1075,7 @@ async fn main() -> Result<()> {
             br2_late_favourite_max_whipsaw_score,
             br2_late_favourite_max_reversal_pressure,
             br2_late_favourite_min_path_efficiency,
+            br2_late_favourite_min_realized_vol_180s_bps,
             br2_late_favourite_max_observed_range,
             br2_late_favourite_range_soft_throttle,
             br2_late_favourite_range_hard_throttle,
@@ -1160,9 +1172,11 @@ async fn main() -> Result<()> {
                 br2_late_confirm_min_model_edge,
                 br2_late_confirm_min_book_skew,
                 br2_late_confirm_max_whipsaw_score,
+                br2_late_confirm_min_realized_vol_180s_bps,
                 br2_high_skew_clip_frac,
                 br2_high_skew_max_clips,
                 br2_high_skew_max_whipsaw_score,
+                br2_high_skew_min_realized_vol_180s_bps,
                 br2_late_favourite_start_secs,
                 br2_late_favourite_threshold,
                 br2_late_favourite_min_ask,
@@ -1187,6 +1201,7 @@ async fn main() -> Result<()> {
                 br2_late_favourite_max_whipsaw_score,
                 br2_late_favourite_max_reversal_pressure,
                 br2_late_favourite_min_path_efficiency,
+                br2_late_favourite_min_realized_vol_180s_bps,
                 br2_late_favourite_max_observed_range,
                 br2_late_favourite_range_soft_throttle,
                 br2_late_favourite_range_hard_throttle,
@@ -1817,9 +1832,11 @@ async fn walk_forward(
     br2_late_confirm_min_model_edge: f32,
     br2_late_confirm_min_book_skew: f32,
     br2_late_confirm_max_whipsaw_score: f32,
+    br2_late_confirm_min_realized_vol_180s_bps: f32,
     br2_high_skew_clip_frac: f32,
     br2_high_skew_max_clips: usize,
     br2_high_skew_max_whipsaw_score: f32,
+    br2_high_skew_min_realized_vol_180s_bps: f32,
     br2_late_favourite_start_secs: f32,
     br2_late_favourite_threshold: f32,
     br2_late_favourite_min_ask: f32,
@@ -1844,6 +1861,7 @@ async fn walk_forward(
     br2_late_favourite_max_whipsaw_score: f32,
     br2_late_favourite_max_reversal_pressure: f32,
     br2_late_favourite_min_path_efficiency: f32,
+    br2_late_favourite_min_realized_vol_180s_bps: f32,
     br2_late_favourite_max_observed_range: f32,
     br2_late_favourite_range_soft_throttle: f32,
     br2_late_favourite_range_hard_throttle: f32,
@@ -2009,9 +2027,11 @@ async fn walk_forward(
         br2_late_confirm_min_model_edge,
         br2_late_confirm_min_book_skew,
         br2_late_confirm_max_whipsaw_score,
+        br2_late_confirm_min_realized_vol_180s_bps,
         br2_high_skew_clip_frac,
         br2_high_skew_max_clips,
         br2_high_skew_max_whipsaw_score,
+        br2_high_skew_min_realized_vol_180s_bps,
         br2_late_favourite_start_secs,
         br2_late_favourite_threshold,
         br2_late_favourite_min_ask,
@@ -2036,6 +2056,7 @@ async fn walk_forward(
         br2_late_favourite_max_whipsaw_score,
         br2_late_favourite_max_reversal_pressure,
         br2_late_favourite_min_path_efficiency,
+        br2_late_favourite_min_realized_vol_180s_bps,
         br2_late_favourite_max_observed_range,
         br2_late_favourite_range_soft_throttle,
         br2_late_favourite_range_hard_throttle,
@@ -2126,6 +2147,9 @@ async fn walk_forward(
         "br2_late_favourite_max_whipsaw_score": wf_cfg.br2_late_favourite_max_whipsaw_score,
         "br2_late_favourite_max_reversal_pressure": wf_cfg.br2_late_favourite_max_reversal_pressure,
         "br2_late_favourite_min_path_efficiency": wf_cfg.br2_late_favourite_min_path_efficiency,
+        "br2_late_confirm_min_realized_vol_180s_bps": wf_cfg.br2_late_confirm_min_realized_vol_180s_bps,
+        "br2_high_skew_min_realized_vol_180s_bps": wf_cfg.br2_high_skew_min_realized_vol_180s_bps,
+        "br2_late_favourite_min_realized_vol_180s_bps": wf_cfg.br2_late_favourite_min_realized_vol_180s_bps,
         "br2_late_favourite_max_observed_range": wf_cfg.br2_late_favourite_max_observed_range,
         "br2_late_favourite_range_soft_throttle": wf_cfg.br2_late_favourite_range_soft_throttle,
         "br2_late_favourite_range_hard_throttle": wf_cfg.br2_late_favourite_range_hard_throttle,

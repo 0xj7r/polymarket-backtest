@@ -56,6 +56,9 @@ late_favourite_range_extra_confidence = 0.08
 late_favourite_max_whipsaw_score = 0.75
 late_favourite_max_reversal_pressure = 1.0
 late_favourite_min_path_efficiency = 0.0
+late_confirm_min_realized_vol_180s_bps = 0.0
+high_skew_min_realized_vol_180s_bps = 0.0
+late_favourite_min_realized_vol_180s_bps = 0.0
 
 # Convex tail
 tail_clip_frac = 0.10
