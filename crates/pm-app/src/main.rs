@@ -399,6 +399,9 @@ enum Cmd {
         /// Bonereaper v2 minimum BTC 180s realized volatility for late confirmation entries.
         #[arg(long, default_value = "0.0")]
         br2_late_confirm_min_realized_vol_180s_bps: f32,
+        /// Bonereaper v2 maximum observed market range for late confirmation entries.
+        #[arg(long, default_value = "1.0")]
+        br2_late_confirm_max_observed_range: f32,
         /// Bonereaper v2 high-skew clip multiplier.
         #[arg(long, default_value = "0.60")]
         br2_high_skew_clip_frac: f32,
@@ -1047,6 +1050,7 @@ async fn main() -> Result<()> {
             br2_late_confirm_min_book_skew,
             br2_late_confirm_max_whipsaw_score,
             br2_late_confirm_min_realized_vol_180s_bps,
+            br2_late_confirm_max_observed_range,
             br2_high_skew_clip_frac,
             br2_high_skew_max_clips,
             br2_high_skew_max_whipsaw_score,
@@ -1173,6 +1177,7 @@ async fn main() -> Result<()> {
                 br2_late_confirm_min_book_skew,
                 br2_late_confirm_max_whipsaw_score,
                 br2_late_confirm_min_realized_vol_180s_bps,
+                br2_late_confirm_max_observed_range,
                 br2_high_skew_clip_frac,
                 br2_high_skew_max_clips,
                 br2_high_skew_max_whipsaw_score,
@@ -1833,6 +1838,7 @@ async fn walk_forward(
     br2_late_confirm_min_book_skew: f32,
     br2_late_confirm_max_whipsaw_score: f32,
     br2_late_confirm_min_realized_vol_180s_bps: f32,
+    br2_late_confirm_max_observed_range: f32,
     br2_high_skew_clip_frac: f32,
     br2_high_skew_max_clips: usize,
     br2_high_skew_max_whipsaw_score: f32,
@@ -2028,6 +2034,7 @@ async fn walk_forward(
         br2_late_confirm_min_book_skew,
         br2_late_confirm_max_whipsaw_score,
         br2_late_confirm_min_realized_vol_180s_bps,
+        br2_late_confirm_max_observed_range,
         br2_high_skew_clip_frac,
         br2_high_skew_max_clips,
         br2_high_skew_max_whipsaw_score,
@@ -2148,6 +2155,7 @@ async fn walk_forward(
         "br2_late_favourite_max_reversal_pressure": wf_cfg.br2_late_favourite_max_reversal_pressure,
         "br2_late_favourite_min_path_efficiency": wf_cfg.br2_late_favourite_min_path_efficiency,
         "br2_late_confirm_min_realized_vol_180s_bps": wf_cfg.br2_late_confirm_min_realized_vol_180s_bps,
+        "br2_late_confirm_max_observed_range": wf_cfg.br2_late_confirm_max_observed_range,
         "br2_high_skew_min_realized_vol_180s_bps": wf_cfg.br2_high_skew_min_realized_vol_180s_bps,
         "br2_late_favourite_min_realized_vol_180s_bps": wf_cfg.br2_late_favourite_min_realized_vol_180s_bps,
         "br2_late_favourite_max_observed_range": wf_cfg.br2_late_favourite_max_observed_range,
@@ -2180,6 +2188,7 @@ async fn walk_forward(
             wf_cfg.br2_late_favourite_high_cert_min_model_edge,
         br2_late_favourite_high_cert_full_clip_edge =
             wf_cfg.br2_late_favourite_high_cert_full_clip_edge,
+        br2_late_confirm_max_observed_range = wf_cfg.br2_late_confirm_max_observed_range,
         br2_tail_budget_favourite_spend_frac = wf_cfg.br2_tail_budget_favourite_spend_frac,
         replay_sample_ms = wf_cfg.replay_sample_ms,
         "effective walk-forward profile"

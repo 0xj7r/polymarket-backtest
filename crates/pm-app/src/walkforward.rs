@@ -65,6 +65,7 @@ pub struct BonereaperV2Profile {
     pub late_max_fires: Option<usize>,
     pub late_confirm_min_model_edge: Option<f32>,
     pub late_confirm_min_realized_vol_180s_bps: Option<f32>,
+    pub late_confirm_max_observed_range: Option<f32>,
     pub high_skew_clip_frac: Option<f32>,
     pub high_skew_max_clips: Option<usize>,
     pub high_skew_max_whipsaw_score: Option<f32>,
@@ -151,6 +152,10 @@ impl BonereaperV2Profile {
         apply!(
             late_confirm_min_realized_vol_180s_bps,
             br2_late_confirm_min_realized_vol_180s_bps
+        );
+        apply!(
+            late_confirm_max_observed_range,
+            br2_late_confirm_max_observed_range
         );
         apply!(high_skew_clip_frac, br2_high_skew_clip_frac);
         apply!(high_skew_max_clips, br2_high_skew_max_clips);
@@ -402,6 +407,7 @@ pub struct WalkForwardConfig {
     pub br2_late_confirm_min_book_skew: f32,
     pub br2_late_confirm_max_whipsaw_score: f32,
     pub br2_late_confirm_min_realized_vol_180s_bps: f32,
+    pub br2_late_confirm_max_observed_range: f32,
     pub br2_high_skew_clip_frac: f32,
     pub br2_high_skew_max_clips: usize,
     pub br2_high_skew_max_whipsaw_score: f32,
@@ -559,6 +565,7 @@ impl Default for WalkForwardConfig {
             br2_late_confirm_min_book_skew: 0.06,
             br2_late_confirm_max_whipsaw_score: 0.85,
             br2_late_confirm_min_realized_vol_180s_bps: 0.0,
+            br2_late_confirm_max_observed_range: 1.0,
             br2_high_skew_clip_frac: 0.60,
             br2_high_skew_max_clips: 5,
             br2_high_skew_max_whipsaw_score: 0.75,
@@ -760,6 +767,7 @@ pub struct SummaryRunConfig {
     pub br2_late_confirm_min_book_skew: f32,
     pub br2_late_confirm_max_whipsaw_score: f32,
     pub br2_late_confirm_min_realized_vol_180s_bps: f32,
+    pub br2_late_confirm_max_observed_range: f32,
     pub br2_high_skew_clip_frac: f32,
     pub br2_high_skew_max_clips: usize,
     pub br2_high_skew_max_whipsaw_score: f32,
@@ -3174,6 +3182,7 @@ fn run_one_strategy(
                 late_confirm_max_whipsaw_score: cfg.br2_late_confirm_max_whipsaw_score,
                 late_confirm_min_realized_vol_180s_bps: cfg
                     .br2_late_confirm_min_realized_vol_180s_bps,
+                late_confirm_max_observed_range: cfg.br2_late_confirm_max_observed_range,
                 high_skew_clip_frac: cfg.br2_high_skew_clip_frac,
                 high_skew_max_clips: cfg.br2_high_skew_max_clips,
                 high_skew_max_whipsaw_score: cfg.br2_high_skew_max_whipsaw_score,
@@ -3960,6 +3969,7 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_late_confirm_min_book_skew: cfg.br2_late_confirm_min_book_skew,
         br2_late_confirm_max_whipsaw_score: cfg.br2_late_confirm_max_whipsaw_score,
         br2_late_confirm_min_realized_vol_180s_bps: cfg.br2_late_confirm_min_realized_vol_180s_bps,
+        br2_late_confirm_max_observed_range: cfg.br2_late_confirm_max_observed_range,
         br2_high_skew_clip_frac: cfg.br2_high_skew_clip_frac,
         br2_high_skew_max_clips: cfg.br2_high_skew_max_clips,
         br2_high_skew_max_whipsaw_score: cfg.br2_high_skew_max_whipsaw_score,

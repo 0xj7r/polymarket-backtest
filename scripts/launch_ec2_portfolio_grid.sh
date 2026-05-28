@@ -60,6 +60,7 @@ BR2_LATE_CONFIRM_MIN_MODEL_EDGE="0.02"
 BR2_LATE_CONFIRM_MIN_BOOK_SKEW="0.06"
 BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE="0.85"
 BR2_LATE_CONFIRM_MIN_REALIZED_VOL_180S_BPS="0.0"
+BR2_LATE_CONFIRM_MAX_OBSERVED_RANGE="1.0"
 BR2_HIGH_SKEW_CLIP_FRAC="0.60"
 BR2_HIGH_SKEW_MAX_CLIPS="5"
 BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE="0.75"
@@ -174,6 +175,7 @@ while [ $# -gt 0 ]; do
         --br2-late-confirm-min-book-skew) BR2_LATE_CONFIRM_MIN_BOOK_SKEW="$2"; shift 2 ;;
         --br2-late-confirm-max-whipsaw-score) BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
         --br2-late-confirm-min-realized-vol-180s-bps) BR2_LATE_CONFIRM_MIN_REALIZED_VOL_180S_BPS="$2"; shift 2 ;;
+        --br2-late-confirm-max-observed-range) BR2_LATE_CONFIRM_MAX_OBSERVED_RANGE="$2"; shift 2 ;;
         --br2-high-skew-clip-frac) BR2_HIGH_SKEW_CLIP_FRAC="$2"; shift 2 ;;
         --br2-high-skew-max-clips) BR2_HIGH_SKEW_MAX_CLIPS="$2"; shift 2 ;;
         --br2-high-skew-max-whipsaw-score) BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
@@ -480,6 +482,7 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-confirm-min-book-skew "${BR2_LATE_CONFIRM_MIN_BOOK_SKEW}" \\
       --br2-late-confirm-max-whipsaw-score "${BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE}" \\
       --br2-late-confirm-min-realized-vol-180s-bps "${BR2_LATE_CONFIRM_MIN_REALIZED_VOL_180S_BPS}" \\
+      --br2-late-confirm-max-observed-range "${BR2_LATE_CONFIRM_MAX_OBSERVED_RANGE}" \\
       --br2-high-skew-clip-frac "${BR2_HIGH_SKEW_CLIP_FRAC}" \\
       --br2-high-skew-max-clips "${BR2_HIGH_SKEW_MAX_CLIPS}" \\
       --br2-high-skew-max-whipsaw-score "${BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE}" \\

@@ -51,6 +51,7 @@ pub struct BonereaperV2GateStats {
     pub late_confirm_model_edge_fail: u64,
     pub late_confirm_whipsaw_fail: u64,
     pub late_confirm_low_vol_fail: u64,
+    pub late_confirm_market_range_fail: u64,
     pub late_confirm_side_lock_fail: u64,
     pub late_confirm_shares_fail: u64,
     pub late_confirm_emits: u64,
@@ -115,6 +116,7 @@ impl BonereaperV2GateStats {
         self.late_confirm_model_edge_fail += other.late_confirm_model_edge_fail;
         self.late_confirm_whipsaw_fail += other.late_confirm_whipsaw_fail;
         self.late_confirm_low_vol_fail += other.late_confirm_low_vol_fail;
+        self.late_confirm_market_range_fail += other.late_confirm_market_range_fail;
         self.late_confirm_side_lock_fail += other.late_confirm_side_lock_fail;
         self.late_confirm_shares_fail += other.late_confirm_shares_fail;
         self.late_confirm_emits += other.late_confirm_emits;
@@ -193,6 +195,7 @@ pub struct BonereaperV2Config {
     pub late_confirm_min_book_skew: f32,
     pub late_confirm_max_whipsaw_score: f32,
     pub late_confirm_min_realized_vol_180s_bps: f32,
+    pub late_confirm_max_observed_range: f32,
 
     // High-skew load lane with whipsaw guards
     pub high_skew_threshold: f32,
@@ -329,6 +332,7 @@ impl Default for BonereaperV2Config {
             late_confirm_min_book_skew: 0.06,
             late_confirm_max_whipsaw_score: 0.85,
             late_confirm_min_realized_vol_180s_bps: 0.0,
+            late_confirm_max_observed_range: 1.0,
             // Favourite-loading lane. Keep this stricter than the old probe
             // defaults: the looser settings overtraded early skew and paid
             // taker spread before the market had a durable favourite.
@@ -1078,6 +1082,8 @@ impl Strategy for BonereaperV2 {
                 < self.cfg.late_confirm_min_realized_vol_180s_bps
             {
                 self.gate_stats.late_confirm_low_vol_fail += 1;
+            } else if ctx.market_yes_range_so_far > self.cfg.late_confirm_max_observed_range {
+                self.gate_stats.late_confirm_market_range_fail += 1;
             } else {
                 let model_support = self.model_support_for_side(
                     ctx,
@@ -1972,6 +1978,40 @@ mod tests {
             .expect("late confirm order");
         assert_eq!(order.side, Side::BuyYes);
         assert!((order.limit_price.expect("limit price") - 0.85).abs() < 1e-6);
+    }
+
+    #[test]
+    fn late_confirm_observed_range_gate_blocks_stretched_markets() {
+        let close_ns = 300_000_000_000;
+        let mut strat = BonereaperV2::new(BonereaperV2Config {
+            max_clip_usdc: 20.0,
+            late_clip_frac: 1.0,
+            late_max_fires: 1,
+            late_confirm_min_model_edge: 0.03,
+            late_confirm_min_model_confidence: 0.80,
+            late_confirm_min_model_side_p: 0.80,
+            late_confirm_min_book_skew: 0.05,
+            late_confirm_max_observed_range: 0.50,
+            high_skew_max_clips: 0,
+            late_favourite_max_clips: 0,
+            ..BonereaperV2Config::default()
+        });
+        let mut ctx = test_ctx(close_ns, 0.9, 0.88);
+        ctx.market_yes_range_so_far = 0.62;
+
+        let out = strat.on_event(
+            &test_event(250_000_000_000, 0.81, 0.80, 0.82),
+            &ctx,
+            &test_spot_uptrend(250_000_000_000),
+            &TradeHistory::default(),
+        );
+
+        assert!(
+            out.orders
+                .iter()
+                .all(|order| order.tag != "br2_late_confirm")
+        );
+        assert_eq!(strat.gate_stats().late_confirm_market_range_fail, 1);
     }
 
     #[test]
