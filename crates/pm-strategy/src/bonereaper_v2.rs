@@ -50,6 +50,7 @@ pub struct BonereaperV2GateStats {
     pub late_confirm_model_side_p_fail: u64,
     pub late_confirm_model_edge_fail: u64,
     pub late_confirm_whipsaw_fail: u64,
+    pub late_confirm_side_lock_fail: u64,
     pub late_confirm_shares_fail: u64,
     pub late_confirm_emits: u64,
 
@@ -66,6 +67,7 @@ pub struct BonereaperV2GateStats {
     pub high_skew_model_side_p_fail: u64,
     pub high_skew_model_edge_fail: u64,
     pub high_skew_whipsaw_fail: u64,
+    pub high_skew_side_lock_fail: u64,
     pub high_skew_shares_fail: u64,
     pub high_skew_emits: u64,
 
@@ -91,6 +93,7 @@ pub struct BonereaperV2GateStats {
     pub late_favourite_adverse_momentum_fail: u64,
     pub late_favourite_entry_pullback_fail: u64,
     pub late_favourite_avg_entry_drawdown_fail: u64,
+    pub late_favourite_side_lock_fail: u64,
     pub late_favourite_shares_fail: u64,
     pub late_favourite_emits: u64,
 }
@@ -108,6 +111,7 @@ impl BonereaperV2GateStats {
         self.late_confirm_model_side_p_fail += other.late_confirm_model_side_p_fail;
         self.late_confirm_model_edge_fail += other.late_confirm_model_edge_fail;
         self.late_confirm_whipsaw_fail += other.late_confirm_whipsaw_fail;
+        self.late_confirm_side_lock_fail += other.late_confirm_side_lock_fail;
         self.late_confirm_shares_fail += other.late_confirm_shares_fail;
         self.late_confirm_emits += other.late_confirm_emits;
 
@@ -124,6 +128,7 @@ impl BonereaperV2GateStats {
         self.high_skew_model_side_p_fail += other.high_skew_model_side_p_fail;
         self.high_skew_model_edge_fail += other.high_skew_model_edge_fail;
         self.high_skew_whipsaw_fail += other.high_skew_whipsaw_fail;
+        self.high_skew_side_lock_fail += other.high_skew_side_lock_fail;
         self.high_skew_shares_fail += other.high_skew_shares_fail;
         self.high_skew_emits += other.high_skew_emits;
 
@@ -149,6 +154,7 @@ impl BonereaperV2GateStats {
         self.late_favourite_adverse_momentum_fail += other.late_favourite_adverse_momentum_fail;
         self.late_favourite_entry_pullback_fail += other.late_favourite_entry_pullback_fail;
         self.late_favourite_avg_entry_drawdown_fail += other.late_favourite_avg_entry_drawdown_fail;
+        self.late_favourite_side_lock_fail += other.late_favourite_side_lock_fail;
         self.late_favourite_shares_fail += other.late_favourite_shares_fail;
         self.late_favourite_emits += other.late_favourite_emits;
     }
@@ -411,6 +417,7 @@ pub struct BonereaperV2 {
     mid_rungs: usize,
     late_fires: usize,
     last_late_ns: i64,
+    directional_side: Option<Side>,
     high_skew_clips: usize,
     last_high_skew_ns: i64,
     late_favourite_clips: usize,
@@ -441,6 +448,7 @@ impl BonereaperV2 {
             mid_rungs: 0,
             late_fires: 0,
             last_late_ns: i64::MIN / 2,
+            directional_side: None,
             high_skew_clips: 0,
             last_high_skew_ns: i64::MIN / 2,
             late_favourite_clips: 0,
@@ -463,6 +471,14 @@ impl BonereaperV2 {
 
     pub fn gate_stats(&self) -> BonereaperV2GateStats {
         self.gate_stats
+    }
+
+    fn directional_side_allowed(&self, side: Side) -> bool {
+        self.directional_side.is_none() || self.directional_side == Some(side)
+    }
+
+    fn mark_directional_side(&mut self, side: Side) {
+        self.directional_side = Some(side);
     }
 
     fn model_support_for_side(
@@ -1009,7 +1025,9 @@ impl Strategy for BonereaperV2 {
                 Side::BuyNo
             };
             let px = buy_px(event, target);
-            if px <= 0.0 {
+            if !self.directional_side_allowed(target) {
+                self.gate_stats.late_confirm_side_lock_fail += 1;
+            } else if px <= 0.0 {
                 self.gate_stats.late_confirm_price_fail += 1;
             } else if !side_is_book_favourite(event, target) {
                 self.gate_stats.late_confirm_book_favourite_fail += 1;
@@ -1042,6 +1060,7 @@ impl Strategy for BonereaperV2 {
                         });
                         self.late_fires += 1;
                         self.last_late_ns = event.ts_ns;
+                        self.mark_directional_side(target);
                         self.gate_stats.late_confirm_emits += 1;
 
                         // Paired tail hedge: cheap-side bet, sized as a fraction of
@@ -1131,7 +1150,9 @@ impl Strategy for BonereaperV2 {
                         Side::BuyNo
                     };
                     let px = buy_px(event, side);
-                    if px <= 0.0 || px as f32 > self.cfg.high_skew_max_ask {
+                    if !self.directional_side_allowed(side) {
+                        self.gate_stats.high_skew_side_lock_fail += 1;
+                    } else if px <= 0.0 || px as f32 > self.cfg.high_skew_max_ask {
                         self.gate_stats.high_skew_price_fail += 1;
                     } else {
                         let model_support = self.model_support_for_side(
@@ -1167,6 +1188,7 @@ impl Strategy for BonereaperV2 {
                                 });
                                 self.high_skew_clips += 1;
                                 self.last_high_skew_ns = event.ts_ns;
+                                self.mark_directional_side(side);
                                 self.gate_stats.high_skew_emits += 1;
                             } else {
                                 self.gate_stats.high_skew_shares_fail += 1;
@@ -1228,6 +1250,8 @@ impl Strategy for BonereaperV2 {
 
                 if skew_mag < effective_skew_threshold {
                     self.gate_stats.late_favourite_skew_fail += 1;
+                } else if !self.directional_side_allowed(side) {
+                    self.gate_stats.late_favourite_side_lock_fail += 1;
                 } else if !favourite_sustained {
                     self.gate_stats.late_favourite_sustain_fail += 1;
                 } else if whipsaw.score > self.cfg.late_favourite_max_whipsaw_score {
@@ -1410,6 +1434,7 @@ impl Strategy for BonereaperV2 {
                                 });
                                 self.late_favourite_clips += levels;
                                 self.last_late_favourite_ns = event.ts_ns;
+                                self.mark_directional_side(side);
                                 if self.late_favourite_side != Some(side) {
                                     self.late_favourite_peak_entry_px = px;
                                     self.late_favourite_side_shares_emitted = shares;
@@ -1531,6 +1556,39 @@ impl Strategy for BonereaperV2 {
 mod tests {
     use super::*;
     use pm_model::ModelOutput;
+    use pm_types::{BookLevel, MarketId, ReplayFlags};
+
+    fn test_event(ts_ns: i64, yes_mid: f32, yes_bid: f32, yes_ask: f32) -> ReplayEvent {
+        ReplayEvent {
+            ts_ns,
+            market_id: MarketId(1),
+            yes_mid,
+            yes_bid,
+            yes_ask,
+            volume: 0.0,
+            bids: [BookLevel::default(); pm_types::TAPE_DEPTH],
+            asks: [BookLevel::default(); pm_types::TAPE_DEPTH],
+            spot_price: 0.0,
+            flags: ReplayFlags::BOOK_UPDATE,
+        }
+    }
+
+    fn test_ctx(ts_close_ns: i64, direction_score: f32, calibrated_p: f32) -> Ctx {
+        Ctx {
+            events_seen: 1,
+            yes_shares: 0.0,
+            no_shares: 0.0,
+            cash_usdc: 1000.0,
+            market_yes_range_so_far: 0.0,
+            model_output: Some(ModelOutput {
+                direction_score,
+                confidence_score: 0.95,
+                calibrated_p,
+                risk_score: 0.10,
+            }),
+            market_close_ns: ts_close_ns,
+        }
+    }
 
     #[test]
     fn late_favourite_ladder_scales_by_price_and_final_window() {
@@ -1539,6 +1597,50 @@ mod tests {
         assert_eq!(late_favourite_ladder_levels(0.84, 200.0), 3);
         assert_eq!(late_favourite_ladder_levels(0.91, 120.0), 4);
         assert_eq!(late_favourite_ladder_levels(0.91, 190.0), 5);
+    }
+
+    #[test]
+    fn expensive_directional_lanes_do_not_flip_sides_after_commit() {
+        let close_ns = 300_000_000_000;
+        let mut strat = BonereaperV2::new(BonereaperV2Config {
+            max_clip_usdc: 20.0,
+            late_max_fires: 0,
+            high_skew_max_clips: 0,
+            late_favourite_start_secs: 180.0,
+            late_favourite_max_clips: 12,
+            late_favourite_min_ask: 0.70,
+            late_favourite_max_ask: 0.97,
+            late_favourite_min_model_edge: 0.0,
+            late_favourite_high_cert_min_model_edge: 0.0,
+            ..BonereaperV2Config::default()
+        });
+
+        let first = strat.on_event(
+            &test_event(240_000_000_000, 0.92, 0.91, 0.93),
+            &test_ctx(close_ns, 0.9, 0.94),
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+        );
+        assert!(
+            first
+                .orders
+                .iter()
+                .any(|o| o.side == Side::BuyYes && o.tag == "br2_late_favourite_load")
+        );
+
+        let second = strat.on_event(
+            &test_event(250_000_000_000, 0.08, 0.07, 0.09),
+            &test_ctx(close_ns, -0.9, 0.94),
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+        );
+        assert!(
+            second
+                .orders
+                .iter()
+                .all(|o| o.tag != "br2_late_favourite_load")
+        );
+        assert_eq!(strat.gate_stats().late_favourite_side_lock_fail, 1);
     }
 
     #[test]

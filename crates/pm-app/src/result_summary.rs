@@ -628,6 +628,7 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
             ("model_side_p", stats.late_confirm_model_side_p_fail),
             ("model_edge", stats.late_confirm_model_edge_fail),
             ("whipsaw", stats.late_confirm_whipsaw_fail),
+            ("side_lock", stats.late_confirm_side_lock_fail),
             ("shares", stats.late_confirm_shares_fail),
         ],
     );
@@ -650,6 +651,7 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
             ("model_side_p", stats.high_skew_model_side_p_fail),
             ("model_edge", stats.high_skew_model_edge_fail),
             ("whipsaw", stats.high_skew_whipsaw_fail),
+            ("side_lock", stats.high_skew_side_lock_fail),
             ("shares", stats.high_skew_shares_fail),
         ],
     );
@@ -692,6 +694,7 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
                 "avg_entry_drawdown",
                 stats.late_favourite_avg_entry_drawdown_fail,
             ),
+            ("side_lock", stats.late_favourite_side_lock_fail),
             ("shares", stats.late_favourite_shares_fail),
         ],
     );
@@ -721,6 +724,7 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
                 stats.late_confirm_model_edge_fail,
             ),
             ("late_confirm_whipsaw", stats.late_confirm_whipsaw_fail),
+            ("late_confirm_side_lock", stats.late_confirm_side_lock_fail),
             ("high_skew_regime", stats.high_skew_regime_fail),
             ("high_skew_threshold", stats.high_skew_threshold_fail),
             ("high_skew_sustain", stats.high_skew_sustain_fail),
@@ -736,6 +740,7 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
             ("high_skew_model_side_p", stats.high_skew_model_side_p_fail),
             ("high_skew_model_edge", stats.high_skew_model_edge_fail),
             ("high_skew_whipsaw", stats.high_skew_whipsaw_fail),
+            ("high_skew_side_lock", stats.high_skew_side_lock_fail),
             (
                 "late_favourite_capacity",
                 stats.late_favourite_capacity_fail,
@@ -787,6 +792,10 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
             (
                 "late_favourite_avg_entry_drawdown",
                 stats.late_favourite_avg_entry_drawdown_fail,
+            ),
+            (
+                "late_favourite_side_lock",
+                stats.late_favourite_side_lock_fail,
             ),
         ],
     );
