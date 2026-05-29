@@ -5,6 +5,19 @@ Last updated: 2026-05-29 01:58 UTC.
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
 
+## Active Rerun
+
+Current active rerun for path diagnostics:
+
+- Run: `20260529T062901Z-portfolio-grid-5265`
+- Label suffix: `cap1k_btc_5m_tail08_lc_range50_exact_profile_postpath_mem128_cf8`
+- Instance: `i-069194bfa6e6aa332`
+- Source commit: `40ac170edc295cf05b9311af27823ca03e423ad0`
+- Purpose: rerun the selected BTC 5m profile with per-fill post-entry path
+  telemetry (`adverse_excursion`, `crossed_mid_after_fill`, final side mid), so
+  the reversal failure mode can be measured directly instead of inferred from
+  final range buckets.
+
 ## Final Selection
 
 Selected 1K BTC 5m path:
