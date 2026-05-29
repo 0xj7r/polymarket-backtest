@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-28 23:34 UTC.
+Last updated: 2026-05-29 00:12 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -72,8 +72,8 @@ Active memory-safe full-history candidates:
    - Strategy logic: same 1K exact profile and frozen meta-calibrator.
    - First checkpoint: `250` markets, `+$60.01`, max drawdown `3.04%`,
      `33` fills.
-   - Latest S3 checkpoint: `5,250` markets, `+$2,673.32`, max drawdown
-     `23.70%`, `1,898` fills.
+   - Latest S3 checkpoint: `11,000` markets, `+$6,554.61`, max drawdown
+     `23.70%`, `2,671` fills.
 2. Broader tail-coverage variant
    - Run: `20260528T225904Z-portfolio-grid-53933`
    - Label:
@@ -88,8 +88,8 @@ Active memory-safe full-history candidates:
      `budget_favourite_upside_frac = 0.40`.
    - First checkpoint: `250` markets, `+$59.98`, max drawdown `3.04%`,
      `34` fills.
-   - Latest S3 checkpoint: `5,500` markets, `+$3,862.71`, max drawdown
-     `23.72%`, `1,947` fills.
+   - Latest S3 checkpoint: `11,000` markets, `+$6,547.67`, max drawdown
+     `23.72%`, `2,674` fills.
 
 Common-prefix memory-safe comparisons:
 
@@ -111,17 +111,34 @@ Common-prefix memory-safe comparisons:
 - `5,250` markets:
   - Base: `+$2,673.32`, max drawdown `23.70%`, tail `+$4.12`
   - Cov75: `+$2,689.32`, max drawdown `23.72%`, tail `+$7.44`
+- `6,250` markets:
+  - Base: `+$4,741.41`, max drawdown `23.70%`, tail `+$5.21`
+  - Cov75: `+$4,761.84`, max drawdown `23.72%`, tail `+$8.36`
+- `7,250` markets:
+  - Base: `+$5,191.71`, max drawdown `23.70%`, tail `-$10.50`
+  - Cov75: `+$5,204.82`, max drawdown `23.72%`, tail `-$15.01`
+- `7,750` markets:
+  - Base: `+$5,336.70`, max drawdown `23.70%`, tail `-$17.23`
+  - Cov75: `+$5,346.76`, max drawdown `23.72%`, tail `-$25.13`
+- `9,500` markets:
+  - Base: `+$6,000.07`, max drawdown `23.70%`, tail `-$37.56`
+  - Cov75: `+$6,000.05`, max drawdown `23.72%`, tail `-$55.80`
+- `10,500` markets:
+  - Base: `+$6,309.67`, max drawdown `23.70%`, tail `-$46.71`
+  - Cov75: `+$6,304.95`, max drawdown `23.72%`, tail `-$69.57`
+- `11,000` markets:
+  - Base: `+$6,554.61`, max drawdown `23.70%`, tail `-$50.90`
+  - Cov75: `+$6,547.67`, max drawdown `23.72%`, tail `-$75.85`
 
-Interim read: cov75 remains slightly ahead on PnL and tail contribution with
-no meaningful drawdown penalty on equal prefixes. Cov75 has reached `5,500`
-markets and jumped to `+$3,862.71`; base has also written a local `5,500`
-checkpoint but S3 has not uploaded it yet. Wait for the common `5,500`
-comparison before interpreting that jump. Selection is not made until the runs
-finish full history or at minimum pass the previous OOM point around `12,500`
-markets.
+Interim read: cov75's early PnL lead has disappeared. At `11,000` common
+markets, base is ahead by `$6.94`, with essentially the same drawdown and
+less tail bleed. Cov75's broader tails spend about `0.8-0.9%` of favourite
+notional versus base around `0.5-0.6%`, but so far that extra insurance has not
+paid for itself. Selection is not made until the runs finish full history or at
+minimum pass the previous OOM point around `12,500` markets.
 
-Health check at `23:34 UTC`: both memory-safe `pm-app` processes are still
-running, each using about `18GB` RSS on `r7i.4xlarge` hosts with `123GB` RAM.
+Health check at `00:12 UTC`: both memory-safe `pm-app` processes are still
+running, each using about `29GB` RSS on `r7i.4xlarge` hosts with `123GB` RAM.
 
 Selection rule: once both memory-safe runners finish, promote the better 1K
 path unless the coverage variant improves hedge/reversal protection at an
