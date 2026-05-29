@@ -81,6 +81,17 @@ def add_candidate(row: dict[str, float], test: list[dict[str, Any]], predicate: 
     row["kept_pnl"] += kept_pnl
     row["removed_toxic"] += sum(1 for fill in removed if fill["target"])
     row["removed_cross"] += sum(1 for fill in removed if fill["post_crossed_mid"])
+    if removed:
+        previous_active = int(row["active_folds"])
+        row["active_folds"] += 1
+        row["helpful_folds"] += 1 if removed_pnl < 0.0 else 0
+        row["harmful_folds"] += 1 if removed_pnl > 0.0 else 0
+        if previous_active == 0:
+            row["worst_fold_removed_pnl"] = removed_pnl
+            row["best_fold_removed_pnl"] = removed_pnl
+        else:
+            row["worst_fold_removed_pnl"] = max(row["worst_fold_removed_pnl"], removed_pnl)
+            row["best_fold_removed_pnl"] = min(row["best_fold_removed_pnl"], removed_pnl)
 
 
 def viable_train_gate(train: list[dict[str, Any]], predicate: Callable[[dict[str, Any]], bool], min_removed: int) -> bool:
@@ -183,7 +194,14 @@ def main() -> int:
             add_candidate(rows[name], test, predicate)
         start += args.step_fills
 
-    ranked = sorted(rows.items(), key=lambda item: item[1]["removed_pnl"])
+    ranked = sorted(
+        rows.items(),
+        key=lambda item: (
+            item[1]["harmful_folds"],
+            item[1]["removed_pnl"],
+            -item[1]["active_folds"],
+        ),
+    )
     source = args.source_label or args.markets_jsonl
     total_pnl = sum(float(fill["pnl"]) for fill in fills)
     total_toxic = sum(1 for fill in fills if fill["target"])
@@ -202,17 +220,20 @@ def main() -> int:
         "",
         "## Candidate Outcomes",
         "",
-        "| Candidate | Folds | Tested Fills | Removed Fills | Removed Cost | Removed PnL | Kept PnL | Full-Removal Improvement | Half-Throttle Improvement | Removed Toxic Rate | Removed Cross-Mid Rate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Candidate | Folds | Active Folds | Helpful Folds | Harmful Folds | Tested Fills | Removed Fills | Removed Cost | Removed PnL | Worst Fold Removed PnL | Kept PnL | Full-Removal Improvement | Half-Throttle Improvement | Removed Toxic Rate | Removed Cross-Mid Rate |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name, row in ranked[:60]:
         removed = int(row["removed_fills"])
         if removed == 0:
             continue
         lines.append(
-            f"| {name} | {int(row['folds'])} | {int(row['tested_fills'])} | {removed} | "
+            f"| {name} | {int(row['folds'])} | {int(row['active_folds'])} | "
+            f"{int(row['helpful_folds'])} | {int(row['harmful_folds'])} | "
+            f"{int(row['tested_fills'])} | {removed} | "
             f"{money(row['removed_cost'])} | {money(row['removed_pnl'])} | "
-            f"{money(row['kept_pnl'])} | {money(-row['removed_pnl'])} | "
+            f"{money(row['worst_fold_removed_pnl'])} | {money(row['kept_pnl'])} | "
+            f"{money(-row['removed_pnl'])} | "
             f"{money(-0.5 * row['removed_pnl'])} | "
             f"{pct(row['removed_toxic'] / removed)} | {pct(row['removed_cross'] / removed)} |"
         )

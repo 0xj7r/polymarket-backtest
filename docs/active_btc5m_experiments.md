@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-29 08:15 UTC.
+Last updated: 2026-05-29 08:30 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -59,17 +59,19 @@ Latest checkpoint readout:
   candidate was small (`br2_late_confirm:q0.95`, `+$35.29` full-removal
   improvement); broad/global throttles removed profitable fills. Treat this as
   a diagnostic signal only.
-- A narrower late-break walk-forward gate search was added and run on the
-  `6,250`-market checkpoint with train-side quantile thresholds. Candidate rules
-  are admitted in a fold only when the same condition had negative train PnL.
-  The first useful candidates are not broad chop labels:
-  - `risk_score:q4 & prior_market_range_7d:q1`: `2` OOS folds, removed `171`
-    fills, removed PnL `-$236.11`, half-throttle improvement `+$118.05`.
-  - `side_model_p:q1 & side_edge_vs_fill:q2`: `1` OOS fold, removed `29`
-    fills, removed PnL `-$249.96`, removed toxic rate `51.72%`.
-  This is still early, but it is the first diagnostic pointing toward a
-  narrower replay-safe throttle: high risk in specific prior-range bands and
-  lower model-probability late breaks, not favourite loading in general.
+- A narrower late-break walk-forward gate search was added with train-side
+  quantile thresholds. Candidate rules are admitted in a fold only when the same
+  condition had negative train PnL. On the `6,750`-market checkpoint, the
+  standard `900/300/300` split still favors `risk_score:q4 &
+  prior_market_range_7d:q1`: `2` active OOS folds, `2` helpful, `0` harmful,
+  removed `171` fills, removed PnL `-$236.11`, half-throttle improvement
+  `+$118.05`. However the smaller `600/200/200` sensitivity weakens that
+  candidate (`1` helpful, `1` harmful active fold) and instead promotes
+  `side_model_p:q1 & side_edge_vs_fill:q2`: `2` active folds, `2` helpful, `0`
+  harmful, removed `29` fills, removed PnL `-$461.94`, removed toxic rate
+  `55.17%`. Current read: the lower model-probability/mid-edge late-break
+  slice is the sharper candidate; the high-risk/prior-range candidate needs more
+  history before promotion.
 - Replay-safe hard-regime throttles were also tested in the same OOS fold
   (`expanded_not_decisive`, sign-flip/path-efficiency, observed-range/reversal,
   high-price choppy favourite variants). They all removed positive PnL in this
@@ -82,8 +84,9 @@ Latest checkpoint readout:
   `docs/btc5m_postfill_checkpoint_5750_gate_sim.md`, and
   `docs/btc5m_postfill_checkpoint_5750_late_break_feature_contrast.md` for the
   current full-pack reports. See
-  `docs/btc5m_postfill_checkpoint_6250_late_break_gate_search.md` for the
-  latest candidate-gate search.
+  `docs/btc5m_postfill_checkpoint_6750_late_break_gate_search.md` and
+  `docs/btc5m_postfill_checkpoint_6750_late_break_gate_search_sens200.md` for
+  the latest candidate-gate searches.
 
 This checkpoint is not yet the final late-regime window. Do not promote a
 post-fill reversal gate until the full-history artifact reaches the final 30d
