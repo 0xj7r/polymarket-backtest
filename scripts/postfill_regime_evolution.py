@@ -143,6 +143,35 @@ def add_fill(acc: dict[str, float], fill: dict[str, Any], pnl: float, won: bool)
             acc["logloss_sum"] += -math_log(1.0 - p)
 
 
+def add_daily_path_fill(acc: dict[str, float], fill: dict[str, Any], pnl: float, row: dict[str, Any]) -> None:
+    post_bucket = postfill_bucket(fill)
+    final_range = float(row.get("volatility_range") or 0.0)
+    observed_range = float(fill.get("market_yes_range_so_far") or 0.0)
+    model_p = fill.get("side_model_p")
+
+    acc["fills"] += 1
+    acc["pnl"] += pnl
+    acc["cost"] += float(fill.get("notional") or 0.0)
+    acc["observed_range_sum"] += observed_range
+    acc["final_range_sum"] += final_range
+    acc["adverse_sum"] += path_value(fill, "adverse_excursion")
+    if model_p is not None:
+        acc["model_samples"] += 1
+        acc["model_p_sum"] += float(model_p)
+    if post_bucket == "crossed_mid_after_fill":
+        acc["crossed_mid"] += 1
+        acc["crossed_mid_pnl"] += pnl
+        acc["crossed_mid_cost"] += float(fill.get("notional") or 0.0)
+    else:
+        acc["non_crossed_pnl"] += pnl
+    if 0.78 <= final_range < 0.93:
+        acc["midwide_fills"] += 1
+        acc["midwide_pnl"] += pnl
+    if live_regime_label(fill) == "expanded_not_decisive":
+        acc["expanded_not_decisive_fills"] += 1
+        acc["expanded_not_decisive_pnl"] += pnl
+
+
 def math_log(value: float) -> float:
     return math.log(value)
 
@@ -199,6 +228,32 @@ def render_market_table(lines: list[str], title: str, rows: Iterable[tuple[str, 
     lines.append("")
 
 
+def render_daily_path_table(lines: list[str], title: str, rows: Iterable[tuple[str, dict[str, float]]]) -> None:
+    lines.extend(
+        [
+            f"## {title}",
+            "",
+            "| Day | Fills | PnL | Cross-Mid Fills | Cross-Mid Rate | Cross-Mid PnL | Non-Cross PnL | Mid-Wide Fills | Mid-Wide PnL | Expanded Not-Decisive Fills | Avg Obs Range | Avg Final Range | Avg Adverse | Avg Model P |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for label, acc in rows:
+        fills = int(acc["fills"])
+        if fills == 0:
+            continue
+        model_samples = int(acc["model_samples"])
+        lines.append(
+            f"| {label} | {fills} | {fmt_money(acc['pnl'])} | {int(acc['crossed_mid'])} | "
+            f"{fmt_pct(acc['crossed_mid'] / fills)} | {fmt_money(acc['crossed_mid_pnl'])} | "
+            f"{fmt_money(acc['non_crossed_pnl'])} | {int(acc['midwide_fills'])} | "
+            f"{fmt_money(acc['midwide_pnl'])} | {int(acc['expanded_not_decisive_fills'])} | "
+            f"{acc['observed_range_sum'] / fills:.3f} | {acc['final_range_sum'] / fills:.3f} | "
+            f"{acc['adverse_sum'] / fills:.3f} | "
+            f"{acc['model_p_sum'] / model_samples if model_samples else 0.0:.3f} |"
+        )
+    lines.append("")
+
+
 def period_label(index: int, total: int) -> str:
     if index < total / 3:
         return "first_third"
@@ -233,6 +288,8 @@ def main() -> int:
     by_live: dict[str, dict[str, float]] = defaultdict(new_acc)
     by_observed: dict[str, dict[str, float]] = defaultdict(new_acc)
     by_recent: dict[str, dict[str, float]] = defaultdict(new_acc)
+    by_day_path: dict[str, dict[str, float]] = defaultdict(new_acc)
+    by_day_lane_path: dict[str, dict[str, float]] = defaultdict(new_acc)
     worst_crossed: list[dict[str, Any]] = []
     missing_paths = 0
 
@@ -265,6 +322,8 @@ def main() -> int:
             add_fill(by_range[f"{tag}:{range_bucket}"], fill, fpnl, won)
             add_fill(by_live[f"{tag}:{live_regime_label(fill)}"], fill, fpnl, won)
             add_fill(by_observed[f"{tag}:{observed_range_bucket(float(fill.get('market_yes_range_so_far') or 0.0))}"], fill, fpnl, won)
+            add_daily_path_fill(by_day_path[day], fill, fpnl, row)
+            add_daily_path_fill(by_day_lane_path[f"{day}:{tag}"], fill, fpnl, row)
             if post_bucket == "crossed_mid_after_fill":
                 worst_crossed.append(
                     {
@@ -300,6 +359,20 @@ def main() -> int:
 
     daily_rows = sorted(by_day_market.items())[-45:]
     render_market_table(lines, "Daily PnL (Last 45 Calendar Rows In Artifact)", daily_rows)
+    daily_path_rows = sorted(by_day_path.items())[-60:]
+    render_daily_path_table(lines, "Daily Toxic Path Evolution (Last 60 Calendar Rows In Artifact)", daily_path_rows)
+
+    worst_daily_crossed = sorted(
+        ((label, acc) for label, acc in by_day_path.items() if acc["crossed_mid"]),
+        key=lambda item: item[1]["crossed_mid_pnl"],
+    )[:20]
+    render_daily_path_table(lines, "Worst Daily Cross-Mid Contribution", worst_daily_crossed)
+
+    recent_lane_path_rows = sorted(
+        (item for item in by_day_lane_path.items() if item[0].split(":", 1)[0] in {label for label, _ in daily_path_rows}),
+        key=lambda item: (item[0].split(":", 1)[0], item[0].split(":", 1)[1]),
+    )
+    render_daily_path_table(lines, "Daily Toxic Path Evolution By Lane (Recent Days)", recent_lane_path_rows)
     render_fill_table(lines, "By Lane", sorted(by_lane.items()))
     render_fill_table(lines, "By Period And Lane", sorted(by_period_lane.items()))
     render_fill_table(lines, "By Post-Fill Path", sorted(by_postfill.items()))
