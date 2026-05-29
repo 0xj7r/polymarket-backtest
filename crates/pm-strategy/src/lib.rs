@@ -54,6 +54,12 @@ pub struct Ctx {
     /// Observed market volatility so far as `max(yes_mid) - min(yes_mid)`.
     /// This is live-safe: it only includes ticks already seen by the runner.
     pub market_yes_range_so_far: f32,
+    /// Mean full-market YES-mid range over already closed prior BTC 5m markets.
+    /// These fields are live-safe in portfolio replay because they never include
+    /// the current market.
+    pub prior_market_range_1d: f32,
+    pub prior_market_range_3d: f32,
+    pub prior_market_range_7d: f32,
     /// Canonical 4-score model output for this event, produced by the shared
     /// model state before the strategy hook. Strategies can use this for
     /// ML-gated lanes while the runner still owns attribution and parity.

@@ -8,6 +8,7 @@ import math
 import os
 import subprocess
 import sys
+from collections import deque
 from pathlib import Path
 from typing import Any, Iterable, Iterator, TextIO
 
@@ -29,7 +30,9 @@ NUMERIC_FEATURES = [
     "regime_reversal_pressure",
     "regime_sign_flip_rate",
     "regime_realized_vol_180s_bps",
-    "volatility_range",
+    "prior_market_range_1d",
+    "prior_market_range_3d",
+    "prior_market_range_7d",
 ]
 
 TAG_FEATURES = [
@@ -97,10 +100,14 @@ def fill_pnl(row: dict[str, Any], fill: dict[str, Any]) -> tuple[float, int]:
 def load_fills(path: str, strategy: str) -> list[dict[str, Any]]:
     f, proc = open_input(path)
     fills: list[dict[str, Any]] = []
+    prior_ranges: deque[float] = deque(maxlen=7 * 288)
     try:
         for row in iter_rows(f):
             strat = strategy_result(row, strategy)
             ts = close_ts(row)
+            prior_range_1d = mean_tail(prior_ranges, 288)
+            prior_range_3d = mean_tail(prior_ranges, 3 * 288)
+            prior_range_7d = mean_tail(prior_ranges, 7 * 288)
             for fill in strat.get("fills_detail") or []:
                 pnl, won = fill_pnl(row, fill)
                 item = {
@@ -112,7 +119,9 @@ def load_fills(path: str, strategy: str) -> list[dict[str, Any]]:
                     "won": won,
                     "notional": float(fill.get("notional") or 0.0),
                     "price": float(fill.get("price") or 0.0),
-                    "volatility_range": float(row.get("volatility_range") or 0.0),
+                    "prior_market_range_1d": prior_range_1d,
+                    "prior_market_range_3d": prior_range_3d,
+                    "prior_market_range_7d": prior_range_7d,
                 }
                 for key in NUMERIC_FEATURES:
                     if key in item:
@@ -120,6 +129,7 @@ def load_fills(path: str, strategy: str) -> list[dict[str, Any]]:
                     value = fill.get(key)
                     item[key] = float(value) if value is not None else 0.0
                 fills.append(item)
+            prior_ranges.append(float(row.get("volatility_range") or 0.0))
     finally:
         if proc is not None:
             assert proc.stderr is not None
@@ -130,6 +140,13 @@ def load_fills(path: str, strategy: str) -> list[dict[str, Any]]:
         elif f is not sys.stdin:
             f.close()
     return fills
+
+
+def mean_tail(values: deque[float], n: int) -> float:
+    if not values:
+        return 0.0
+    tail = list(values)[-n:]
+    return sum(tail) / len(tail) if tail else 0.0
 
 
 def matrix(fills: list[dict[str, Any]]) -> tuple[np.ndarray, np.ndarray, list[str]]:
@@ -237,6 +254,7 @@ def main() -> int:
     parser.add_argument("--l2", type=float, default=0.01)
     parser.add_argument("--edge-threshold", type=float, default=0.05)
     parser.add_argument("--out", help="write markdown report to this path")
+    parser.add_argument("--model-json-out", help="write replay-safe raw logistic coefficients")
     args = parser.parse_args()
 
     global AWS_PROFILE
@@ -270,7 +288,21 @@ def main() -> int:
     model_gate = summarize_gate("regime_logistic_edge", test, p_test, args.edge_threshold)
     existing_gate = summarize_gate("existing_model_edge", test, existing_test, args.edge_threshold)
 
-    coef = sorted(zip(names, weights[1:] / std), key=lambda kv: abs(kv[1]), reverse=True)[:20]
+    raw_coef = weights[1:] / std
+    raw_intercept = weights[0] - float((weights[1:] * mean / std).sum())
+    coef = sorted(zip(names, raw_coef), key=lambda kv: abs(kv[1]), reverse=True)[:20]
+    selected_by_model = [
+        fill for fill, p in zip(test, p_test) if p - float(fill.get("price") or 0.0) >= args.edge_threshold
+    ]
+    selected_by_tag: dict[str, dict[str, Any]] = {}
+    for tag in sorted({fill["tag"] for fill in selected_by_model}):
+        fills_for_tag = [fill for fill in selected_by_model if fill["tag"] == tag]
+        selected_by_tag[tag] = {
+            "fills": len(fills_for_tag),
+            "pnl": sum(float(fill["pnl"]) for fill in fills_for_tag),
+            "wins": sum(int(fill["won"]) for fill in fills_for_tag),
+            "cost": sum(float(fill["notional"]) for fill in fills_for_tag),
+        }
     tag_rows = []
     for tag in sorted({fill["tag"] for fill in test}):
         idx = [i for i, fill in enumerate(test) if fill["tag"] == tag]
@@ -300,6 +332,7 @@ def main() -> int:
     lines.append("## PnL Gate On Final Window")
     lines.append("")
     lines.append(f"All final-window fills: `{len(test)}`, PnL `${all_test_pnl:.2f}`.")
+    lines.append("The gate excludes final full-market `volatility_range`; only replay-time fields are used.")
     lines.append("")
     lines.append("| Gate | Fills | PnL | Cost | Wins | Win Rate |")
     lines.append("|---|---:|---:|---:|---:|---:|")
@@ -307,6 +340,17 @@ def main() -> int:
         lines.append(
             f"| {row['name']} | {row['fills']} | ${row['pnl']:.2f} | ${row['cost']:.2f} | "
             f"{row['wins']} | {row['win_rate'] * 100.0:.2f}% |"
+        )
+    lines.append("")
+    lines.append("### Logistic Gate Selected Fills By Tag")
+    lines.append("")
+    lines.append("| Tag | Fills | PnL | Cost | Wins | Win Rate |")
+    lines.append("|---|---:|---:|---:|---:|---:|")
+    for tag, row in selected_by_tag.items():
+        win_rate = row["wins"] / row["fills"] if row["fills"] else 0.0
+        lines.append(
+            f"| {tag} | {row['fills']} | ${row['pnl']:.2f} | ${row['cost']:.2f} | "
+            f"{row['wins']} | {win_rate * 100.0:.2f}% |"
         )
     lines.append("")
     lines.append("## Test Metrics By Fill Tag")
@@ -324,6 +368,30 @@ def main() -> int:
         lines.append(f"| {name} | {value:.4f} |")
     lines.append("")
     output = "\n".join(lines)
+    if args.model_json_out:
+        model = {
+            "kind": "recent_regime_logistic_v1_no_lookahead",
+            "trained_before_ts": int(test_start),
+            "test_days": args.test_days,
+            "edge_threshold": args.edge_threshold,
+            "feature_names": names,
+            "intercept": raw_intercept,
+            "coefficients": {name: float(value) for name, value in zip(names, raw_coef)},
+            "metrics": {
+                "train_fills": len(train),
+                "test_fills": len(test),
+                "train_log_loss": log_loss(y_train, p_train),
+                "test_log_loss": log_loss(y_test, p_test),
+                "existing_test_log_loss": log_loss(y_test, existing_test),
+                "test_brier": brier(y_test, p_test),
+                "existing_test_brier": brier(y_test, existing_test),
+                "all_test_pnl": all_test_pnl,
+                "model_gate": model_gate,
+                "existing_gate": existing_gate,
+                "selected_by_tag": selected_by_tag,
+            },
+        }
+        Path(args.model_json_out).write_text(json.dumps(model, indent=2, sort_keys=True) + "\n")
     if args.out:
         Path(args.out).write_text(output + "\n")
     else:

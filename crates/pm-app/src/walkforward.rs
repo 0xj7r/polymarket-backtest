@@ -74,6 +74,11 @@ pub struct BonereaperV2Profile {
     pub late_confirm_min_model_edge: Option<f32>,
     pub late_confirm_min_realized_vol_180s_bps: Option<f32>,
     pub late_confirm_max_observed_range: Option<f32>,
+    pub recent_regime_gate_enabled: Option<bool>,
+    pub recent_regime_gate_min_edge: Option<f32>,
+    pub recent_regime_gate_late_confirm: Option<bool>,
+    pub recent_regime_gate_high_skew: Option<bool>,
+    pub recent_regime_gate_late_favourite: Option<bool>,
     pub high_skew_clip_frac: Option<f32>,
     pub high_skew_max_clips: Option<usize>,
     pub high_skew_max_whipsaw_score: Option<f32>,
@@ -190,6 +195,20 @@ impl BonereaperV2Profile {
         apply!(
             late_confirm_max_observed_range,
             br2_late_confirm_max_observed_range
+        );
+        apply!(recent_regime_gate_enabled, br2_recent_regime_gate_enabled);
+        apply!(recent_regime_gate_min_edge, br2_recent_regime_gate_min_edge);
+        apply!(
+            recent_regime_gate_late_confirm,
+            br2_recent_regime_gate_late_confirm
+        );
+        apply!(
+            recent_regime_gate_high_skew,
+            br2_recent_regime_gate_high_skew
+        );
+        apply!(
+            recent_regime_gate_late_favourite,
+            br2_recent_regime_gate_late_favourite
         );
         apply!(high_skew_clip_frac, br2_high_skew_clip_frac);
         apply!(high_skew_max_clips, br2_high_skew_max_clips);
@@ -477,6 +496,11 @@ pub struct WalkForwardConfig {
     pub br2_late_confirm_max_whipsaw_score: f32,
     pub br2_late_confirm_min_realized_vol_180s_bps: f32,
     pub br2_late_confirm_max_observed_range: f32,
+    pub br2_recent_regime_gate_enabled: bool,
+    pub br2_recent_regime_gate_min_edge: f32,
+    pub br2_recent_regime_gate_late_confirm: bool,
+    pub br2_recent_regime_gate_high_skew: bool,
+    pub br2_recent_regime_gate_late_favourite: bool,
     pub br2_high_skew_clip_frac: f32,
     pub br2_high_skew_max_clips: usize,
     pub br2_high_skew_max_whipsaw_score: f32,
@@ -653,6 +677,11 @@ impl Default for WalkForwardConfig {
             br2_late_confirm_max_whipsaw_score: 0.85,
             br2_late_confirm_min_realized_vol_180s_bps: 0.0,
             br2_late_confirm_max_observed_range: 1.0,
+            br2_recent_regime_gate_enabled: false,
+            br2_recent_regime_gate_min_edge: 0.08,
+            br2_recent_regime_gate_late_confirm: true,
+            br2_recent_regime_gate_high_skew: true,
+            br2_recent_regime_gate_late_favourite: true,
             br2_high_skew_clip_frac: 0.60,
             br2_high_skew_max_clips: 5,
             br2_high_skew_max_whipsaw_score: 0.75,
@@ -815,6 +844,22 @@ fn market_close_ns(m: &MarketHandle) -> i64 {
     market_close_ts(m).saturating_mul(1_000_000_000)
 }
 
+fn prior_market_range_mean(results: &[MarketResult], window: usize) -> f32 {
+    if window == 0 || results.is_empty() {
+        return 0.0;
+    }
+    let start = results.len().saturating_sub(window);
+    let slice = &results[start..];
+    if slice.is_empty() {
+        return 0.0;
+    }
+    (slice
+        .iter()
+        .map(|result| result.volatility_range)
+        .sum::<f64>()
+        / slice.len() as f64) as f32
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WalkForwardSummary {
     pub markets_attempted: usize,
@@ -870,6 +915,11 @@ pub struct SummaryRunConfig {
     pub br2_late_confirm_max_whipsaw_score: f32,
     pub br2_late_confirm_min_realized_vol_180s_bps: f32,
     pub br2_late_confirm_max_observed_range: f32,
+    pub br2_recent_regime_gate_enabled: bool,
+    pub br2_recent_regime_gate_min_edge: f32,
+    pub br2_recent_regime_gate_late_confirm: bool,
+    pub br2_recent_regime_gate_high_skew: bool,
+    pub br2_recent_regime_gate_late_favourite: bool,
     pub br2_high_skew_clip_frac: f32,
     pub br2_high_skew_max_clips: usize,
     pub br2_high_skew_max_whipsaw_score: f32,
@@ -1368,6 +1418,9 @@ pub struct FillTagAggregate {
     pub avg_regime_reversal_pressure: f64,
     pub avg_regime_sign_flip_rate: f64,
     pub avg_regime_realized_vol_180s_bps: f64,
+    pub avg_post_fill_adverse_excursion: f64,
+    pub avg_post_fill_favourable_excursion: f64,
+    pub post_fill_cross_mid_rate: f64,
 }
 
 #[derive(Debug, Default)]
@@ -1390,6 +1443,10 @@ struct FillTagAccumulator {
     sum_regime_sign_flip_rate: f64,
     sum_regime_realized_vol_180s_bps: f64,
     regime_samples: usize,
+    sum_post_fill_adverse_excursion: f64,
+    sum_post_fill_favourable_excursion: f64,
+    post_fill_cross_mid_count: usize,
+    post_fill_path_samples: usize,
 }
 
 #[derive(Debug, Default)]
@@ -1562,6 +1619,12 @@ impl FillTagAccumulator {
             self.sum_regime_realized_vol_180s_bps += realized_vol as f64;
             self.regime_samples += 1;
         }
+        if let Some(path) = fill.post_fill_path {
+            self.sum_post_fill_adverse_excursion += path.adverse_excursion as f64;
+            self.sum_post_fill_favourable_excursion += path.favourable_excursion as f64;
+            self.post_fill_cross_mid_count += usize::from(path.crossed_mid_after_fill);
+            self.post_fill_path_samples += 1;
+        }
     }
 
     fn into_aggregate(self) -> FillTagAggregate {
@@ -1628,6 +1691,21 @@ impl FillTagAccumulator {
             },
             avg_regime_realized_vol_180s_bps: if self.regime_samples > 0 {
                 self.sum_regime_realized_vol_180s_bps / self.regime_samples as f64
+            } else {
+                0.0
+            },
+            avg_post_fill_adverse_excursion: if self.post_fill_path_samples > 0 {
+                self.sum_post_fill_adverse_excursion / self.post_fill_path_samples as f64
+            } else {
+                0.0
+            },
+            avg_post_fill_favourable_excursion: if self.post_fill_path_samples > 0 {
+                self.sum_post_fill_favourable_excursion / self.post_fill_path_samples as f64
+            } else {
+                0.0
+            },
+            post_fill_cross_mid_rate: if self.post_fill_path_samples > 0 {
+                self.post_fill_cross_mid_count as f64 / self.post_fill_path_samples as f64
             } else {
                 0.0
             },
@@ -2948,6 +3026,9 @@ async fn collect_training_samples_for_market(
         } else {
             ModelMarketContext::default()
         },
+        prior_market_range_1d: 0.0,
+        prior_market_range_3d: 0.0,
+        prior_market_range_7d: 0.0,
         model_btc_whipsaw_risk_weight: 0.16,
         model_btc_path_inefficiency_risk_weight: 0.10,
         model_btc_reversal_pressure_risk_weight: 0.12,
@@ -3082,6 +3163,9 @@ async fn run_markets(
                 meta_calibrator_snapshot,
                 enable_meta_calibration: cfg_arc.enable_meta_calibration,
                 model_market_context: model_market_context_for_cfg(&cfg_arc, &m),
+                prior_market_range_1d: 0.0,
+                prior_market_range_3d: 0.0,
+                prior_market_range_7d: 0.0,
                 model_btc_whipsaw_risk_weight: cfg_arc.model_btc_whipsaw_risk_weight,
                 model_btc_path_inefficiency_risk_weight: cfg_arc
                     .model_btc_path_inefficiency_risk_weight,
@@ -3357,6 +3441,11 @@ fn run_one_strategy(
                 late_confirm_min_realized_vol_180s_bps: cfg
                     .br2_late_confirm_min_realized_vol_180s_bps,
                 late_confirm_max_observed_range: cfg.br2_late_confirm_max_observed_range,
+                recent_regime_gate_enabled: cfg.br2_recent_regime_gate_enabled,
+                recent_regime_gate_min_edge: cfg.br2_recent_regime_gate_min_edge,
+                recent_regime_gate_late_confirm: cfg.br2_recent_regime_gate_late_confirm,
+                recent_regime_gate_high_skew: cfg.br2_recent_regime_gate_high_skew,
+                recent_regime_gate_late_favourite: cfg.br2_recent_regime_gate_late_favourite,
                 high_skew_clip_frac: cfg.br2_high_skew_clip_frac,
                 high_skew_max_clips: cfg.br2_high_skew_max_clips,
                 high_skew_max_whipsaw_score: cfg.br2_high_skew_max_whipsaw_score,
@@ -3650,6 +3739,9 @@ async fn run_portfolio(
                 meta_calibrator_snapshot: meta_calibrator_snapshot.clone(),
                 enable_meta_calibration: cfg.enable_meta_calibration,
                 model_market_context: model_market_context_for_cfg(cfg, &m),
+                prior_market_range_1d: prior_market_range_mean(&results, 288),
+                prior_market_range_3d: prior_market_range_mean(&results, 3 * 288),
+                prior_market_range_7d: prior_market_range_mean(&results, 7 * 288),
                 model_btc_whipsaw_risk_weight: cfg.model_btc_whipsaw_risk_weight,
                 model_btc_path_inefficiency_risk_weight: cfg
                     .model_btc_path_inefficiency_risk_weight,
@@ -4157,6 +4249,11 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_late_confirm_max_whipsaw_score: cfg.br2_late_confirm_max_whipsaw_score,
         br2_late_confirm_min_realized_vol_180s_bps: cfg.br2_late_confirm_min_realized_vol_180s_bps,
         br2_late_confirm_max_observed_range: cfg.br2_late_confirm_max_observed_range,
+        br2_recent_regime_gate_enabled: cfg.br2_recent_regime_gate_enabled,
+        br2_recent_regime_gate_min_edge: cfg.br2_recent_regime_gate_min_edge,
+        br2_recent_regime_gate_late_confirm: cfg.br2_recent_regime_gate_late_confirm,
+        br2_recent_regime_gate_high_skew: cfg.br2_recent_regime_gate_high_skew,
+        br2_recent_regime_gate_late_favourite: cfg.br2_recent_regime_gate_late_favourite,
         br2_high_skew_clip_frac: cfg.br2_high_skew_clip_frac,
         br2_high_skew_max_clips: cfg.br2_high_skew_max_clips,
         br2_high_skew_max_whipsaw_score: cfg.br2_high_skew_max_whipsaw_score,
@@ -4692,6 +4789,7 @@ model_btc_whipsaw_risk_weight = 0.31
             regime_reversal_pressure: Some(0.20),
             regime_sign_flip_rate: Some(0.10),
             regime_realized_vol_180s_bps: Some(25.0),
+            post_fill_path: None,
         }
     }
 

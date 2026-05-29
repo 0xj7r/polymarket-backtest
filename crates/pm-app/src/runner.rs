@@ -80,6 +80,19 @@ pub struct Fill {
     pub regime_sign_flip_rate: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regime_realized_vol_180s_bps: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_fill_path: Option<PostFillPath>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct PostFillPath {
+    pub min_side_mid: f32,
+    pub max_side_mid: f32,
+    pub final_side_mid: f32,
+    pub adverse_excursion: f32,
+    pub favourable_excursion: f32,
+    pub crossed_mid_after_fill: bool,
+    pub final_side_above_entry: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -315,6 +328,11 @@ pub struct RunnerConfig {
     /// Defaults to unknown so BTC 5m baseline runs remain comparable unless a
     /// caller opts into market-context features.
     pub model_market_context: ModelMarketContext,
+    /// Replay-safe prior completed-market range features for strategy regime
+    /// gates. In portfolio mode these are computed before the current market.
+    pub prior_market_range_1d: f32,
+    pub prior_market_range_3d: f32,
+    pub prior_market_range_7d: f32,
     /// Weight for BTC spot whipsaw risk in the canonical model risk score.
     pub model_btc_whipsaw_risk_weight: f32,
     /// Weight for BTC spot path inefficiency in the canonical model risk score.
@@ -355,6 +373,9 @@ impl Default for RunnerConfig {
             meta_calibrator_snapshot: None,
             enable_meta_calibration: true,
             model_market_context: ModelMarketContext::default(),
+            prior_market_range_1d: 0.0,
+            prior_market_range_3d: 0.0,
+            prior_market_range_7d: 0.0,
             model_btc_whipsaw_risk_weight: ModelConfig::default().btc_whipsaw_risk_weight,
             model_btc_path_inefficiency_risk_weight: ModelConfig::default()
                 .btc_path_inefficiency_risk_weight,
@@ -622,6 +643,9 @@ pub fn run_backtest<S: Strategy>(
             no_shares,
             cash_usdc: cash,
             market_yes_range_so_far,
+            prior_market_range_1d: cfg.prior_market_range_1d,
+            prior_market_range_3d: cfg.prior_market_range_3d,
+            prior_market_range_7d: cfg.prior_market_range_7d,
             model_output: Some(canonical_model_eval.output),
             market_close_ns: cfg.market_close_ns,
         };
@@ -973,6 +997,7 @@ pub fn run_backtest<S: Strategy>(
     pending_takers.clear();
 
     let yes_resolved = cfg.resolved_yes.unwrap_or(last_mid >= 0.5);
+    annotate_post_fill_paths(&mut fills, events, cfg.market_close_ns);
     let settlement_cash = if yes_resolved { yes_shares } else { no_shares };
     let end_cash = cash + settlement_cash;
     let filled_shares = fills.iter().map(|f| f.shares).sum::<f64>();
@@ -1452,6 +1477,55 @@ fn mark_to_market(cash: f64, yes_shares: f64, no_shares: f64, yes_mid: f32) -> f
     cash + yes_shares * p + no_shares * (1.0 - p)
 }
 
+fn annotate_post_fill_paths(fills: &mut [Fill], events: &[ReplayEvent], market_close_ns: i64) {
+    let mut cursor = 0usize;
+    for fill in fills {
+        while cursor < events.len() && events[cursor].ts_ns < fill.ts_ns {
+            cursor += 1;
+        }
+        let mut min_side_mid = f32::INFINITY;
+        let mut max_side_mid = f32::NEG_INFINITY;
+        let mut final_side_mid = None;
+        for event in events.iter().skip(cursor) {
+            if market_close_ns > 0 && event.ts_ns > market_close_ns {
+                break;
+            }
+            let Some(side_mid) = side_mid_for_fill(fill, event.yes_mid) else {
+                continue;
+            };
+            min_side_mid = min_side_mid.min(side_mid);
+            max_side_mid = max_side_mid.max(side_mid);
+            final_side_mid = Some(side_mid);
+        }
+        let Some(final_side_mid) = final_side_mid else {
+            continue;
+        };
+        let Some(entry_side_mid) = fill
+            .yes_mid
+            .and_then(|yes_mid| side_mid_for_fill(fill, yes_mid))
+        else {
+            continue;
+        };
+        fill.post_fill_path = Some(PostFillPath {
+            min_side_mid,
+            max_side_mid,
+            final_side_mid,
+            adverse_excursion: (entry_side_mid - min_side_mid).max(0.0),
+            favourable_excursion: (max_side_mid - entry_side_mid).max(0.0),
+            crossed_mid_after_fill: entry_side_mid >= 0.5 && min_side_mid < 0.5,
+            final_side_above_entry: final_side_mid >= entry_side_mid,
+        });
+    }
+}
+
+fn side_mid_for_fill(fill: &Fill, yes_mid: f32) -> Option<f32> {
+    match fill.side.as_str() {
+        "BuyYes" | "SellNo" => Some(yes_mid.clamp(0.0, 1.0)),
+        "BuyNo" | "SellYes" => Some((1.0 - yes_mid).clamp(0.0, 1.0)),
+        _ => None,
+    }
+}
+
 /// Convert a strategy-side limit price (in YES- or NO-native terms) into a
 /// canonical YES-side limit price used by the resting book. For NO orders, the
 /// strategy's "limit_price" is in NO-terms; we flip via `1 - L_no`.
@@ -1564,6 +1638,7 @@ fn apply_maker_fill(
         regime_reversal_pressure: model_context.map(|m| m.regime_reversal_pressure),
         regime_sign_flip_rate: model_context.map(|m| m.regime_sign_flip_rate),
         regime_realized_vol_180s_bps: model_context.map(|m| m.regime_realized_vol_180s_bps),
+        post_fill_path: None,
     });
     true
 }
@@ -1772,6 +1847,7 @@ fn check_resting_fills(
             regime_reversal_pressure: r.model_context.map(|m| m.regime_reversal_pressure),
             regime_sign_flip_rate: r.model_context.map(|m| m.regime_sign_flip_rate),
             regime_realized_vol_180s_bps: r.model_context.map(|m| m.regime_realized_vol_180s_bps),
+            post_fill_path: None,
         });
         let _ = r.submit_ts_ns;
         resting.swap_remove(i);
@@ -2069,6 +2145,7 @@ fn apply_taker_order(
         regime_reversal_pressure: model_context.map(|m| m.regime_reversal_pressure),
         regime_sign_flip_rate: model_context.map(|m| m.regime_sign_flip_rate),
         regime_realized_vol_180s_bps: model_context.map(|m| m.regime_realized_vol_180s_bps),
+        post_fill_path: None,
     });
 }
 
@@ -2410,6 +2487,64 @@ mod tests {
         assert_eq!(rep.fills.len(), 1);
         assert_eq!(rep.fills[0].ts_ns, 2_000_000_000);
         assert!((rep.fills[0].price - 0.70).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fill_records_post_fill_adverse_path() {
+        struct OneShot(bool);
+        impl Strategy for OneShot {
+            fn on_event(
+                &mut self,
+                _event: &ReplayEvent,
+                _ctx: &Ctx,
+                _spot: &SpotHistory,
+                _trades: &TradeHistory,
+            ) -> StrategyOutput {
+                if self.0 {
+                    return StrategyOutput::hold();
+                }
+                self.0 = true;
+                StrategyOutput::one(OrderRequest {
+                    side: Side::BuyYes,
+                    shares: 2.0,
+                    max_depth: 1,
+                    limit_price: None,
+                    tag: "path",
+                })
+            }
+        }
+
+        let events = vec![
+            evt(1_000_000_000, 0.69, 0.70, 10.0),
+            evt(2_000_000_000, 0.44, 0.45, 10.0),
+            evt(3_000_000_000, 0.54, 0.55, 10.0),
+        ];
+        let cfg = RunnerConfig {
+            starting_cash_usdc: 100.0,
+            market_open_ns: 1_000_000_000,
+            market_close_ns: 3_000_000_000,
+            resolved_yes: Some(true),
+            ..RunnerConfig::default()
+        };
+        let mut strat = OneShot(false);
+        let rep = run_backtest(
+            &events,
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+            &mut strat,
+            &cfg,
+        )
+        .unwrap();
+
+        let path = rep.fills[0]
+            .post_fill_path
+            .expect("post-fill path should be populated");
+        assert!((path.min_side_mid - 0.445).abs() < 1e-6);
+        assert!((path.max_side_mid - 0.695).abs() < 1e-6);
+        assert!((path.final_side_mid - 0.545).abs() < 1e-6);
+        assert!((path.adverse_excursion - 0.25).abs() < 1e-6);
+        assert!(path.crossed_mid_after_fill);
+        assert!(!path.final_side_above_entry);
     }
 
     #[test]

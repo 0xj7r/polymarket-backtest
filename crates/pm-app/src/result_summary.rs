@@ -79,6 +79,9 @@ pub struct FillTagSummary {
     pub avg_regime_reversal_pressure: f64,
     pub avg_regime_sign_flip_rate: f64,
     pub avg_regime_realized_vol_180s_bps: f64,
+    pub avg_post_fill_adverse_excursion: f64,
+    pub avg_post_fill_favourable_excursion: f64,
+    pub post_fill_cross_mid_rate: f64,
 }
 
 #[derive(Debug, Default)]
@@ -99,6 +102,10 @@ struct FillTagAccumulator {
     sum_regime_sign_flip_rate: f64,
     sum_regime_realized_vol_180s_bps: f64,
     regime_samples: usize,
+    sum_post_fill_adverse_excursion: f64,
+    sum_post_fill_favourable_excursion: f64,
+    post_fill_cross_mid_count: usize,
+    post_fill_path_samples: usize,
 }
 
 impl FillTagAccumulator {
@@ -139,6 +146,12 @@ impl FillTagAccumulator {
             self.sum_regime_sign_flip_rate += sign_flip_rate;
             self.sum_regime_realized_vol_180s_bps += realized_vol;
             self.regime_samples += 1;
+        }
+        if let Some(path) = fill.post_fill_path {
+            self.sum_post_fill_adverse_excursion += path.adverse_excursion;
+            self.sum_post_fill_favourable_excursion += path.favourable_excursion;
+            self.post_fill_cross_mid_count += usize::from(path.crossed_mid_after_fill);
+            self.post_fill_path_samples += 1;
         }
     }
 
@@ -195,6 +208,21 @@ impl FillTagAccumulator {
             },
             avg_regime_realized_vol_180s_bps: if self.regime_samples > 0 {
                 self.sum_regime_realized_vol_180s_bps / self.regime_samples as f64
+            } else {
+                0.0
+            },
+            avg_post_fill_adverse_excursion: if self.post_fill_path_samples > 0 {
+                self.sum_post_fill_adverse_excursion / self.post_fill_path_samples as f64
+            } else {
+                0.0
+            },
+            avg_post_fill_favourable_excursion: if self.post_fill_path_samples > 0 {
+                self.sum_post_fill_favourable_excursion / self.post_fill_path_samples as f64
+            } else {
+                0.0
+            },
+            post_fill_cross_mid_rate: if self.post_fill_path_samples > 0 {
+                self.post_fill_cross_mid_count as f64 / self.post_fill_path_samples as f64
             } else {
                 0.0
             },
@@ -270,6 +298,15 @@ struct FillRow {
     regime_sign_flip_rate: Option<f64>,
     #[serde(default)]
     regime_realized_vol_180s_bps: Option<f64>,
+    #[serde(default)]
+    post_fill_path: Option<PostFillPathRow>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct PostFillPathRow {
+    adverse_excursion: f64,
+    favourable_excursion: f64,
+    crossed_mid_after_fill: bool,
 }
 
 #[derive(Debug, Default)]
@@ -628,6 +665,7 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
             ("model_side_p", stats.late_confirm_model_side_p_fail),
             ("model_edge", stats.late_confirm_model_edge_fail),
             ("whipsaw", stats.late_confirm_whipsaw_fail),
+            ("recent_regime", stats.late_confirm_recent_regime_fail),
             ("side_lock", stats.late_confirm_side_lock_fail),
             ("shares", stats.late_confirm_shares_fail),
         ],
@@ -651,6 +689,7 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
             ("model_side_p", stats.high_skew_model_side_p_fail),
             ("model_edge", stats.high_skew_model_edge_fail),
             ("whipsaw", stats.high_skew_whipsaw_fail),
+            ("recent_regime", stats.high_skew_recent_regime_fail),
             ("side_lock", stats.high_skew_side_lock_fail),
             ("shares", stats.high_skew_shares_fail),
         ],
@@ -694,6 +733,7 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
                 "avg_entry_drawdown",
                 stats.late_favourite_avg_entry_drawdown_fail,
             ),
+            ("recent_regime", stats.late_favourite_recent_regime_fail),
             ("side_lock", stats.late_favourite_side_lock_fail),
             ("shares", stats.late_favourite_shares_fail),
         ],
@@ -724,6 +764,10 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
                 stats.late_confirm_model_edge_fail,
             ),
             ("late_confirm_whipsaw", stats.late_confirm_whipsaw_fail),
+            (
+                "late_confirm_recent_regime",
+                stats.late_confirm_recent_regime_fail,
+            ),
             ("late_confirm_side_lock", stats.late_confirm_side_lock_fail),
             ("high_skew_regime", stats.high_skew_regime_fail),
             ("high_skew_threshold", stats.high_skew_threshold_fail),
@@ -740,6 +784,10 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
             ("high_skew_model_side_p", stats.high_skew_model_side_p_fail),
             ("high_skew_model_edge", stats.high_skew_model_edge_fail),
             ("high_skew_whipsaw", stats.high_skew_whipsaw_fail),
+            (
+                "high_skew_recent_regime",
+                stats.high_skew_recent_regime_fail,
+            ),
             ("high_skew_side_lock", stats.high_skew_side_lock_fail),
             (
                 "late_favourite_capacity",
@@ -792,6 +840,10 @@ fn print_bonereaper_v2_gate_summary(stats: BonereaperV2GateStats) {
             (
                 "late_favourite_avg_entry_drawdown",
                 stats.late_favourite_avg_entry_drawdown_fail,
+            ),
+            (
+                "late_favourite_recent_regime",
+                stats.late_favourite_recent_regime_fail,
             ),
             (
                 "late_favourite_side_lock",

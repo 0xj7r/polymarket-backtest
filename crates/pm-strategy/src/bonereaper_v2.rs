@@ -52,6 +52,7 @@ pub struct BonereaperV2GateStats {
     pub late_confirm_whipsaw_fail: u64,
     pub late_confirm_low_vol_fail: u64,
     pub late_confirm_market_range_fail: u64,
+    pub late_confirm_recent_regime_fail: u64,
     pub late_confirm_side_lock_fail: u64,
     pub late_confirm_shares_fail: u64,
     pub late_confirm_emits: u64,
@@ -70,6 +71,7 @@ pub struct BonereaperV2GateStats {
     pub high_skew_model_edge_fail: u64,
     pub high_skew_whipsaw_fail: u64,
     pub high_skew_low_vol_fail: u64,
+    pub high_skew_recent_regime_fail: u64,
     pub high_skew_side_lock_fail: u64,
     pub high_skew_shares_fail: u64,
     pub high_skew_emits: u64,
@@ -97,6 +99,7 @@ pub struct BonereaperV2GateStats {
     pub late_favourite_adverse_momentum_fail: u64,
     pub late_favourite_entry_pullback_fail: u64,
     pub late_favourite_avg_entry_drawdown_fail: u64,
+    pub late_favourite_recent_regime_fail: u64,
     pub late_favourite_side_lock_fail: u64,
     pub late_favourite_shares_fail: u64,
     pub late_favourite_emits: u64,
@@ -117,6 +120,7 @@ impl BonereaperV2GateStats {
         self.late_confirm_whipsaw_fail += other.late_confirm_whipsaw_fail;
         self.late_confirm_low_vol_fail += other.late_confirm_low_vol_fail;
         self.late_confirm_market_range_fail += other.late_confirm_market_range_fail;
+        self.late_confirm_recent_regime_fail += other.late_confirm_recent_regime_fail;
         self.late_confirm_side_lock_fail += other.late_confirm_side_lock_fail;
         self.late_confirm_shares_fail += other.late_confirm_shares_fail;
         self.late_confirm_emits += other.late_confirm_emits;
@@ -135,6 +139,7 @@ impl BonereaperV2GateStats {
         self.high_skew_model_edge_fail += other.high_skew_model_edge_fail;
         self.high_skew_whipsaw_fail += other.high_skew_whipsaw_fail;
         self.high_skew_low_vol_fail += other.high_skew_low_vol_fail;
+        self.high_skew_recent_regime_fail += other.high_skew_recent_regime_fail;
         self.high_skew_side_lock_fail += other.high_skew_side_lock_fail;
         self.high_skew_shares_fail += other.high_skew_shares_fail;
         self.high_skew_emits += other.high_skew_emits;
@@ -162,6 +167,7 @@ impl BonereaperV2GateStats {
         self.late_favourite_adverse_momentum_fail += other.late_favourite_adverse_momentum_fail;
         self.late_favourite_entry_pullback_fail += other.late_favourite_entry_pullback_fail;
         self.late_favourite_avg_entry_drawdown_fail += other.late_favourite_avg_entry_drawdown_fail;
+        self.late_favourite_recent_regime_fail += other.late_favourite_recent_regime_fail;
         self.late_favourite_side_lock_fail += other.late_favourite_side_lock_fail;
         self.late_favourite_shares_fail += other.late_favourite_shares_fail;
         self.late_favourite_emits += other.late_favourite_emits;
@@ -210,6 +216,14 @@ pub struct BonereaperV2Config {
     pub late_confirm_max_whipsaw_score: f32,
     pub late_confirm_min_realized_vol_180s_bps: f32,
     pub late_confirm_max_observed_range: f32,
+
+    // Replay-safe logistic entry gate trained from historical fills. This uses
+    // only current tick/model/regime state plus prior completed-market ranges.
+    pub recent_regime_gate_enabled: bool,
+    pub recent_regime_gate_min_edge: f32,
+    pub recent_regime_gate_late_confirm: bool,
+    pub recent_regime_gate_high_skew: bool,
+    pub recent_regime_gate_late_favourite: bool,
 
     // High-skew load lane with whipsaw guards
     pub high_skew_threshold: f32,
@@ -366,6 +380,11 @@ impl Default for BonereaperV2Config {
             late_confirm_max_whipsaw_score: 0.85,
             late_confirm_min_realized_vol_180s_bps: 0.0,
             late_confirm_max_observed_range: 1.0,
+            recent_regime_gate_enabled: false,
+            recent_regime_gate_min_edge: 0.08,
+            recent_regime_gate_late_confirm: true,
+            recent_regime_gate_high_skew: true,
+            recent_regime_gate_late_favourite: true,
             // Favourite-loading lane. Keep this stricter than the old probe
             // defaults: the looser settings overtraded early skew and paid
             // taker spread before the market had a durable favourite.
@@ -859,6 +878,116 @@ fn model_limited_buy_price(ctx: &Ctx, side: Side, max_ask: f32, min_edge: f32) -
         .unwrap_or(max_ask)
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RecentRegimeTag {
+    HighSkewLoad,
+    LateConfirm,
+    LateFavouriteLoad,
+}
+
+const RECENT_REGIME_INTERCEPT: f64 = -0.32595430311806406;
+const RECENT_REGIME_BUY_YES: f64 = 0.1510334171392331;
+const RECENT_REGIME_CONFIDENCE_SCORE: f64 = 0.2067142264963719;
+const RECENT_REGIME_EDGE_X_CONFIDENCE: f64 = 1.216681349179975;
+const RECENT_REGIME_MARKET_YES_RANGE_SO_FAR: f64 = -2.1093908248155797;
+const RECENT_REGIME_PRICE: f64 = 1.2873834443843846;
+const RECENT_REGIME_PRICE_X_MODEL_P: f64 = 1.3856702016116504;
+const RECENT_REGIME_PRIOR_MARKET_RANGE_1D: f64 = -1.1913807326776196;
+const RECENT_REGIME_PRIOR_MARKET_RANGE_3D: f64 = 1.0991670801933349;
+const RECENT_REGIME_PRIOR_MARKET_RANGE_7D: f64 = 0.8270134034720209;
+const RECENT_REGIME_RANGE_X_REVERSAL: f64 = -0.009787711121205541;
+const RECENT_REGIME_PATH_EFFICIENCY: f64 = 0.5047698671380214;
+const RECENT_REGIME_REALIZED_VOL_180S_BPS: f64 = 0.09071979636452739;
+const RECENT_REGIME_REVERSAL_PRESSURE: f64 = 0.04359966681145439;
+const RECENT_REGIME_SIGN_FLIP_RATE: f64 = -1.219537378180665;
+const RECENT_REGIME_WHIPSAW_SCORE: f64 = 0.2626545761670573;
+const RECENT_REGIME_RISK_SCORE: f64 = -1.439136629085809;
+const RECENT_REGIME_SECONDS_TO_CLOSE: f64 = -0.0018270696800363462;
+const RECENT_REGIME_SIDE_EDGE_VS_FILL: f64 = -1.550855857237457;
+const RECENT_REGIME_SIDE_MODEL_P: f64 = 0.9496618232112639;
+const RECENT_REGIME_TAG_HIGH_SKEW_LOAD: f64 = 0.10378455544308492;
+const RECENT_REGIME_TAG_LATE_CONFIRM: f64 = -0.0419135598272544;
+const RECENT_REGIME_TAG_LATE_FAVOURITE_LOAD: f64 = 0.07777405236388565;
+const RECENT_REGIME_WHIPSAW_X_LOW_EFFICIENCY: f64 = 0.5995117174505017;
+const RECENT_REGIME_WHIPSAW_X_REVERSAL: f64 = -0.20407075062535404;
+
+fn recent_regime_tag_coef(tag: RecentRegimeTag) -> f64 {
+    match tag {
+        RecentRegimeTag::HighSkewLoad => RECENT_REGIME_TAG_HIGH_SKEW_LOAD,
+        RecentRegimeTag::LateConfirm => RECENT_REGIME_TAG_LATE_CONFIRM,
+        RecentRegimeTag::LateFavouriteLoad => RECENT_REGIME_TAG_LATE_FAVOURITE_LOAD,
+    }
+}
+
+fn sigmoid(x: f64) -> f32 {
+    if x >= 0.0 {
+        let z = (-x).exp();
+        (1.0 / (1.0 + z)) as f32
+    } else {
+        let z = x.exp();
+        (z / (1.0 + z)) as f32
+    }
+}
+
+fn recent_regime_win_probability(
+    ctx: &Ctx,
+    side: Side,
+    price: f32,
+    seconds_to_close: f32,
+    whipsaw: WhipsawRiskSnapshot,
+    tag: RecentRegimeTag,
+) -> Option<f32> {
+    let model = ctx.model_output?;
+    let side_p = model_side_probability(ctx, side)?;
+    let side_edge_vs_fill = side_p - price;
+    let buy_yes = matches!(side, Side::BuyYes) as u8 as f64;
+    let confidence = model.confidence_score as f64;
+    let risk = model.risk_score as f64;
+    let market_range = ctx.market_yes_range_so_far.clamp(0.0, 1.0) as f64;
+    let reversal = whipsaw.reversal_pressure as f64;
+    let whipsaw_score = whipsaw.score as f64;
+    let path_efficiency = whipsaw.path_efficiency as f64;
+
+    let logit = RECENT_REGIME_INTERCEPT
+        + RECENT_REGIME_PRICE * price as f64
+        + RECENT_REGIME_SIDE_MODEL_P * side_p as f64
+        + RECENT_REGIME_SIDE_EDGE_VS_FILL * side_edge_vs_fill as f64
+        + RECENT_REGIME_CONFIDENCE_SCORE * confidence
+        + RECENT_REGIME_RISK_SCORE * risk
+        + RECENT_REGIME_MARKET_YES_RANGE_SO_FAR * market_range
+        + RECENT_REGIME_SECONDS_TO_CLOSE * seconds_to_close as f64
+        + RECENT_REGIME_WHIPSAW_SCORE * whipsaw_score
+        + RECENT_REGIME_PATH_EFFICIENCY * path_efficiency
+        + RECENT_REGIME_REVERSAL_PRESSURE * reversal
+        + RECENT_REGIME_SIGN_FLIP_RATE * whipsaw.sign_flip_rate as f64
+        + RECENT_REGIME_REALIZED_VOL_180S_BPS * whipsaw.realized_vol_180s_bps as f64
+        + RECENT_REGIME_PRIOR_MARKET_RANGE_1D * ctx.prior_market_range_1d as f64
+        + RECENT_REGIME_PRIOR_MARKET_RANGE_3D * ctx.prior_market_range_3d as f64
+        + RECENT_REGIME_PRIOR_MARKET_RANGE_7D * ctx.prior_market_range_7d as f64
+        + RECENT_REGIME_BUY_YES * buy_yes
+        + recent_regime_tag_coef(tag)
+        + RECENT_REGIME_WHIPSAW_X_REVERSAL * whipsaw_score * reversal
+        + RECENT_REGIME_WHIPSAW_X_LOW_EFFICIENCY * whipsaw_score * (1.0 - path_efficiency)
+        + RECENT_REGIME_RANGE_X_REVERSAL * market_range * reversal
+        + RECENT_REGIME_PRICE_X_MODEL_P * price as f64 * side_p as f64
+        + RECENT_REGIME_EDGE_X_CONFIDENCE * side_edge_vs_fill as f64 * confidence;
+
+    Some(sigmoid(logit))
+}
+
+fn recent_regime_gate_passes(
+    ctx: &Ctx,
+    side: Side,
+    price: f32,
+    seconds_to_close: f32,
+    whipsaw: WhipsawRiskSnapshot,
+    tag: RecentRegimeTag,
+    min_edge: f32,
+) -> bool {
+    recent_regime_win_probability(ctx, side, price, seconds_to_close, whipsaw, tag)
+        .is_some_and(|p| p - price >= min_edge)
+}
+
 fn bump_model_fail(stats: &mut BonereaperV2GateStats, prefix: GatePrefix, support: ModelSupport) {
     match (prefix, support) {
         (_, ModelSupport::Supported) => {}
@@ -1255,6 +1384,19 @@ impl Strategy for BonereaperV2 {
                 );
                 if !model_support.is_supported() {
                     bump_model_fail(&mut self.gate_stats, GatePrefix::LateConfirm, model_support);
+                } else if self.cfg.recent_regime_gate_enabled
+                    && self.cfg.recent_regime_gate_late_confirm
+                    && !recent_regime_gate_passes(
+                        ctx,
+                        target,
+                        px as f32,
+                        seconds_to_close,
+                        whipsaw,
+                        RecentRegimeTag::LateConfirm,
+                        self.cfg.recent_regime_gate_min_edge,
+                    )
+                {
+                    self.gate_stats.late_confirm_recent_regime_fail += 1;
                 } else {
                     let clip = self.cfg.max_clip_usdc * self.cfg.late_clip_frac as f64;
                     let shares = shares_capped(clip, px);
@@ -1385,6 +1527,19 @@ impl Strategy for BonereaperV2 {
                                 GatePrefix::HighSkew,
                                 model_support,
                             );
+                        } else if self.cfg.recent_regime_gate_enabled
+                            && self.cfg.recent_regime_gate_high_skew
+                            && !recent_regime_gate_passes(
+                                ctx,
+                                side,
+                                px as f32,
+                                seconds_to_close,
+                                whipsaw,
+                                RecentRegimeTag::HighSkewLoad,
+                                self.cfg.recent_regime_gate_min_edge,
+                            )
+                        {
+                            self.gate_stats.high_skew_recent_regime_fail += 1;
                         } else {
                             let clip = self.cfg.max_clip_usdc * self.cfg.high_skew_clip_frac as f64;
                             // Dynamic risk sizing (same as late favourite lane)
@@ -1570,6 +1725,19 @@ impl Strategy for BonereaperV2 {
                                 GatePrefix::LateFavourite,
                                 model_support,
                             );
+                        } else if self.cfg.recent_regime_gate_enabled
+                            && self.cfg.recent_regime_gate_late_favourite
+                            && !recent_regime_gate_passes(
+                                ctx,
+                                side,
+                                px as f32,
+                                seconds_to_close,
+                                whipsaw,
+                                RecentRegimeTag::LateFavouriteLoad,
+                                self.cfg.recent_regime_gate_min_edge,
+                            )
+                        {
+                            self.gate_stats.late_favourite_recent_regime_fail += 1;
                         } else {
                             let remaining_clips = self
                                 .cfg
@@ -1836,6 +2004,9 @@ mod tests {
             no_shares: 0.0,
             cash_usdc: 1000.0,
             market_yes_range_so_far: 0.0,
+            prior_market_range_1d: 0.0,
+            prior_market_range_3d: 0.0,
+            prior_market_range_7d: 0.0,
             model_output: Some(ModelOutput {
                 direction_score,
                 confidence_score: 0.95,
@@ -2067,6 +2238,9 @@ mod tests {
             no_shares: 0.0,
             cash_usdc: 100.0,
             market_yes_range_so_far: 0.0,
+            prior_market_range_1d: 0.0,
+            prior_market_range_3d: 0.0,
+            prior_market_range_7d: 0.0,
             model_output: Some(ModelOutput {
                 direction_score: 0.8,
                 confidence_score: 0.82,
@@ -2097,6 +2271,9 @@ mod tests {
             no_shares: 0.0,
             cash_usdc: 100.0,
             market_yes_range_so_far: 0.0,
+            prior_market_range_1d: 0.0,
+            prior_market_range_3d: 0.0,
+            prior_market_range_7d: 0.0,
             model_output: Some(ModelOutput {
                 direction_score: -0.8,
                 confidence_score: 0.82,
@@ -2170,6 +2347,9 @@ mod tests {
             no_shares: 0.0,
             cash_usdc: 100.0,
             market_yes_range_so_far: 0.0,
+            prior_market_range_1d: 0.0,
+            prior_market_range_3d: 0.0,
+            prior_market_range_7d: 0.0,
             model_output: Some(ModelOutput {
                 direction_score: 0.8,
                 confidence_score: 0.9,

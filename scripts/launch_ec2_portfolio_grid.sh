@@ -69,6 +69,8 @@ BR2_LATE_CONFIRM_MIN_BOOK_SKEW="0.06"
 BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE="0.85"
 BR2_LATE_CONFIRM_MIN_REALIZED_VOL_180S_BPS="0.0"
 BR2_LATE_CONFIRM_MAX_OBSERVED_RANGE="1.0"
+BR2_RECENT_REGIME_GATE_ENABLED="0"
+BR2_RECENT_REGIME_GATE_MIN_EDGE="0.08"
 BR2_HIGH_SKEW_CLIP_FRAC="0.60"
 BR2_HIGH_SKEW_MAX_CLIPS="5"
 BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE="0.75"
@@ -201,6 +203,8 @@ while [ $# -gt 0 ]; do
         --br2-late-confirm-max-whipsaw-score) BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
         --br2-late-confirm-min-realized-vol-180s-bps) BR2_LATE_CONFIRM_MIN_REALIZED_VOL_180S_BPS="$2"; shift 2 ;;
         --br2-late-confirm-max-observed-range) BR2_LATE_CONFIRM_MAX_OBSERVED_RANGE="$2"; shift 2 ;;
+        --br2-recent-regime-gate-enabled) BR2_RECENT_REGIME_GATE_ENABLED="1"; shift ;;
+        --br2-recent-regime-gate-min-edge) BR2_RECENT_REGIME_GATE_MIN_EDGE="$2"; shift 2 ;;
         --br2-high-skew-clip-frac) BR2_HIGH_SKEW_CLIP_FRAC="$2"; shift 2 ;;
         --br2-high-skew-max-clips) BR2_HIGH_SKEW_MAX_CLIPS="$2"; shift 2 ;;
         --br2-high-skew-max-whipsaw-score) BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE="$2"; shift 2 ;;
@@ -441,6 +445,10 @@ BR2_LATE_FAVOURITE_HIGH_CERT_BYPASS_MODEL_EDGE_ARGS=()
 if [ "${BR2_LATE_FAVOURITE_HIGH_CERT_BYPASS_MODEL_EDGE}" = "1" ]; then
   BR2_LATE_FAVOURITE_HIGH_CERT_BYPASS_MODEL_EDGE_ARGS=(--br2-late-favourite-high-cert-bypass-model-edge)
 fi
+BR2_RECENT_REGIME_GATE_ARGS=()
+if [ "${BR2_RECENT_REGIME_GATE_ENABLED}" = "1" ]; then
+  BR2_RECENT_REGIME_GATE_ARGS=(--br2-recent-regime-gate-enabled)
+fi
 if [ -n "${PROFILE_PATH}" ]; then
   echo "[\$(date -u)] ignoring --profile ${PROFILE_PATH}; launcher CLI knobs are authoritative for sweeps"
 fi
@@ -538,6 +546,8 @@ for CLIP_FRAC in "\${CLIPS[@]}"; do
       --br2-late-confirm-max-whipsaw-score "${BR2_LATE_CONFIRM_MAX_WHIPSAW_SCORE}" \\
       --br2-late-confirm-min-realized-vol-180s-bps "${BR2_LATE_CONFIRM_MIN_REALIZED_VOL_180S_BPS}" \\
       --br2-late-confirm-max-observed-range "${BR2_LATE_CONFIRM_MAX_OBSERVED_RANGE}" \\
+      "\${BR2_RECENT_REGIME_GATE_ARGS[@]}" \\
+      --br2-recent-regime-gate-min-edge "${BR2_RECENT_REGIME_GATE_MIN_EDGE}" \\
       --br2-high-skew-clip-frac "${BR2_HIGH_SKEW_CLIP_FRAC}" \\
       --br2-high-skew-max-clips "${BR2_HIGH_SKEW_MAX_CLIPS}" \\
       --br2-high-skew-max-whipsaw-score "${BR2_HIGH_SKEW_MAX_WHIPSAW_SCORE}" \\

@@ -423,6 +423,21 @@ enum Cmd {
         /// Bonereaper v2 maximum observed market range for late confirmation entries.
         #[arg(long, default_value = "1.0")]
         br2_late_confirm_max_observed_range: f32,
+        /// Enable Bonereaper v2 replay-safe recent-regime logistic gate.
+        #[arg(long, default_value_t = false)]
+        br2_recent_regime_gate_enabled: bool,
+        /// Minimum logistic win-probability edge over entry price for recent-regime gate.
+        #[arg(long, default_value = "0.08")]
+        br2_recent_regime_gate_min_edge: f32,
+        /// Apply recent-regime gate to late confirmation entries.
+        #[arg(long, default_value_t = true)]
+        br2_recent_regime_gate_late_confirm: bool,
+        /// Apply recent-regime gate to high-skew entries.
+        #[arg(long, default_value_t = true)]
+        br2_recent_regime_gate_high_skew: bool,
+        /// Apply recent-regime gate to late-favourite entries.
+        #[arg(long, default_value_t = true)]
+        br2_recent_regime_gate_late_favourite: bool,
         /// Bonereaper v2 high-skew clip multiplier.
         #[arg(long, default_value = "0.60")]
         br2_high_skew_clip_frac: f32,
@@ -1103,6 +1118,11 @@ async fn main() -> Result<()> {
             br2_late_confirm_max_whipsaw_score,
             br2_late_confirm_min_realized_vol_180s_bps,
             br2_late_confirm_max_observed_range,
+            br2_recent_regime_gate_enabled,
+            br2_recent_regime_gate_min_edge,
+            br2_recent_regime_gate_late_confirm,
+            br2_recent_regime_gate_high_skew,
+            br2_recent_regime_gate_late_favourite,
             br2_high_skew_clip_frac,
             br2_high_skew_max_clips,
             br2_high_skew_max_whipsaw_score,
@@ -1245,6 +1265,11 @@ async fn main() -> Result<()> {
                 br2_late_confirm_max_whipsaw_score,
                 br2_late_confirm_min_realized_vol_180s_bps,
                 br2_late_confirm_max_observed_range,
+                br2_recent_regime_gate_enabled,
+                br2_recent_regime_gate_min_edge,
+                br2_recent_regime_gate_late_confirm,
+                br2_recent_regime_gate_high_skew,
+                br2_recent_regime_gate_late_favourite,
                 br2_high_skew_clip_frac,
                 br2_high_skew_max_clips,
                 br2_high_skew_max_whipsaw_score,
@@ -1929,6 +1954,11 @@ async fn walk_forward(
     br2_late_confirm_max_whipsaw_score: f32,
     br2_late_confirm_min_realized_vol_180s_bps: f32,
     br2_late_confirm_max_observed_range: f32,
+    br2_recent_regime_gate_enabled: bool,
+    br2_recent_regime_gate_min_edge: f32,
+    br2_recent_regime_gate_late_confirm: bool,
+    br2_recent_regime_gate_high_skew: bool,
+    br2_recent_regime_gate_late_favourite: bool,
     br2_high_skew_clip_frac: f32,
     br2_high_skew_max_clips: usize,
     br2_high_skew_max_whipsaw_score: f32,
@@ -2140,6 +2170,11 @@ async fn walk_forward(
         br2_late_confirm_max_whipsaw_score,
         br2_late_confirm_min_realized_vol_180s_bps,
         br2_late_confirm_max_observed_range,
+        br2_recent_regime_gate_enabled,
+        br2_recent_regime_gate_min_edge,
+        br2_recent_regime_gate_late_confirm,
+        br2_recent_regime_gate_high_skew,
+        br2_recent_regime_gate_late_favourite,
         br2_high_skew_clip_frac,
         br2_high_skew_max_clips,
         br2_high_skew_max_whipsaw_score,
@@ -2645,6 +2680,9 @@ async fn run_market_backtest(
         meta_calibrator_snapshot: None,
         enable_meta_calibration: true,
         model_market_context: pm_model::ModelMarketContext::default(),
+        prior_market_range_1d: 0.0,
+        prior_market_range_3d: 0.0,
+        prior_market_range_7d: 0.0,
         model_btc_whipsaw_risk_weight: 0.16,
         model_btc_path_inefficiency_risk_weight: 0.10,
         model_btc_reversal_pressure_risk_weight: 0.12,
