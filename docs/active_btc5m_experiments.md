@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-29 08:38 BST (07:38 UTC).
+Last updated: 2026-05-29 08:48 BST (07:48 UTC).
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -20,10 +20,12 @@ Current active rerun for path diagnostics:
 
 Latest checkpoint readout:
 
-- S3 checkpoint analyzed: `7,750 / 23,705` markets.
-- Checkpoint calendar: `2026-02-27T15:40:00Z` to `2026-03-26T13:25:00Z`.
-- Checkpoint PnL: `+$5,336.70`; active markets `1,177 / 7,750`
-  (`15.19%`).
+- S3 checkpoint analyzed: `8,500 / 23,705` markets. The EC2 instance is still
+  running in `us-east-1`; live SSM output reached `9,150 / 23,705` at
+  `2026-05-29T07:45:28Z`, with `bonereaper_v2` equity around `$6,728.22`.
+- Checkpoint calendar: `2026-02-27T15:40:00Z` to `2026-03-29T03:55:00Z`.
+- Checkpoint PnL: `+$5,496.16`; active markets `1,213 / 8,500`
+  (`14.27%`).
 - Path labels are present on all analyzed tracked lane fills.
 - The failure mode is now clearly path-dependent, not just a final-range label:
   `crossed_mid_after_fill` is toxic, while held-side and moderate adverse paths
@@ -44,16 +46,17 @@ Latest checkpoint readout:
   with `-$859.31` cross-mid PnL, and March 16 lost `-$224.84` with `-$820.01`
   cross-mid PnL. March 17 had cross-mid drag too (`-$253.60`) but finished
   `+$1,310.35` because non-cross paths made `+$1,563.95`.
-- Replay-safe logistic path models on a final-10-day split remain diagnostic,
-  not actionable gates. `toxic_reversal_path` test AUC is `0.5668`, log loss
-  `0.7914`; `crossed_mid_after_fill` test AUC is `0.5901`, log loss `0.7476`.
+- Replay-safe logistic path models on the `8,500` checkpoint final-10-day split
+  remain diagnostic, not actionable gates. `toxic_reversal_path` test AUC is
+  `0.5994`, log loss `0.7471`; `crossed_mid_after_fill` test AUC is `0.6242`,
+  log loss `0.6655`.
   Both rank some path risk directionally, but high-risk test buckets still made
   money, so removing or hard-throttling the top buckets would delete profitable
   late breaks.
-- Late-break feature contrast on `1,683` late-confirm/favourite fills shows why
+- Late-break feature contrast on `1,726` late-confirm/favourite fills shows why
   broad favourite throttles are wrong: toxic late breaks have lower average fill
-  price (`0.7028`) and lower average model probability (`0.8081`) than
-  profitable non-toxic late breaks (`0.7386` and `0.8375`). The highest-price
+  price (`0.7033`) and lower average model probability (`0.8084`) than
+  profitable non-toxic late breaks (`0.7392` and `0.8378`). The highest-price
   and highest-model-probability quartiles are still profitable with lower toxic
   rates. The weak area is lower-confidence/lower-price late breaks plus certain
   prior-range bands, not simply large favourite exposure.
@@ -74,17 +77,17 @@ Latest checkpoint readout:
   Current read: the lower model-probability/mid-edge late-break slice is still
   the sharper research lead, but it needs more history and fold coverage before
   promotion.
-- Portfolio/day half-throttle simulations were added on the `7,750`-market
+- Portfolio/day half-throttle simulations were refreshed on the `8,500`-market
   checkpoint. These convert candidate fill slices into base vs adjusted PnL and
   max-DD what-ifs, still using train-only thresholds. Results:
   - `side_model_p:q1 & side_edge_vs_fill:q2` (`600/200/200`): base PnL
-    `+$5,336.70`, adjusted PnL `+$5,392.45`, adjustment `+$55.74`, max DD
+    `+$5,496.16`, adjusted PnL `+$5,551.90`, adjustment `+$55.74`, max DD
     improves from `23.70%` to `18.23%`, but fold 5 was harmful (`-$206.47`
     half-throttle adjustment).
   - `risk_score:q4 & prior_market_range_7d:q1` (`900/300/300`): adjusted PnL
-    `+$5,451.57`, adjustment `+$114.86`, max DD also `18.23%`, but it throttles
+    `+$5,611.02`, adjustment `+$114.86`, max DD also `18.23%`, but it throttles
     many more markets (`144`) and hurts several strong days.
-- The `7,750` portfolio what-ifs now include final-range bucket attribution.
+- The `8,500` portfolio what-ifs now include final-range bucket attribution.
   This is post-hoc only because resolved final range is not replay-safe, but it
   clarifies the shape: `risk_score:q4 & prior_market_range_7d:q1` helps wide
   (`+$329.30`) and extreme (`+$88.52`) resolved ranges while damaging
@@ -99,20 +102,46 @@ Latest checkpoint readout:
   checkpoint. That means the broad regime label is not enough; we need a sharper
   classifier for "late break that fails back through mid" rather than a blanket
   choppy/mid-wide throttle.
-- See `docs/btc5m_postfill_checkpoint_7750_regime_evolution.md`,
-  `docs/btc5m_postfill_checkpoint_7750_reversal_tail.md`,
-  `docs/btc5m_postfill_checkpoint_7750_toxic_reversal_path_model.md`,
-  `docs/btc5m_postfill_checkpoint_7750_crossed_mid_after_fill_model.md`,
-  `docs/btc5m_postfill_checkpoint_7750_gate_sim.md`,
-  `docs/btc5m_postfill_checkpoint_7750_late_break_feature_contrast.md`,
-  `docs/btc5m_postfill_checkpoint_7750_late_break_gate_search.md`,
-  `docs/btc5m_postfill_checkpoint_7750_late_break_gate_portfolio_sim.md` and
-  `docs/btc5m_postfill_checkpoint_7750_late_break_gate_portfolio_sim_risk_prior.md`
+- See `docs/btc5m_postfill_checkpoint_8500_regime_evolution.md`,
+  `docs/btc5m_postfill_checkpoint_8500_reversal_tail.md`,
+  `docs/btc5m_postfill_checkpoint_8500_toxic_reversal_path_model.md`,
+  `docs/btc5m_postfill_checkpoint_8500_crossed_mid_after_fill_model.md`,
+  `docs/btc5m_postfill_checkpoint_8500_gate_sim.md`,
+  `docs/btc5m_postfill_checkpoint_8500_late_break_feature_contrast.md`,
+  `docs/btc5m_postfill_checkpoint_8500_late_break_gate_search.md`,
+  `docs/btc5m_postfill_checkpoint_8500_late_break_gate_portfolio_sim.md` and
+  `docs/btc5m_postfill_checkpoint_8500_late_break_gate_portfolio_sim_risk_prior.md`
   for the latest checkpoint reports.
 
 This checkpoint is not yet the final late-regime window. Do not promote a
 post-fill reversal gate until the full-history artifact reaches the final 30d
 slice and the OOS diagnostics are rerun there.
+
+## Late-Regime Readout
+
+The completed full-history selected run now has a focused late-regime report:
+`docs/btc5m_late_regime_action_report.md`.
+
+Core findings from that report:
+
+- Full-history range: `2026-02-27T15:40:00Z` to `2026-05-20T23:55:00Z`.
+- Last third: `-$227.08`, active rate `3.24%`, versus first third
+  `+$5,072.67`, active rate `15.07%`.
+- Last 30d: only `+$20.80`; mid-wide final-range markets lost `-$3,006.12`
+  while non-mid-wide markets made `+$3,026.92`.
+- The mid-wide rate fell from `17.50%` in the first 30d to `12.04%` in the
+  last 30d. The problem is not higher mid-wide frequency; it is that mid-wide
+  expectancy stayed very negative while participation and offsetting
+  continuation wins collapsed.
+- Last 30d lane x final-range damage is concentrated in
+  `late_confirm:range_78_93_midwide` (`-$1,300.89`),
+  `late_favourite:range_78_93_midwide` (`-$1,067.18`), and
+  `high_skew:range_78_93_midwide` (`-$616.47`).
+- Candidate replay-safe guardrails identify late-window pain but are unstable:
+  `late_fav_obs_040_050` removed `-$660.43` in the last 30d but would have
+  removed `+$832.54` in the first 30d; `late_confirm_low_conf_lt_081` removed
+  `-$605.36` last 30d but `+$303.78` first 30d. These belong in a regime/gated
+  model, not fixed global thresholds.
 
 When the active artifact reaches the final 30d slice or completes, regenerate
 the diagnostic pack with:
