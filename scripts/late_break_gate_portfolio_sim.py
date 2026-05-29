@@ -22,6 +22,18 @@ def pct(value: float) -> str:
     return f"{value:.2%}"
 
 
+def range_bucket(value: float) -> str:
+    if value < 0.30:
+        return "narrow_lt30"
+    if value < 0.50:
+        return "mid_30_50"
+    if value < 0.75:
+        return "mid_wide_50_75"
+    if value < 0.95:
+        return "wide_75_95"
+    return "extreme_gte95"
+
+
 def close_ts(row: dict[str, Any]) -> int:
     if row.get("close_ts") is not None:
         return int(row["close_ts"])
@@ -185,6 +197,8 @@ def main() -> int:
         start += args.step_fills
 
     by_day: dict[str, dict[str, float]] = defaultdict(acc)
+    by_final_range: dict[str, dict[str, float]] = defaultdict(acc)
+    by_day_range: dict[str, dict[str, float]] = defaultdict(acc)
     base_equity = args.starting_capital
     adjusted_equity = args.starting_capital
     base_curve = [base_equity]
@@ -198,11 +212,15 @@ def main() -> int:
         pnl = float(strat.get("pnl_usdc") or 0.0)
         adjustment = row_adjustments[market_key(row)]
         day = dt.datetime.fromtimestamp(close_ts(row), tz=dt.timezone.utc).date().isoformat()
-        add(by_day[day], pnl, adjustment, row_throttled[market_key(row)] > 0)
+        throttled = row_throttled[market_key(row)] > 0
+        final_range = range_bucket(float(row.get("volatility_range") or 0.0))
+        add(by_day[day], pnl, adjustment, throttled)
+        add(by_final_range[final_range], pnl, adjustment, throttled)
+        add(by_day_range[f"{day} {final_range}"], pnl, adjustment, throttled)
         base_pnl_total += pnl
         adjusted_pnl_total += pnl + adjustment
         adjustment_total += adjustment
-        throttled_markets += 1 if row_throttled[market_key(row)] > 0 else 0
+        throttled_markets += 1 if throttled else 0
         base_equity += pnl
         adjusted_equity += pnl + adjustment
         base_curve.append(base_equity)
@@ -241,6 +259,58 @@ def main() -> int:
             continue
         lines.append(
             f"| {day} | {int(row['markets'])} | {money(row['base_pnl'])} | "
+            f"{money(row['adjustment'])} | {money(row['adjusted_pnl'])} | "
+            f"{int(row['throttled_markets'])} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Final Range Bucket Impact",
+            "",
+            "Final range uses the resolved whole-market path, so this section is post-hoc diagnostics only. It should not be used directly as a live gate.",
+            "",
+            "| Final Range Bucket | Markets | Base PnL | Adjustment | Adjusted PnL | Throttled Markets |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for bucket in ["narrow_lt30", "mid_30_50", "mid_wide_50_75", "wide_75_95", "extreme_gte95"]:
+        row = by_final_range.get(bucket)
+        if not row:
+            continue
+        lines.append(
+            f"| {bucket} | {int(row['markets'])} | {money(row['base_pnl'])} | "
+            f"{money(row['adjustment'])} | {money(row['adjusted_pnl'])} | "
+            f"{int(row['throttled_markets'])} |"
+        )
+    worst_day_ranges = sorted(by_day_range.items(), key=lambda item: item[1]["adjustment"])[:12]
+    best_day_ranges = sorted(by_day_range.items(), key=lambda item: item[1]["adjustment"], reverse=True)[:12]
+    lines.extend(
+        [
+            "",
+            "## Worst Day-Range Adjustments",
+            "",
+            "| Day + Final Range Bucket | Markets | Base PnL | Adjustment | Adjusted PnL | Throttled Markets |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for label, row in worst_day_ranges:
+        lines.append(
+            f"| {label} | {int(row['markets'])} | {money(row['base_pnl'])} | "
+            f"{money(row['adjustment'])} | {money(row['adjusted_pnl'])} | "
+            f"{int(row['throttled_markets'])} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Best Day-Range Adjustments",
+            "",
+            "| Day + Final Range Bucket | Markets | Base PnL | Adjustment | Adjusted PnL | Throttled Markets |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for label, row in best_day_ranges:
+        lines.append(
+            f"| {label} | {int(row['markets'])} | {money(row['base_pnl'])} | "
             f"{money(row['adjustment'])} | {money(row['adjusted_pnl'])} | "
             f"{int(row['throttled_markets'])} |"
         )

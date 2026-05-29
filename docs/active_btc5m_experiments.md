@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-29 08:45 UTC.
+Last updated: 2026-05-29 08:38 BST (07:38 UTC).
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -20,9 +20,13 @@ Current active rerun for path diagnostics:
 
 Latest checkpoint readout:
 
-- S3 checkpoint analyzed: `5,750 / 23,705` markets.
-- Checkpoint calendar: `2026-02-27T15:40:00Z` to `2026-03-19T14:45:00Z`.
-- Checkpoint PnL: `+$4,141.46`; active markets `991 / 5,750` (`17.23%`).
+- S3 checkpoint analyzed: `7,750 / 23,705` markets for the latest portfolio
+  what-ifs. The fuller path-diagnostic pack below is still from the earlier
+  `5,750` checkpoint unless a specific `7,750` report is named.
+- Checkpoint calendar at `5,750`: `2026-02-27T15:40:00Z` to
+  `2026-03-19T14:45:00Z`.
+- Checkpoint PnL at `5,750`: `+$4,141.46`; active markets `991 / 5,750`
+  (`17.23%`).
 - Path labels are present on all analyzed tracked lane fills.
 - The failure mode is now clearly path-dependent, not just a final-range label:
   `crossed_mid_after_fill` is toxic, while held-side and moderate adverse paths
@@ -72,18 +76,25 @@ Latest checkpoint readout:
   `55.17%`. Current read: the lower model-probability/mid-edge late-break
   slice is the sharper candidate; the high-risk/prior-range candidate needs more
   history before promotion.
-- Portfolio/day half-throttle simulations were added on the `7,500`-market
+- Portfolio/day half-throttle simulations were added on the `7,750`-market
   checkpoint. These convert candidate fill slices into base vs adjusted PnL and
   max-DD what-ifs, still using train-only thresholds. Results:
   - `side_model_p:q1 & side_edge_vs_fill:q2` (`600/200/200`): base PnL
-    `+$5,181.43`, adjusted PnL `+$5,237.17`, adjustment `+$55.74`, max DD
+    `+$5,336.70`, adjusted PnL `+$5,392.45`, adjustment `+$55.74`, max DD
     improves from `23.70%` to `18.23%`, but fold 5 was harmful (`-$206.47`
     half-throttle adjustment).
   - `risk_score:q4 & prior_market_range_7d:q1` (`900/300/300`): adjusted PnL
-    `+$5,296.29`, adjustment `+$114.86`, max DD also `18.23%`, but it throttles
-    many more markets (`144`) and hurts several strong days. Current read:
-    both remain diagnostics only; neither is clean enough to patch into strategy
-    logic before the full-history late-regime validation.
+    `+$5,451.57`, adjustment `+$114.86`, max DD also `18.23%`, but it throttles
+    many more markets (`144`) and hurts several strong days.
+- The `7,750` portfolio what-ifs now include final-range bucket attribution.
+  This is post-hoc only because resolved final range is not replay-safe, but it
+  clarifies the shape: `risk_score:q4 & prior_market_range_7d:q1` helps wide
+  (`+$329.30`) and extreme (`+$88.52`) resolved ranges while damaging
+  mid-wide (`-$280.32`) ranges. The sharper `side_model_p:q1 &
+  side_edge_vs_fill:q2` candidate is less invasive but still mixed: mid-wide
+  `-$26.92`, wide `+$65.59`, extreme `+$17.07`. Current read: both remain
+  diagnostics only; the live model should learn "late break that crosses back
+  through mid" instead of gating late breaks or mid-wide markets broadly.
 - Replay-safe hard-regime throttles were also tested in the same OOS fold
   (`expanded_not_decisive`, sign-flip/path-efficiency, observed-range/reversal,
   high-price choppy favourite variants). They all removed positive PnL in this
@@ -99,8 +110,8 @@ Latest checkpoint readout:
   `docs/btc5m_postfill_checkpoint_6750_late_break_gate_search.md` and
   `docs/btc5m_postfill_checkpoint_6750_late_break_gate_search_sens200.md` for
   the latest candidate-gate searches. See
-  `docs/btc5m_postfill_checkpoint_7500_late_break_gate_portfolio_sim.md` and
-  `docs/btc5m_postfill_checkpoint_7500_late_break_gate_portfolio_sim_risk_prior.md`
+  `docs/btc5m_postfill_checkpoint_7750_late_break_gate_portfolio_sim.md` and
+  `docs/btc5m_postfill_checkpoint_7750_late_break_gate_portfolio_sim_risk_prior.md`
   for portfolio-level what-ifs.
 
 This checkpoint is not yet the final late-regime window. Do not promote a
