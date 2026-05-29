@@ -50,6 +50,41 @@ That means a static global threshold is likely the wrong shape. We need a
 regime-conditioned gate or sizing curve that changes behavior when the broader
 market tape is in the later low-participation / mid-wide-toxic state.
 
+## Mid-Wide Model Diagnostics
+
+Source reports:
+
+- `docs/btc5m_midwide_membership_model.md`
+- `docs/btc5m_midwide_regime_model.md`
+
+Two replay-safe logistic classifiers were checked:
+
+1. `midwide`: whether the fill belongs to a market whose final range was
+   `0.78..0.93`.
+2. `toxic_midwide`: whether the fill belongs to that final range and the fill
+   lost money.
+
+The model can partly detect mid-wide membership out of sample:
+
+- `midwide` OOS AUC: `0.6587`.
+- Test base rate: `25.72%`.
+- Strongest drivers: observed range, range x sign-flip, prior range features.
+
+But that is not enough for a trading gate. The highest predicted mid-wide bucket
+was profitable in the final 30d (`+$443`), while the worst bucket was the middle
+risk bucket (`-$1,275`). Removing high predicted mid-wide probability would have
+removed profitable late-window fills.
+
+The more directly useful `toxic_midwide` target failed OOS:
+
+- `toxic_midwide` OOS AUC: `0.4412`.
+- Test base rate: `13.63%`.
+- Highest predicted risk bucket was also profitable (`+$655`).
+
+Conclusion: current fill-time summary features can identify some mid-wide
+structure, but they do not robustly identify which mid-wide entries are toxic.
+The next model label should be post-entry path failure, not final range alone.
+
 ## Interpretation
 
 The model still sees good edge in individual late-favourite and late-confirm
