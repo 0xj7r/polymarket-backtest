@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-29 07:35 UTC.
+Last updated: 2026-05-29 07:55 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -20,9 +20,9 @@ Current active rerun for path diagnostics:
 
 Latest checkpoint readout:
 
-- S3 checkpoint analyzed: `4,500 / 23,705` markets.
-- Checkpoint calendar: `2026-02-27T15:40:00Z` to `2026-03-15T06:35:00Z`.
-- Checkpoint PnL: `+$2,600.36`; active markets `838 / 4,500` (`18.62%`).
+- S3 checkpoint analyzed: `5,750 / 23,705` markets.
+- Checkpoint calendar: `2026-02-27T15:40:00Z` to `2026-03-19T14:45:00Z`.
+- Checkpoint PnL: `+$4,141.46`; active markets `991 / 5,750` (`17.23%`).
 - Path labels are present on all analyzed tracked lane fills.
 - The failure mode is now clearly path-dependent, not just a final-range label:
   `crossed_mid_after_fill` is toxic, while held-side and moderate adverse paths
@@ -38,15 +38,24 @@ Latest checkpoint readout:
   `<0.78` made `+$3,811.93`.
 - Daily toxic-path evolution now confirms the actual negative-day mechanism:
   cross-mid PnL is a persistent drag even on profitable days, but it becomes
-  account-level damage when non-crossing late breaks stop offsetting it. In this
-  checkpoint, March 12 lost `-$187.65` with `-$958.21` cross-mid PnL and March
-  13 lost `-$327.80` with `-$859.31` cross-mid PnL. March 9 had worse cross-mid
-  drag (`-$874.67`) but still finished positive because non-cross paths made
-  `+$1,055.25`.
+  account-level damage when non-crossing late breaks stop offsetting it. March
+  12 lost `-$187.65` with `-$958.21` cross-mid PnL, March 13 lost `-$327.80`
+  with `-$859.31` cross-mid PnL, and March 16 lost `-$224.84` with `-$820.01`
+  cross-mid PnL. March 17 had cross-mid drag too (`-$253.60`) but finished
+  `+$1,310.35` because non-cross paths made `+$1,563.95`.
 - Replay-safe logistic toxic-reversal model on a short final-5-day split remains
-  weak: test AUC `0.5804`, log loss `0.6897`. It ranks risk directionally, but
-  top-risk test buckets still made money, so it is not yet an actionable gate.
-- The 4,500-market walk-forward gate simulation has only one OOS fold. The best
+  weak: test AUC `0.5454`, log loss `0.8819`. It ranks some risk directionally,
+  but top-risk test buckets still made money, so it is not yet an actionable
+  gate.
+- Late-break feature contrast on `1,463` late-confirm/favourite fills shows why
+  broad favourite throttles are wrong: toxic late breaks have lower average fill
+  price (`0.7033`) and lower average model probability (`0.8087`) than
+  profitable non-toxic late breaks (`0.7376` and `0.8363`). The highest-price
+  and highest-model-probability quartiles are still profitable with lower toxic
+  rates. The weak area is lower-confidence/lower-price late breaks plus certain
+  prior-range bands, not simply large favourite exposure.
+- The 5,750-market walk-forward gate simulation still has only one OOS fold with
+  the current `500`-fill fold size. The best
   candidate was small (`br2_late_confirm:q0.95`, `+$35.29` full-removal
   improvement); broad/global throttles removed profitable fills. Treat this as
   a diagnostic signal only.
@@ -56,10 +65,12 @@ Latest checkpoint readout:
   checkpoint. That means the broad regime label is not enough; we need a sharper
   classifier for "late break that fails back through mid" rather than a blanket
   choppy/mid-wide throttle.
-- See `docs/btc5m_postfill_checkpoint_4500_regime_evolution.md`,
-  `docs/btc5m_postfill_checkpoint_4500_reversal_tail.md`,
-  `docs/btc5m_postfill_checkpoint_4500_toxic_reversal_path_model.md`, and
-  `docs/btc5m_postfill_checkpoint_4500_gate_sim.md` for the current reports.
+- See `docs/btc5m_postfill_checkpoint_5750_regime_evolution.md`,
+  `docs/btc5m_postfill_checkpoint_5750_reversal_tail.md`,
+  `docs/btc5m_postfill_checkpoint_5750_toxic_reversal_path_model.md`,
+  `docs/btc5m_postfill_checkpoint_5750_gate_sim.md`, and
+  `docs/btc5m_postfill_checkpoint_5750_late_break_feature_contrast.md` for the
+  current reports.
 
 This checkpoint is not yet the final late-regime window. Do not promote a
 post-fill reversal gate until the full-history artifact reaches the final 30d
@@ -85,6 +96,7 @@ This emits:
 - `docs/btc5m_postfill_full_toxic_reversal_path_model.md`
 - `docs/btc5m_postfill_full_crossed_mid_after_fill_model.md`
 - `docs/btc5m_postfill_full_gate_sim.md`
+- `docs/btc5m_postfill_full_late_break_feature_contrast.md`
 
 To poll until the full artifact is ready and then run the same pack:
 
