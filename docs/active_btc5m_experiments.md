@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-29 07:55 UTC.
+Last updated: 2026-05-29 08:15 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -59,6 +59,17 @@ Latest checkpoint readout:
   candidate was small (`br2_late_confirm:q0.95`, `+$35.29` full-removal
   improvement); broad/global throttles removed profitable fills. Treat this as
   a diagnostic signal only.
+- A narrower late-break walk-forward gate search was added and run on the
+  `6,250`-market checkpoint with train-side quantile thresholds. Candidate rules
+  are admitted in a fold only when the same condition had negative train PnL.
+  The first useful candidates are not broad chop labels:
+  - `risk_score:q4 & prior_market_range_7d:q1`: `2` OOS folds, removed `171`
+    fills, removed PnL `-$236.11`, half-throttle improvement `+$118.05`.
+  - `side_model_p:q1 & side_edge_vs_fill:q2`: `1` OOS fold, removed `29`
+    fills, removed PnL `-$249.96`, removed toxic rate `51.72%`.
+  This is still early, but it is the first diagnostic pointing toward a
+  narrower replay-safe throttle: high risk in specific prior-range bands and
+  lower model-probability late breaks, not favourite loading in general.
 - Replay-safe hard-regime throttles were also tested in the same OOS fold
   (`expanded_not_decisive`, sign-flip/path-efficiency, observed-range/reversal,
   high-price choppy favourite variants). They all removed positive PnL in this
@@ -70,7 +81,9 @@ Latest checkpoint readout:
   `docs/btc5m_postfill_checkpoint_5750_toxic_reversal_path_model.md`,
   `docs/btc5m_postfill_checkpoint_5750_gate_sim.md`, and
   `docs/btc5m_postfill_checkpoint_5750_late_break_feature_contrast.md` for the
-  current reports.
+  current full-pack reports. See
+  `docs/btc5m_postfill_checkpoint_6250_late_break_gate_search.md` for the
+  latest candidate-gate search.
 
 This checkpoint is not yet the final late-regime window. Do not promote a
 post-fill reversal gate until the full-history artifact reaches the final 30d
@@ -97,6 +110,7 @@ This emits:
 - `docs/btc5m_postfill_full_crossed_mid_after_fill_model.md`
 - `docs/btc5m_postfill_full_gate_sim.md`
 - `docs/btc5m_postfill_full_late_break_feature_contrast.md`
+- `docs/btc5m_postfill_full_late_break_gate_search.md`
 
 To poll until the full artifact is ready and then run the same pack:
 

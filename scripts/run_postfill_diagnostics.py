@@ -178,6 +178,19 @@ def main() -> int:
             str(out_prefix.with_name(out_prefix.name + "_late_break_feature_contrast.md")),
         ]
     )
+    run_optional(
+        [
+            sys.executable,
+            "scripts/late_break_gate_search.py",
+            str(local_markets),
+            "--strategy",
+            args.strategy,
+            "--source-label",
+            source_label,
+            "--out-md",
+            str(out_prefix.with_name(out_prefix.name + "_late_break_gate_search.md")),
+        ]
+    )
     return 0
 
 
