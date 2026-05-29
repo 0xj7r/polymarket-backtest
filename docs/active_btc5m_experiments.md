@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-29 00:12 UTC.
+Last updated: 2026-05-29 00:24 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -72,8 +72,8 @@ Active memory-safe full-history candidates:
    - Strategy logic: same 1K exact profile and frozen meta-calibrator.
    - First checkpoint: `250` markets, `+$60.01`, max drawdown `3.04%`,
      `33` fills.
-   - Latest S3 checkpoint: `11,000` markets, `+$6,554.61`, max drawdown
-     `23.70%`, `2,671` fills.
+   - Latest S3 checkpoint: `12,500` markets, `+$7,169.72`, max drawdown
+     `23.70%`, `2,870` fills.
 2. Broader tail-coverage variant
    - Run: `20260528T225904Z-portfolio-grid-53933`
    - Label:
@@ -88,8 +88,8 @@ Active memory-safe full-history candidates:
      `budget_favourite_upside_frac = 0.40`.
    - First checkpoint: `250` markets, `+$59.98`, max drawdown `3.04%`,
      `34` fills.
-   - Latest S3 checkpoint: `11,000` markets, `+$6,547.67`, max drawdown
-     `23.72%`, `2,674` fills.
+   - Latest S3 checkpoint: `12,500` markets, `+$7,147.69`, max drawdown
+     `23.72%`, `2,875` fills.
 
 Common-prefix memory-safe comparisons:
 
@@ -129,16 +129,19 @@ Common-prefix memory-safe comparisons:
 - `11,000` markets:
   - Base: `+$6,554.61`, max drawdown `23.70%`, tail `-$50.90`
   - Cov75: `+$6,547.67`, max drawdown `23.72%`, tail `-$75.85`
+- `12,500` markets:
+  - Base: `+$7,169.72`, max drawdown `23.70%`, tail `-$71.92`
+  - Cov75: `+$7,147.69`, max drawdown `23.72%`, tail `-$110.82`
 
-Interim read: cov75's early PnL lead has disappeared. At `11,000` common
-markets, base is ahead by `$6.94`, with essentially the same drawdown and
-less tail bleed. Cov75's broader tails spend about `0.8-0.9%` of favourite
-notional versus base around `0.5-0.6%`, but so far that extra insurance has not
-paid for itself. Selection is not made until the runs finish full history or at
-minimum pass the previous OOM point around `12,500` markets.
+Interim read: the memory-safe runs have now passed the previous OOM failure
+area. Cov75's early PnL lead has disappeared. At `12,500` common markets, base
+is ahead by `$22.03`, with essentially the same drawdown and much less tail
+bleed. Cov75's broader tails spend about `0.8-0.9%` of favourite notional
+versus base around `0.5-0.6%`, but so far that extra insurance has not paid for
+itself. Selection is not made until the runs finish full history.
 
-Health check at `00:12 UTC`: both memory-safe `pm-app` processes are still
-running, each using about `29GB` RSS on `r7i.4xlarge` hosts with `123GB` RAM.
+Health check at `00:24 UTC`: both memory-safe `pm-app` processes are still
+running, each using about `32GB` RSS on `r7i.4xlarge` hosts with `123GB` RAM.
 
 Selection rule: once both memory-safe runners finish, promote the better 1K
 path unless the coverage variant improves hedge/reversal protection at an
