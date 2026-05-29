@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-29 06:50 UTC.
+Last updated: 2026-05-29 06:55 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -20,15 +20,19 @@ Current active rerun for path diagnostics:
 
 Latest checkpoint readout:
 
-- Local progress checked: `1,150 / 23,705` markets, equity `$1,235.07`.
-- S3 checkpoint analyzed: `1,000 / 23,705` markets.
-- Checkpoint calendar: `2026-02-27T15:40:00Z` to `2026-03-03T02:55:00Z`.
-- Checkpoint PnL: `+$153.55`, max drawdown `16.38%`, `357` fills.
+- S3 checkpoint analyzed: `2,000 / 23,705` markets.
+- Checkpoint calendar: `2026-02-27T15:40:00Z` to `2026-03-06T14:15:00Z`.
+- Checkpoint PnL: `+$1,147.81`, max drawdown `18.23%`, `957` fills.
 - Path labels are present on all analyzed fills.
 - `crossed_mid_after_fill` is the directly confirmed loss shape:
-  `br2_late_favourite_load` crossed-mid fills lost `-$465.44`, while held-side
-  favourite fills made `+$299.62`.
+  `br2_late_favourite_load` crossed-mid fills lost `-$1,216.94`, while
+  held-side favourite fills made `+$1,194.07`.
+- The 2-day OOS toxic-reversal smoke model is promising but not yet decisive:
+  test AUC `0.6191`; the highest-risk bucket had `68.97%` cross-mid rate and
+  `-$238.27` PnL.
 - See `docs/btc5m_postfill_checkpoint_readout.md` for the checkpoint details.
+- See `docs/btc5m_postfill_checkpoint_2000_regime_evolution.md` for the
+  current post-fill evolution report.
 
 This checkpoint is not yet the final late-regime window. Do not promote a
 post-fill reversal gate until the full-history artifact reaches the final 30d
