@@ -20,13 +20,10 @@ Current active rerun for path diagnostics:
 
 Latest checkpoint readout:
 
-- S3 checkpoint analyzed: `7,750 / 23,705` markets for the latest portfolio
-  what-ifs. The fuller path-diagnostic pack below is still from the earlier
-  `5,750` checkpoint unless a specific `7,750` report is named.
-- Checkpoint calendar at `5,750`: `2026-02-27T15:40:00Z` to
-  `2026-03-19T14:45:00Z`.
-- Checkpoint PnL at `5,750`: `+$4,141.46`; active markets `991 / 5,750`
-  (`17.23%`).
+- S3 checkpoint analyzed: `7,750 / 23,705` markets.
+- Checkpoint calendar: `2026-02-27T15:40:00Z` to `2026-03-26T13:25:00Z`.
+- Checkpoint PnL: `+$5,336.70`; active markets `1,177 / 7,750`
+  (`15.19%`).
 - Path labels are present on all analyzed tracked lane fills.
 - The failure mode is now clearly path-dependent, not just a final-range label:
   `crossed_mid_after_fill` is toxic, while held-side and moderate adverse paths
@@ -47,14 +44,16 @@ Latest checkpoint readout:
   with `-$859.31` cross-mid PnL, and March 16 lost `-$224.84` with `-$820.01`
   cross-mid PnL. March 17 had cross-mid drag too (`-$253.60`) but finished
   `+$1,310.35` because non-cross paths made `+$1,563.95`.
-- Replay-safe logistic toxic-reversal model on a short final-5-day split remains
-  weak: test AUC `0.5454`, log loss `0.8819`. It ranks some risk directionally,
-  but top-risk test buckets still made money, so it is not yet an actionable
-  gate.
-- Late-break feature contrast on `1,463` late-confirm/favourite fills shows why
+- Replay-safe logistic path models on a final-10-day split remain diagnostic,
+  not actionable gates. `toxic_reversal_path` test AUC is `0.5668`, log loss
+  `0.7914`; `crossed_mid_after_fill` test AUC is `0.5901`, log loss `0.7476`.
+  Both rank some path risk directionally, but high-risk test buckets still made
+  money, so removing or hard-throttling the top buckets would delete profitable
+  late breaks.
+- Late-break feature contrast on `1,683` late-confirm/favourite fills shows why
   broad favourite throttles are wrong: toxic late breaks have lower average fill
-  price (`0.7033`) and lower average model probability (`0.8087`) than
-  profitable non-toxic late breaks (`0.7376` and `0.8363`). The highest-price
+  price (`0.7028`) and lower average model probability (`0.8081`) than
+  profitable non-toxic late breaks (`0.7386` and `0.8375`). The highest-price
   and highest-model-probability quartiles are still profitable with lower toxic
   rates. The weak area is lower-confidence/lower-price late breaks plus certain
   prior-range bands, not simply large favourite exposure.
@@ -65,17 +64,16 @@ Latest checkpoint readout:
   a diagnostic signal only.
 - A narrower late-break walk-forward gate search was added with train-side
   quantile thresholds. Candidate rules are admitted in a fold only when the same
-  condition had negative train PnL. On the `6,750`-market checkpoint, the
+  condition had negative train PnL. On the `7,750`-market checkpoint, the
   standard `900/300/300` split still favors `risk_score:q4 &
   prior_market_range_7d:q1`: `2` active OOS folds, `2` helpful, `0` harmful,
   removed `171` fills, removed PnL `-$236.11`, half-throttle improvement
-  `+$118.05`. However the smaller `600/200/200` sensitivity weakens that
-  candidate (`1` helpful, `1` harmful active fold) and instead promotes
-  `side_model_p:q1 & side_edge_vs_fill:q2`: `2` active folds, `2` helpful, `0`
-  harmful, removed `29` fills, removed PnL `-$461.94`, removed toxic rate
-  `55.17%`. Current read: the lower model-probability/mid-edge late-break
-  slice is the sharper candidate; the high-risk/prior-range candidate needs more
-  history before promotion.
+  `+$118.05`. The sharper `side_model_p:q1 & side_edge_vs_fill:q2` candidate
+  has only `1` active fold at this split but removed PnL `-$249.96` from just
+  `29` fills, with removed toxic rate `51.72%` and cross-mid rate `62.07%`.
+  Current read: the lower model-probability/mid-edge late-break slice is still
+  the sharper research lead, but it needs more history and fold coverage before
+  promotion.
 - Portfolio/day half-throttle simulations were added on the `7,750`-market
   checkpoint. These convert candidate fill slices into base vs adjusted PnL and
   max-DD what-ifs, still using train-only thresholds. Results:
@@ -101,18 +99,16 @@ Latest checkpoint readout:
   checkpoint. That means the broad regime label is not enough; we need a sharper
   classifier for "late break that fails back through mid" rather than a blanket
   choppy/mid-wide throttle.
-- See `docs/btc5m_postfill_checkpoint_5750_regime_evolution.md`,
-  `docs/btc5m_postfill_checkpoint_5750_reversal_tail.md`,
-  `docs/btc5m_postfill_checkpoint_5750_toxic_reversal_path_model.md`,
-  `docs/btc5m_postfill_checkpoint_5750_gate_sim.md`, and
-  `docs/btc5m_postfill_checkpoint_5750_late_break_feature_contrast.md` for the
-  current full-pack reports. See
-  `docs/btc5m_postfill_checkpoint_6750_late_break_gate_search.md` and
-  `docs/btc5m_postfill_checkpoint_6750_late_break_gate_search_sens200.md` for
-  the latest candidate-gate searches. See
+- See `docs/btc5m_postfill_checkpoint_7750_regime_evolution.md`,
+  `docs/btc5m_postfill_checkpoint_7750_reversal_tail.md`,
+  `docs/btc5m_postfill_checkpoint_7750_toxic_reversal_path_model.md`,
+  `docs/btc5m_postfill_checkpoint_7750_crossed_mid_after_fill_model.md`,
+  `docs/btc5m_postfill_checkpoint_7750_gate_sim.md`,
+  `docs/btc5m_postfill_checkpoint_7750_late_break_feature_contrast.md`,
+  `docs/btc5m_postfill_checkpoint_7750_late_break_gate_search.md`,
   `docs/btc5m_postfill_checkpoint_7750_late_break_gate_portfolio_sim.md` and
   `docs/btc5m_postfill_checkpoint_7750_late_break_gate_portfolio_sim_risk_prior.md`
-  for portfolio-level what-ifs.
+  for the latest checkpoint reports.
 
 This checkpoint is not yet the final late-regime window. Do not promote a
 post-fill reversal gate until the full-history artifact reaches the final 30d
