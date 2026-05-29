@@ -381,6 +381,7 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=3000)
     parser.add_argument("--learning-rate", type=float, default=0.035)
     parser.add_argument("--l2", type=float, default=0.02)
+    parser.add_argument("--min-fills", type=int, default=500)
     parser.add_argument("--source-label")
     parser.add_argument("--out-md", required=True)
     args = parser.parse_args()
@@ -389,7 +390,7 @@ def main() -> int:
     AWS_PROFILE = args.aws_profile
 
     fills = load_fills(args.markets_jsonl, args.strategy, args.target)
-    if len(fills) < 500:
+    if len(fills) < args.min_fills:
         raise RuntimeError(f"not enough fills with post-fill paths: {len(fills)}")
 
     max_ts = max(fill["ts"] for fill in fills)
