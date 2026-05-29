@@ -174,7 +174,119 @@ impl BonereaperV2GateStats {
     }
 }
 
+/// Features available to the fill-time reversal-risk score. These are the
+/// Phase-1 Binance flow features (recomputed replay-safe at the load decision
+/// from the same spot tape + the same `signed_flow_and_adverse` /
+/// `spot_returns_and_accel` calls the runner uses) plus a handful of base
+/// model/book features. HIGH score = fragile/likely-reversal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReversalScoreFeature {
+    BinanceFlowImbal5s,
+    BinanceFlowImbal15s,
+    BinanceFlowImbal30s,
+    BinanceAdverseVol5s,
+    BinanceAdverseVol15s,
+    BinanceAdverseVol30s,
+    BinanceLargeAdverseCount10s,
+    BinanceTradeIntensity15s,
+    SpotRet5s,
+    SpotRet15s,
+    SpotRet30s,
+    SpotAccel15sVs30s,
+    SpotAccel5sVs15s,
+    SideModelP,
+    RiskScore,
+    Price,
+    SideEdgeVsFill,
+}
+
+/// One standardized logistic term: `coef * (feature - mean) / std`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ReversalScoreTerm {
+    pub feature: ReversalScoreFeature,
+    pub mean: f64,
+    pub std: f64,
+    pub coef: f64,
+}
+
+/// Phase-2-fit logistic coefficients for the reversal-risk score. Loaded from a
+/// JSON file. `score = sigmoid(intercept + sum_i coef_i*(x_i - mean_i)/std_i)`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReversalScoreCoeffs {
+    pub intercept: f64,
+    pub terms: Vec<ReversalScoreTerm>,
+}
+
+impl ReversalScoreCoeffs {
+    /// Replay-safe values for the score features at a single load decision.
+    /// `score` consumes this via `ReversalScoreCoeffs::score`.
+    pub fn score(&self, f: &ReversalScoreFeatureValues) -> f32 {
+        let mut logit = self.intercept;
+        for term in &self.terms {
+            let x = f.get(term.feature);
+            let std = if term.std.abs() < 1e-12 { 1.0 } else { term.std };
+            logit += term.coef * (x - term.mean) / std;
+        }
+        sigmoid(logit)
+    }
+}
+
+/// Concrete feature values at one load decision. Built from the same inputs the
+/// Phase-1 logger uses (`BinanceFlowFeatures::compute` in the runner) so the
+/// score sees the same numbers that get logged.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ReversalScoreFeatureValues {
+    pub flow_imbal_5s: f64,
+    pub flow_imbal_15s: f64,
+    pub flow_imbal_30s: f64,
+    pub adverse_vol_5s: f64,
+    pub adverse_vol_15s: f64,
+    pub adverse_vol_30s: f64,
+    pub large_adverse_count_10s: f64,
+    pub trade_intensity_15s: f64,
+    pub spot_ret_5s: f64,
+    pub spot_ret_15s: f64,
+    pub spot_ret_30s: f64,
+    pub spot_accel_15s_vs_30s: f64,
+    pub spot_accel_5s_vs_15s: f64,
+    pub side_model_p: f64,
+    pub risk_score: f64,
+    pub price: f64,
+    pub side_edge_vs_fill: f64,
+}
+
+impl ReversalScoreFeatureValues {
+    fn get(&self, feature: ReversalScoreFeature) -> f64 {
+        use ReversalScoreFeature::*;
+        match feature {
+            BinanceFlowImbal5s => self.flow_imbal_5s,
+            BinanceFlowImbal15s => self.flow_imbal_15s,
+            BinanceFlowImbal30s => self.flow_imbal_30s,
+            BinanceAdverseVol5s => self.adverse_vol_5s,
+            BinanceAdverseVol15s => self.adverse_vol_15s,
+            BinanceAdverseVol30s => self.adverse_vol_30s,
+            BinanceLargeAdverseCount10s => self.large_adverse_count_10s,
+            BinanceTradeIntensity15s => self.trade_intensity_15s,
+            SpotRet5s => self.spot_ret_5s,
+            SpotRet15s => self.spot_ret_15s,
+            SpotRet30s => self.spot_ret_30s,
+            SpotAccel15sVs30s => self.spot_accel_15s_vs_30s,
+            SpotAccel5sVs15s => self.spot_accel_5s_vs_15s,
+            SideModelP => self.side_model_p,
+            RiskScore => self.risk_score,
+            Price => self.price,
+            SideEdgeVsFill => self.side_edge_vs_fill,
+        }
+    }
+}
+
+/// Linear interpolation, clamped to `[a, b]` order-independent.
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t.clamp(0.0, 1.0)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BonereaperV2Config {
     pub bankroll_usdc: f64,
@@ -195,6 +307,25 @@ pub struct BonereaperV2Config {
     pub participation_repair_inventory_delta_shares: f64,
     pub participation_refresh_secs: f32,
     pub participation_max_orders_per_leg: usize,
+
+    // Hedge-first arb-anchored base. A real BTC-5m operator limits losses
+    // structurally: buy the YES+NO pair early for a combined taker cost below
+    // ~0.98 (locking arb since the engine pays $1 per winning share), stay
+    // balanced, and make the late directional bet a small overlay on top of
+    // that hedged base. Everything here is inert by default
+    // (`hedged_base_max_notional_usdc` = 0 means the lane never opens, and the
+    // overlay cap is effectively infinite).
+    pub hedged_base_enabled: bool,
+    pub hedged_base_max_secs_in: f32,
+    pub hedged_base_max_pair_cost: f32,
+    pub hedged_base_min_minority_leg_frac: f32,
+    pub hedged_base_clip_usdc: f32,
+    pub hedged_base_max_notional_usdc: f32,
+    /// Cap `directional_notional_emitted` to this fraction of
+    /// `hedged_base_notional_emitted`. The huge default makes the directional
+    /// lanes unconstrained; with hedge-first mode on, set ~0.064 to keep the
+    /// late directional bet a ~6% overlay on the hedged base.
+    pub late_directional_overlay_frac: f32,
 
     pub early_phase_end_secs: f32,
     pub mid_phase_end_secs: f32,
@@ -224,6 +355,30 @@ pub struct BonereaperV2Config {
     pub recent_regime_gate_late_confirm: bool,
     pub recent_regime_gate_high_skew: bool,
     pub recent_regime_gate_late_favourite: bool,
+
+    // Phase-3 flow-based reversal-risk score modulators. OFF BY DEFAULT.
+    // `reversal_score_enabled` is the master gate; with it false (or no
+    // `reversal_score_coeffs` supplied) the score path is skipped entirely and
+    // orders are byte-identical to baseline. The score in [0,1] is HIGH for
+    // fragile/likely-reversal loads. Two soft (continuous) modulators:
+    //   a. Convex coverage: effective tail coverage target
+    //      = lerp(cov_min, cov_max, score). Fires convex protection only on
+    //      fragile loads. Inert defaults (NaN) fall back to the base coverage.
+    //   b. Directional sizing: late-lane clip scaled by
+    //      size_mult = lerp(size_floor, size_ceiling, 1 - score). Inert
+    //      defaults (1.0/1.0) leave sizing unchanged.
+    pub reversal_score_enabled: bool,
+    #[serde(skip)]
+    pub reversal_score_coeffs: Option<ReversalScoreCoeffs>,
+    /// Convex-tail coverage at score=0 (stable). NaN => use the base coverage
+    /// (`tail_target_favourite_loss_coverage_frac`) unchanged.
+    pub reversal_score_cov_min: f32,
+    /// Convex-tail coverage at score=1 (fragile). NaN => use the base coverage.
+    pub reversal_score_cov_max: f32,
+    /// Late-lane size multiplier at score=1 (fragile). 1.0 => no change.
+    pub reversal_score_size_floor: f32,
+    /// Late-lane size multiplier at score=0 (stable). 1.0 => no change.
+    pub reversal_score_size_ceiling: f32,
 
     // High-skew load lane with whipsaw guards
     pub high_skew_threshold: f32,
@@ -357,6 +512,13 @@ impl Default for BonereaperV2Config {
             participation_repair_inventory_delta_shares: 5.0,
             participation_refresh_secs: 0.50,
             participation_max_orders_per_leg: 500,
+            hedged_base_enabled: false,
+            hedged_base_max_secs_in: 240.0,
+            hedged_base_max_pair_cost: 0.98,
+            hedged_base_min_minority_leg_frac: 0.20,
+            hedged_base_clip_usdc: 5.0,
+            hedged_base_max_notional_usdc: 0.0,
+            late_directional_overlay_frac: 1e9,
             early_phase_end_secs: 30.0,
             mid_phase_end_secs: 240.0,
             min_composite_direction: 0.10,
@@ -385,6 +547,13 @@ impl Default for BonereaperV2Config {
             recent_regime_gate_late_confirm: true,
             recent_regime_gate_high_skew: true,
             recent_regime_gate_late_favourite: true,
+            // Phase-3 reversal-risk score: inert by default.
+            reversal_score_enabled: false,
+            reversal_score_coeffs: None,
+            reversal_score_cov_min: f32::NAN,
+            reversal_score_cov_max: f32::NAN,
+            reversal_score_size_floor: 1.0,
+            reversal_score_size_ceiling: 1.0,
             // Favourite-loading lane. Keep this stricter than the old probe
             // defaults: the looser settings overtraded early skew and paid
             // taker spread before the market had a durable favourite.
@@ -524,6 +693,7 @@ pub struct BonereaperV2 {
     participation_no_emitted: usize,
     last_participation_yes_ns: i64,
     last_participation_no_ns: i64,
+    hedged_base_notional_emitted: f32,
 }
 
 impl BonereaperV2 {
@@ -561,6 +731,7 @@ impl BonereaperV2 {
             participation_no_emitted: 0,
             last_participation_yes_ns: i64::MIN / 2,
             last_participation_no_ns: i64::MIN / 2,
+            hedged_base_notional_emitted: 0.0,
         }
     }
 
@@ -580,6 +751,114 @@ impl BonereaperV2 {
         self.mark_directional_side(side);
         self.directional_shares_emitted += shares;
         self.directional_notional_emitted += shares * px;
+    }
+
+    /// True when the Phase-3 reversal-risk score machinery is active. With this
+    /// false the score path is skipped and the lanes are byte-identical to
+    /// baseline.
+    fn reversal_score_active(&self) -> bool {
+        self.cfg.reversal_score_enabled && self.cfg.reversal_score_coeffs.is_some()
+    }
+
+    /// Replay-safe reversal-risk score in [0,1] for a candidate load on `side`
+    /// at `px`. Recomputes the Phase-1 Binance flow features from the same spot
+    /// tape and the same `signed_flow_and_adverse` / `spot_returns_and_accel`
+    /// calls the runner logs, so the score sees the same values. Returns `None`
+    /// when the score is inert (disabled, no coeffs, or model output missing).
+    fn reversal_score(
+        &self,
+        ctx: &Ctx,
+        spot: &SpotHistory,
+        ts_ns: i64,
+        side: Side,
+        px: f32,
+    ) -> Option<f32> {
+        if !self.reversal_score_active() {
+            return None;
+        }
+        let coeffs = self.cfg.reversal_score_coeffs.as_ref()?;
+        let model = ctx.model_output?;
+        let side_p = model_side_probability(ctx, side)?;
+        let is_buy_yes = matches!(side, Side::BuyYes);
+        // Mirror BinanceFlowFeatures::compute in the runner exactly.
+        let f5 = spot.signed_flow_and_adverse(ts_ns, 5_000_000_000, is_buy_yes);
+        let f15 = spot.signed_flow_and_adverse(ts_ns, 15_000_000_000, is_buy_yes);
+        let f30 = spot.signed_flow_and_adverse(ts_ns, 30_000_000_000, is_buy_yes);
+        let f10 = spot.signed_flow_and_adverse(ts_ns, 10_000_000_000, is_buy_yes);
+        let accel = spot.spot_returns_and_accel(ts_ns);
+        let values = ReversalScoreFeatureValues {
+            flow_imbal_5s: f5.imbalance,
+            flow_imbal_15s: f15.imbalance,
+            flow_imbal_30s: f30.imbalance,
+            adverse_vol_5s: f5.adverse_volume,
+            adverse_vol_15s: f15.adverse_volume,
+            adverse_vol_30s: f30.adverse_volume,
+            large_adverse_count_10s: f10.large_adverse_count as f64,
+            trade_intensity_15s: f15.intensity,
+            spot_ret_5s: accel.ret_5s,
+            spot_ret_15s: accel.ret_15s,
+            spot_ret_30s: accel.ret_30s,
+            spot_accel_15s_vs_30s: accel.accel_15s_vs_30s,
+            spot_accel_5s_vs_15s: accel.accel_5s_vs_15s,
+            side_model_p: side_p as f64,
+            risk_score: model.risk_score as f64,
+            price: px as f64,
+            side_edge_vs_fill: (side_p - px) as f64,
+        };
+        Some(coeffs.score(&values))
+    }
+
+    /// Convex-coverage modulator: effective base tail coverage given the
+    /// favourite-side reversal score. With the master gate off or inert NaN
+    /// `cov_min`/`cov_max`, returns `base` unchanged.
+    fn reversal_modulated_coverage(
+        &self,
+        ctx: &Ctx,
+        spot: &SpotHistory,
+        ts_ns: i64,
+        favourite_side: Side,
+        favourite_px: f32,
+        base: f32,
+    ) -> f32 {
+        if self.cfg.reversal_score_cov_min.is_nan() || self.cfg.reversal_score_cov_max.is_nan() {
+            return base;
+        }
+        match self.reversal_score(ctx, spot, ts_ns, favourite_side, favourite_px) {
+            Some(score) => lerp(
+                self.cfg.reversal_score_cov_min,
+                self.cfg.reversal_score_cov_max,
+                score,
+            ),
+            None => base,
+        }
+    }
+
+    /// Directional-sizing modulator: `lerp(size_floor, size_ceiling, 1-score)`.
+    /// Sizes UP stable loads (low score), DOWN fragile loads (high score).
+    /// Returns 1.0 (no change) when inert.
+    fn reversal_size_mult(&self, ctx: &Ctx, spot: &SpotHistory, ts_ns: i64, side: Side, px: f32) -> f64 {
+        match self.reversal_score(ctx, spot, ts_ns, side, px) {
+            Some(score) => lerp(
+                self.cfg.reversal_score_size_floor,
+                self.cfg.reversal_score_size_ceiling,
+                1.0 - score,
+            ) as f64,
+            None => 1.0,
+        }
+    }
+
+    /// True when the late directional lanes are allowed to add more exposure.
+    /// With the default `late_directional_overlay_frac` (1e9) this is always
+    /// true and is a no-op. In hedge-first mode it caps cumulative directional
+    /// notional to a small fraction of the hedged base notional, turning the
+    /// late directional bet into an overlay rather than a naked load.
+    fn directional_overlay_allowed(&self) -> bool {
+        if !self.cfg.hedged_base_enabled {
+            return true;
+        }
+        let cap = self.cfg.late_directional_overlay_frac as f64
+            * self.hedged_base_notional_emitted as f64;
+        self.directional_notional_emitted < cap
     }
 
     fn model_support_for_side(
@@ -1272,6 +1551,73 @@ impl Strategy for BonereaperV2 {
             }
         }
 
+        // ---- LANE 0b: Hedge-first arb-anchored base ----
+        // Buy the YES+NO pair early as a taker when the combined cost is below
+        // a locked-arb threshold. The engine pays $1 per winning share, so a
+        // balanced pair bought for < $1 combined is +EV regardless of outcome.
+        // This is the structural loss limiter the late directional lanes ride
+        // on top of. Tagged `br2_participation_*` so it is exempt from the
+        // directional model gate in the runner.
+        if self.cfg.hedged_base_enabled
+            && secs_in <= self.cfg.hedged_base_max_secs_in
+            && (self.hedged_base_notional_emitted as f64)
+                < self.cfg.hedged_base_max_notional_usdc as f64
+        {
+            let yes_px = buy_px(event, Side::BuyYes);
+            let no_px = buy_px(event, Side::BuyNo);
+            let pair_cost = yes_px + no_px;
+            if yes_px > 0.0
+                && no_px > 0.0
+                && pair_cost < self.cfg.hedged_base_max_pair_cost as f64
+            {
+                let remaining = self.cfg.hedged_base_max_notional_usdc as f64
+                    - self.hedged_base_notional_emitted as f64;
+                let clip = (self.cfg.hedged_base_clip_usdc as f64).min(remaining).max(0.0);
+                if clip > 0.0 {
+                    // Arb lock requires EQUAL shares on both legs, not equal
+                    // dollars: the engine pays $1 per winning share, so a pair
+                    // of N YES and N NO shares bought for a combined per-share
+                    // cost of `yes_px + no_px < 1` returns N*$1 on either
+                    // outcome, beating the N*(yes_px + no_px) outlay. Size the
+                    // common share count off the clip against the pricier leg
+                    // so neither leg over-spends the per-add clip.
+                    let pair_shares = shares_capped(clip, yes_px.max(no_px));
+                    if pair_shares > 0.0 {
+                        // Keep both legs balanced across ticks. If the held book
+                        // has drifted so the minority leg is below
+                        // `min_minority_leg_frac` of the majority leg, add only
+                        // the starved leg this tick; otherwise add the full
+                        // arb-locked pair.
+                        let yes_book = ctx.yes_shares * yes_px;
+                        let no_book = ctx.no_shares * no_px;
+                        let frac = self.cfg.hedged_base_min_minority_leg_frac as f64;
+                        let yes_starved = yes_book < frac * no_book;
+                        let no_starved = no_book < frac * yes_book;
+                        let mut emitted_notional = 0.0_f64;
+                        let mut push_leg = |side: Side, px: f64, orders: &mut Vec<OrderRequest>| {
+                            orders.push(OrderRequest {
+                                side,
+                                shares: pair_shares,
+                                max_depth: 1,
+                                limit_price: None,
+                                tag: "br2_participation_hedged_base",
+                            });
+                            emitted_notional += pair_shares * px;
+                        };
+                        if yes_starved && !no_starved {
+                            push_leg(Side::BuyYes, yes_px, &mut orders);
+                        } else if no_starved && !yes_starved {
+                            push_leg(Side::BuyNo, no_px, &mut orders);
+                        } else {
+                            push_leg(Side::BuyYes, yes_px, &mut orders);
+                            push_leg(Side::BuyNo, no_px, &mut orders);
+                        }
+                        self.hedged_base_notional_emitted += emitted_notional as f32;
+                    }
+                }
+            }
+        }
+
         // ---- LANE 1: Early directional probe ----
         if !self.early_emitted
             && secs_in <= self.cfg.early_phase_end_secs
@@ -1348,6 +1694,7 @@ impl Strategy for BonereaperV2 {
             && self.late_fires < self.cfg.late_max_fires
             && composite_dir.abs() >= self.cfg.min_composite_direction
             && (event.ts_ns - self.last_late_ns) as f64 / 1e9 > self.cfg.late_refresh_secs as f64
+            && self.directional_overlay_allowed()
         {
             self.gate_stats.late_confirm_checks += 1;
             let target = if composite_dir > 0.0 {
@@ -1399,7 +1746,9 @@ impl Strategy for BonereaperV2 {
                     self.gate_stats.late_confirm_recent_regime_fail += 1;
                 } else {
                     let clip = self.cfg.max_clip_usdc * self.cfg.late_clip_frac as f64;
-                    let shares = shares_capped(clip, px);
+                    let reversal_size_mult =
+                        self.reversal_size_mult(ctx, spot, event.ts_ns, target, px as f32);
+                    let shares = shares_capped(clip * reversal_size_mult, px);
                     if shares > 0.0 {
                         orders.push(OrderRequest {
                             side: target,
@@ -1463,6 +1812,7 @@ impl Strategy for BonereaperV2 {
             && self.high_skew_clips < self.cfg.high_skew_max_clips
             && (event.ts_ns - self.last_high_skew_ns) as f64 / 1e9
                 > self.cfg.high_skew_refresh_secs as f64
+            && self.directional_overlay_allowed()
         {
             self.gate_stats.high_skew_checks += 1;
             let regime_ok = if self.cfg.high_skew_skip_whipsaw {
@@ -1547,7 +1897,10 @@ impl Strategy for BonereaperV2 {
                                 .model_output
                                 .map(|m| (1.0 - m.risk_score as f64).clamp(0.25, 1.0))
                                 .unwrap_or(1.0);
-                            let shares = shares_capped(clip * risk_size_mult, px);
+                            let reversal_size_mult =
+                                self.reversal_size_mult(ctx, spot, event.ts_ns, side, px as f32);
+                            let shares =
+                                shares_capped(clip * risk_size_mult * reversal_size_mult, px);
                             if shares > 0.0 {
                                 orders.push(OrderRequest {
                                     side,
@@ -1575,7 +1928,7 @@ impl Strategy for BonereaperV2 {
         }
 
         // ---- LANE 5: Late favourite load ----
-        if secs_in >= self.cfg.late_favourite_start_secs {
+        if secs_in >= self.cfg.late_favourite_start_secs && self.directional_overlay_allowed() {
             self.gate_stats.late_favourite_window_checks += 1;
             let refreshed = (event.ts_ns - self.last_late_favourite_ns) as f64 / 1e9
                 > self.cfg.late_favourite_refresh_secs as f64;
@@ -1805,7 +2158,10 @@ impl Strategy for BonereaperV2 {
                                 .map(|m| (1.0 - m.risk_score as f64).clamp(0.25, 1.0))
                                 .unwrap_or(1.0);
 
-                            let desired_notional = desired_notional * risk_size_mult;
+                            let reversal_size_mult =
+                                self.reversal_size_mult(ctx, spot, event.ts_ns, side, px as f32);
+                            let desired_notional =
+                                desired_notional * risk_size_mult * reversal_size_mult;
                             let shares = shares_capped(desired_notional, px);
                             if shares > 0.0 {
                                 orders.push(OrderRequest {
@@ -1927,8 +2283,16 @@ impl Strategy for BonereaperV2 {
                             favourite_win_upside * tail_budget_favourite_upside_frac as f64;
                         let remaining_tail_budget =
                             cap_by_fav_spend.min(cap_by_win_upside) - self.tail_notional_emitted;
-                        let mut coverage_frac = tail_coverage_for_regime(
+                        let effective_base_coverage = self.reversal_modulated_coverage(
+                            ctx,
+                            spot,
+                            event.ts_ns,
+                            favourite_side,
+                            buy_px(event, favourite_side) as f32,
                             self.cfg.tail_target_favourite_loss_coverage_frac,
+                        );
+                        let mut coverage_frac = tail_coverage_for_regime(
+                            effective_base_coverage,
                             avg_favourite_px,
                             seconds_to_close,
                             self.cfg.tail_reversal_coverage_frac,
@@ -2038,6 +2402,145 @@ mod tests {
                 is_buyer_maker: false,
             },
         ])
+    }
+
+    fn reversal_coeffs_intercept_only(intercept: f64) -> ReversalScoreCoeffs {
+        ReversalScoreCoeffs {
+            intercept,
+            terms: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn reversal_score_matches_standardized_logistic() {
+        let coeffs = ReversalScoreCoeffs {
+            intercept: 0.5,
+            terms: vec![
+                ReversalScoreTerm {
+                    feature: ReversalScoreFeature::SpotRet5s,
+                    mean: 1.0,
+                    std: 2.0,
+                    coef: 1.5,
+                },
+                ReversalScoreTerm {
+                    feature: ReversalScoreFeature::RiskScore,
+                    mean: 0.2,
+                    std: 0.1,
+                    coef: -0.8,
+                },
+            ],
+        };
+        let values = ReversalScoreFeatureValues {
+            spot_ret_5s: 3.0,
+            risk_score: 0.5,
+            ..ReversalScoreFeatureValues::default()
+        };
+        // logit = 0.5 + 1.5*(3-1)/2 + (-0.8)*(0.5-0.2)/0.1 = 0.5 + 1.5 - 2.4 = -0.4
+        let expected = 1.0 / (1.0 + (0.4f64).exp());
+        let got = coeffs.score(&values) as f64;
+        assert!((got - expected).abs() < 1e-6, "got={got} expected={expected}");
+    }
+
+    #[test]
+    fn reversal_score_inert_orders_byte_identical_to_baseline() {
+        let close_ns = 300_000_000_000;
+        let event = test_event(250_000_000_000, 0.90, 0.89, 0.91);
+        let spot = test_spot_uptrend(250_000_000_000);
+
+        let base_cfg = || BonereaperV2Config {
+            max_clip_usdc: 50.0,
+            late_clip_frac: 1.0,
+            late_max_fires: 1,
+            late_confirm_min_model_edge: 0.03,
+            late_confirm_min_model_confidence: 0.80,
+            late_confirm_min_model_side_p: 0.80,
+            late_confirm_min_book_skew: 0.05,
+            late_confirm_min_realized_vol_180s_bps: 0.0,
+            high_skew_max_clips: 0,
+            late_favourite_max_clips: 0,
+            tail_clip_frac: 0.10,
+            tail_max_clips: 1,
+            tail_min_ask: 0.01,
+            tail_max_ask: 0.20,
+            tail_min_seconds_to_close: 0.0,
+            tail_target_favourite_loss_coverage_frac: 0.50,
+            tail_budget_favourite_spend_frac: 1.0,
+            tail_budget_favourite_upside_frac: 1.0,
+            ..BonereaperV2Config::default()
+        };
+
+        let mut ctx = test_ctx(close_ns, 0.9, 0.98);
+        ctx.yes_shares = 70.0;
+        let mut baseline = BonereaperV2::new(base_cfg());
+        let baseline_out =
+            baseline.on_event(&event, &ctx, &spot, &TradeHistory::default());
+
+        // Enabled + coeffs present but every knob at its inert sentinel.
+        let mut ctx2 = test_ctx(close_ns, 0.9, 0.98);
+        ctx2.yes_shares = 70.0;
+        let mut inert = BonereaperV2::new(BonereaperV2Config {
+            reversal_score_enabled: true,
+            reversal_score_coeffs: Some(reversal_coeffs_intercept_only(2.0)),
+            reversal_score_cov_min: f32::NAN,
+            reversal_score_cov_max: f32::NAN,
+            reversal_score_size_floor: 1.0,
+            reversal_score_size_ceiling: 1.0,
+            ..base_cfg()
+        });
+        let inert_out = inert.on_event(&event, &ctx2, &spot, &TradeHistory::default());
+
+        assert_eq!(baseline_out.orders.len(), inert_out.orders.len());
+        for (b, i) in baseline_out.orders.iter().zip(inert_out.orders.iter()) {
+            assert_eq!(b.side, i.side);
+            assert_eq!(b.tag, i.tag);
+            assert_eq!(b.max_depth, i.max_depth);
+            assert_eq!(b.shares.to_bits(), i.shares.to_bits(), "shares differ");
+            assert_eq!(
+                b.limit_price.map(f32::to_bits),
+                i.limit_price.map(f32::to_bits),
+                "limit_price differs"
+            );
+        }
+    }
+
+    #[test]
+    fn reversal_score_modulates_coverage_and_size_by_fragility() {
+        let close_ns = 300_000_000_000;
+        let ctx = test_ctx(close_ns, 0.9, 0.98);
+        let spot = test_spot_uptrend(250_000_000_000);
+        let ts = 250_000_000_000;
+        let base_coverage = 0.50f32;
+
+        let cfg = |intercept: f64| BonereaperV2Config {
+            reversal_score_enabled: true,
+            reversal_score_coeffs: Some(reversal_coeffs_intercept_only(intercept)),
+            reversal_score_cov_min: 0.40,
+            reversal_score_cov_max: 1.00,
+            reversal_score_size_floor: 0.25,
+            reversal_score_size_ceiling: 1.00,
+            ..BonereaperV2Config::default()
+        };
+
+        // High score (intercept large +) => sigmoid ~1 => coverage near cov_max,
+        // size near size_floor.
+        let fragile = BonereaperV2::new(cfg(8.0));
+        let frag_cov =
+            fragile.reversal_modulated_coverage(&ctx, &spot, ts, Side::BuyYes, 0.90, base_coverage);
+        let frag_size = fragile.reversal_size_mult(&ctx, &spot, ts, Side::BuyYes, 0.90);
+
+        // Low score (intercept large -) => sigmoid ~0 => coverage near cov_min,
+        // size near size_ceiling.
+        let stable = BonereaperV2::new(cfg(-8.0));
+        let stable_cov =
+            stable.reversal_modulated_coverage(&ctx, &spot, ts, Side::BuyYes, 0.90, base_coverage);
+        let stable_size = stable.reversal_size_mult(&ctx, &spot, ts, Side::BuyYes, 0.90);
+
+        assert!(frag_cov > stable_cov, "frag_cov={frag_cov} stable_cov={stable_cov}");
+        assert!(frag_cov > 0.95, "frag_cov={frag_cov}");
+        assert!(stable_cov < 0.45, "stable_cov={stable_cov}");
+        assert!(frag_size < stable_size, "frag_size={frag_size} stable_size={stable_size}");
+        assert!(frag_size < 0.30, "frag_size={frag_size}");
+        assert!(stable_size > 0.95, "stable_size={stable_size}");
     }
 
     #[test]
@@ -2614,5 +3117,143 @@ mod tests {
         assert!(!tail_seconds_to_close_allowed(9.9, 10.0));
         assert!(tail_seconds_to_close_allowed(10.0, 10.0));
         assert!(tail_seconds_to_close_allowed(0.0, -5.0));
+    }
+
+    // Hedge-first config used by the tests below. Everything else is default.
+    // NOTE: in this engine the NO leg is synthesized as `1 - yes_bid`, so the
+    // taker pair cost is `yes_ask + (1 - yes_bid) = 1 + (yes_ask - yes_bid)`.
+    // That only drops below the 0.98 arb-lock threshold when the YES book is
+    // crossed (`yes_ask < yes_bid`), which is precisely the dislocation a
+    // hedge-first operator wants to lock. The test event below uses such a
+    // crossed book to exercise the lane.
+    fn hedged_first_cfg() -> BonereaperV2Config {
+        BonereaperV2Config {
+            hedged_base_enabled: true,
+            hedged_base_max_secs_in: 240.0,
+            hedged_base_max_pair_cost: 0.98,
+            hedged_base_min_minority_leg_frac: 0.20,
+            hedged_base_clip_usdc: 5.0,
+            hedged_base_max_notional_usdc: 40.0,
+            late_directional_overlay_frac: 0.064,
+            ..BonereaperV2Config::default()
+        }
+    }
+
+    #[test]
+    fn hedged_base_locks_arb_pair_and_is_plus_ev_on_either_outcome() {
+        let close_ns = 300_000_000_000;
+        let mut strat = BonereaperV2::new(hedged_first_cfg());
+        // Crossed book: yes_ask 0.46 < yes_bid 0.49 -> NO leg = 1 - 0.49 = 0.51.
+        // Pair cost = 0.46 + 0.51 = 0.97 < 0.98 -> arb locked.
+        let event = test_event(10_000_000_000, 0.475, 0.49, 0.46);
+        let out = strat.on_event(
+            &event,
+            &test_ctx(close_ns, 0.0, 0.50),
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+        );
+
+        // Both legs emitted as takers (no limit price) under the participation
+        // tag so the runner exempts them from the directional model gate.
+        let yes = out
+            .orders
+            .iter()
+            .find(|o| o.side == Side::BuyYes)
+            .expect("yes leg emitted");
+        let no = out
+            .orders
+            .iter()
+            .find(|o| o.side == Side::BuyNo)
+            .expect("no leg emitted");
+        assert_eq!(yes.tag, "br2_participation_hedged_base");
+        assert_eq!(no.tag, "br2_participation_hedged_base");
+        assert!(yes.limit_price.is_none());
+        assert!(no.limit_price.is_none());
+        assert!(yes.tag.starts_with("br2_participation_"));
+
+        let yes_px = 0.46_f64;
+        let no_px = 1.0 - 0.49_f64;
+        let total_cost = yes.shares * yes_px + no.shares * no_px;
+        // Engine pays $1 per winning share. The pair is +EV regardless of
+        // which side resolves: each leg's $1 payout exceeds the combined cost.
+        let pnl_if_yes = yes.shares * 1.0 - total_cost;
+        let pnl_if_no = no.shares * 1.0 - total_cost;
+        assert!(pnl_if_yes > 0.0, "pnl_if_yes={pnl_if_yes}");
+        assert!(pnl_if_no > 0.0, "pnl_if_no={pnl_if_no}");
+    }
+
+    #[test]
+    fn hedged_base_does_not_open_on_normal_uncrossed_book() {
+        let close_ns = 300_000_000_000;
+        let mut strat = BonereaperV2::new(hedged_first_cfg());
+        // Normal book: pair cost = 0.51 + (1 - 0.49) = 1.02 >= 0.98 -> no arb.
+        let out = strat.on_event(
+            &test_event(10_000_000_000, 0.50, 0.49, 0.51),
+            &test_ctx(close_ns, 0.0, 0.50),
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+        );
+        assert!(
+            out.orders
+                .iter()
+                .all(|o| o.tag != "br2_participation_hedged_base")
+        );
+    }
+
+    #[test]
+    fn hedged_base_disabled_is_byte_identical_to_baseline() {
+        let close_ns = 300_000_000_000;
+        // Same crossed book that would trigger the lane when enabled.
+        let event = test_event(10_000_000_000, 0.475, 0.49, 0.46);
+        let ctx = test_ctx(close_ns, 0.0, 0.50);
+
+        let mut baseline = BonereaperV2::new(BonereaperV2Config::default());
+        let baseline_out = baseline.on_event(
+            &event,
+            &ctx,
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+        );
+
+        // Hedge-first knobs set EXCEPT the enable flag: must be inert.
+        let mut disabled = BonereaperV2::new(BonereaperV2Config {
+            hedged_base_enabled: false,
+            hedged_base_max_notional_usdc: 40.0,
+            hedged_base_clip_usdc: 5.0,
+            late_directional_overlay_frac: 0.064,
+            ..BonereaperV2Config::default()
+        });
+        let disabled_out = disabled.on_event(
+            &event,
+            &ctx,
+            &SpotHistory::default(),
+            &TradeHistory::default(),
+        );
+
+        assert_eq!(baseline_out.orders.len(), disabled_out.orders.len());
+        for (a, b) in baseline_out.orders.iter().zip(disabled_out.orders.iter()) {
+            assert_eq!(a.side, b.side);
+            assert_eq!(a.shares, b.shares);
+            assert_eq!(a.max_depth, b.max_depth);
+            assert_eq!(a.limit_price, b.limit_price);
+            assert_eq!(a.tag, b.tag);
+        }
+        // And specifically: no hedged-base orders exist in either output.
+        assert!(
+            disabled_out
+                .orders
+                .iter()
+                .all(|o| o.tag != "br2_participation_hedged_base")
+        );
+    }
+
+    #[test]
+    fn late_directional_overlay_cap_does_not_constrain_baseline() {
+        // With hedged_base disabled (default), directional_overlay_allowed is
+        // always true even though the default overlay_frac * 0 base = 0 cap
+        // would otherwise block everything. This guards the default-off
+        // invariant for the directional lanes.
+        let strat = BonereaperV2::new(BonereaperV2Config::default());
+        assert!(strat.directional_overlay_allowed());
     }
 }

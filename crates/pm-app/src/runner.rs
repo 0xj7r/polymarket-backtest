@@ -81,6 +81,32 @@ pub struct Fill {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regime_realized_vol_180s_bps: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub binance_flow_imbal_5s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binance_flow_imbal_15s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binance_flow_imbal_30s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binance_adverse_vol_5s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binance_adverse_vol_15s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binance_adverse_vol_30s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binance_large_adverse_count_10s: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binance_trade_intensity_15s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spot_ret_5s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spot_ret_15s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spot_ret_30s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spot_accel_15s_vs_30s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spot_accel_5s_vs_15s: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub post_fill_path: Option<PostFillPath>,
 }
 
@@ -114,6 +140,52 @@ struct FillModelContext {
     regime_reversal_pressure: f32,
     regime_sign_flip_rate: f32,
     regime_realized_vol_180s_bps: f32,
+    flow: BinanceFlowFeatures,
+}
+
+/// Engine-computed Binance order-flow + spot-acceleration reversal features,
+/// matching `scripts/binance_flow_reversal_discovery.py`. Logging only.
+#[derive(Debug, Clone, Copy)]
+struct BinanceFlowFeatures {
+    flow_imbal_5s: f64,
+    flow_imbal_15s: f64,
+    flow_imbal_30s: f64,
+    adverse_vol_5s: f64,
+    adverse_vol_15s: f64,
+    adverse_vol_30s: f64,
+    large_adverse_count_10s: u32,
+    trade_intensity_15s: f64,
+    spot_ret_5s: f64,
+    spot_ret_15s: f64,
+    spot_ret_30s: f64,
+    spot_accel_15s_vs_30s: f64,
+    spot_accel_5s_vs_15s: f64,
+}
+
+impl BinanceFlowFeatures {
+    fn compute(spot: &SpotHistory, ts_ns: i64, side: Side) -> Self {
+        let is_buy_yes = matches!(side, Side::BuyYes);
+        let f5 = spot.signed_flow_and_adverse(ts_ns, 5_000_000_000, is_buy_yes);
+        let f15 = spot.signed_flow_and_adverse(ts_ns, 15_000_000_000, is_buy_yes);
+        let f30 = spot.signed_flow_and_adverse(ts_ns, 30_000_000_000, is_buy_yes);
+        let f10 = spot.signed_flow_and_adverse(ts_ns, 10_000_000_000, is_buy_yes);
+        let accel = spot.spot_returns_and_accel(ts_ns);
+        Self {
+            flow_imbal_5s: f5.imbalance,
+            flow_imbal_15s: f15.imbalance,
+            flow_imbal_30s: f30.imbalance,
+            adverse_vol_5s: f5.adverse_volume,
+            adverse_vol_15s: f15.adverse_volume,
+            adverse_vol_30s: f30.adverse_volume,
+            large_adverse_count_10s: f10.large_adverse_count,
+            trade_intensity_15s: f15.intensity,
+            spot_ret_5s: accel.ret_5s,
+            spot_ret_15s: accel.ret_15s,
+            spot_ret_30s: accel.ret_30s,
+            spot_accel_15s_vs_30s: accel.accel_15s_vs_30s,
+            spot_accel_5s_vs_15s: accel.accel_5s_vs_15s,
+        }
+    }
 }
 
 impl FillModelContext {
@@ -125,6 +197,7 @@ impl FillModelContext {
         seconds_since_open: f32,
         market_close_ns: i64,
         whipsaw: WhipsawRiskSnapshot,
+        spot: &SpotHistory,
     ) -> Self {
         let yes_side = order_adds_yes_exposure(side);
         let side_market_mid = if yes_side {
@@ -156,6 +229,7 @@ impl FillModelContext {
             regime_reversal_pressure: whipsaw.reversal_pressure,
             regime_sign_flip_rate: whipsaw.sign_flip_rate,
             regime_realized_vol_180s_bps: whipsaw.realized_vol_180s_bps,
+            flow: BinanceFlowFeatures::compute(spot, event.ts_ns, side),
         }
     }
 }
@@ -708,6 +782,7 @@ pub fn run_backtest<S: Strategy>(
                 secs_since_open as f32,
                 cfg.market_close_ns,
                 whipsaw_snapshot,
+                spot,
             ));
             match req.limit_price {
                 None => {
@@ -1638,6 +1713,19 @@ fn apply_maker_fill(
         regime_reversal_pressure: model_context.map(|m| m.regime_reversal_pressure),
         regime_sign_flip_rate: model_context.map(|m| m.regime_sign_flip_rate),
         regime_realized_vol_180s_bps: model_context.map(|m| m.regime_realized_vol_180s_bps),
+        binance_flow_imbal_5s: model_context.map(|m| m.flow.flow_imbal_5s),
+        binance_flow_imbal_15s: model_context.map(|m| m.flow.flow_imbal_15s),
+        binance_flow_imbal_30s: model_context.map(|m| m.flow.flow_imbal_30s),
+        binance_adverse_vol_5s: model_context.map(|m| m.flow.adverse_vol_5s),
+        binance_adverse_vol_15s: model_context.map(|m| m.flow.adverse_vol_15s),
+        binance_adverse_vol_30s: model_context.map(|m| m.flow.adverse_vol_30s),
+        binance_large_adverse_count_10s: model_context.map(|m| m.flow.large_adverse_count_10s),
+        binance_trade_intensity_15s: model_context.map(|m| m.flow.trade_intensity_15s),
+        spot_ret_5s: model_context.map(|m| m.flow.spot_ret_5s),
+        spot_ret_15s: model_context.map(|m| m.flow.spot_ret_15s),
+        spot_ret_30s: model_context.map(|m| m.flow.spot_ret_30s),
+        spot_accel_15s_vs_30s: model_context.map(|m| m.flow.spot_accel_15s_vs_30s),
+        spot_accel_5s_vs_15s: model_context.map(|m| m.flow.spot_accel_5s_vs_15s),
         post_fill_path: None,
     });
     true
@@ -1847,6 +1935,19 @@ fn check_resting_fills(
             regime_reversal_pressure: r.model_context.map(|m| m.regime_reversal_pressure),
             regime_sign_flip_rate: r.model_context.map(|m| m.regime_sign_flip_rate),
             regime_realized_vol_180s_bps: r.model_context.map(|m| m.regime_realized_vol_180s_bps),
+            binance_flow_imbal_5s: r.model_context.map(|m| m.flow.flow_imbal_5s),
+            binance_flow_imbal_15s: r.model_context.map(|m| m.flow.flow_imbal_15s),
+            binance_flow_imbal_30s: r.model_context.map(|m| m.flow.flow_imbal_30s),
+            binance_adverse_vol_5s: r.model_context.map(|m| m.flow.adverse_vol_5s),
+            binance_adverse_vol_15s: r.model_context.map(|m| m.flow.adverse_vol_15s),
+            binance_adverse_vol_30s: r.model_context.map(|m| m.flow.adverse_vol_30s),
+            binance_large_adverse_count_10s: r.model_context.map(|m| m.flow.large_adverse_count_10s),
+            binance_trade_intensity_15s: r.model_context.map(|m| m.flow.trade_intensity_15s),
+            spot_ret_5s: r.model_context.map(|m| m.flow.spot_ret_5s),
+            spot_ret_15s: r.model_context.map(|m| m.flow.spot_ret_15s),
+            spot_ret_30s: r.model_context.map(|m| m.flow.spot_ret_30s),
+            spot_accel_15s_vs_30s: r.model_context.map(|m| m.flow.spot_accel_15s_vs_30s),
+            spot_accel_5s_vs_15s: r.model_context.map(|m| m.flow.spot_accel_5s_vs_15s),
             post_fill_path: None,
         });
         let _ = r.submit_ts_ns;
@@ -2145,6 +2246,19 @@ fn apply_taker_order(
         regime_reversal_pressure: model_context.map(|m| m.regime_reversal_pressure),
         regime_sign_flip_rate: model_context.map(|m| m.regime_sign_flip_rate),
         regime_realized_vol_180s_bps: model_context.map(|m| m.regime_realized_vol_180s_bps),
+        binance_flow_imbal_5s: model_context.map(|m| m.flow.flow_imbal_5s),
+        binance_flow_imbal_15s: model_context.map(|m| m.flow.flow_imbal_15s),
+        binance_flow_imbal_30s: model_context.map(|m| m.flow.flow_imbal_30s),
+        binance_adverse_vol_5s: model_context.map(|m| m.flow.adverse_vol_5s),
+        binance_adverse_vol_15s: model_context.map(|m| m.flow.adverse_vol_15s),
+        binance_adverse_vol_30s: model_context.map(|m| m.flow.adverse_vol_30s),
+        binance_large_adverse_count_10s: model_context.map(|m| m.flow.large_adverse_count_10s),
+        binance_trade_intensity_15s: model_context.map(|m| m.flow.trade_intensity_15s),
+        spot_ret_5s: model_context.map(|m| m.flow.spot_ret_5s),
+        spot_ret_15s: model_context.map(|m| m.flow.spot_ret_15s),
+        spot_ret_30s: model_context.map(|m| m.flow.spot_ret_30s),
+        spot_accel_15s_vs_30s: model_context.map(|m| m.flow.spot_accel_15s_vs_30s),
+        spot_accel_5s_vs_15s: model_context.map(|m| m.flow.spot_accel_5s_vs_15s),
         post_fill_path: None,
     });
 }
@@ -2571,6 +2685,7 @@ mod tests {
             1.0,
             301_000_000_000,
             WhipsawRiskSnapshot::default(),
+            &SpotHistory::default(),
         );
 
         let mut cash = 100.0;
@@ -2628,6 +2743,7 @@ mod tests {
             1.0,
             301_000_000_000,
             WhipsawRiskSnapshot::default(),
+            &SpotHistory::default(),
         );
 
         let mut cash = 100.0;

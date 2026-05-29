@@ -11,7 +11,7 @@ pub mod trade;
 
 pub use config::{AppConfig, BacktestConfig, BacktestMode};
 pub use market::{MarketId, MarketInfo, Outcome};
-pub use spot::{SpotHistory, SpotTick};
+pub use spot::{FlowStats, SpotAccelStats, SpotHistory, SpotTick};
 pub use tape::{BookLevel, ReplayEvent, ReplayFlags, TAPE_DEPTH};
 pub use trade::{TradeFlowSignal, TradeHistory, TradeTick, compute_trade_flow};
 

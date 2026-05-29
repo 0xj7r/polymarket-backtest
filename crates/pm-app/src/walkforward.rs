@@ -21,7 +21,7 @@ use pm_strategy::{
     LateConvexTail, NoopStrategy, PairedMmDense, ReactiveDirectional, SpotMomentumFollower,
     UnlawfulRecycler,
     bonereaper::BonereaperLiteConfig,
-    bonereaper_v2::{BonereaperV2Config, BonereaperV2GateStats},
+    bonereaper_v2::{BonereaperV2Config, BonereaperV2GateStats, ReversalScoreCoeffs},
     delta_neutral_mm::DeltaNeutralMmConfig,
     late_big_bet::LateBigBetConfig,
     late_confirmation::LateConfirmationConfig,
@@ -68,6 +68,13 @@ pub struct BonereaperV2Profile {
     pub participation_repair_inventory_delta_shares: Option<f64>,
     pub participation_refresh_secs: Option<f32>,
     pub participation_stop_secs_before_close: Option<f32>,
+    pub hedged_base_enabled: Option<bool>,
+    pub hedged_base_max_secs_in: Option<f32>,
+    pub hedged_base_max_pair_cost: Option<f32>,
+    pub hedged_base_min_minority_leg_frac: Option<f32>,
+    pub hedged_base_clip_usdc: Option<f32>,
+    pub hedged_base_max_notional_usdc: Option<f32>,
+    pub late_directional_overlay_frac: Option<f32>,
     pub min_composite_direction: Option<f32>,
     pub late_clip_frac: Option<f32>,
     pub late_max_fires: Option<usize>,
@@ -135,6 +142,12 @@ pub struct BonereaperV2Profile {
     pub model_btc_whipsaw_risk_weight: Option<f32>,
     pub model_btc_path_inefficiency_risk_weight: Option<f32>,
     pub model_btc_reversal_pressure_risk_weight: Option<f32>,
+    pub reversal_score_enabled: Option<bool>,
+    pub reversal_score_coeffs_path: Option<PathBuf>,
+    pub reversal_score_cov_min: Option<f32>,
+    pub reversal_score_cov_max: Option<f32>,
+    pub reversal_score_size_floor: Option<f32>,
+    pub reversal_score_size_ceiling: Option<f32>,
 }
 
 impl BonereaperV2Profile {
@@ -183,6 +196,22 @@ impl BonereaperV2Profile {
         apply!(
             participation_stop_secs_before_close,
             br2_participation_stop_secs_before_close
+        );
+        apply!(hedged_base_enabled, br2_hedged_base_enabled);
+        apply!(hedged_base_max_secs_in, br2_hedged_base_max_secs_in);
+        apply!(hedged_base_max_pair_cost, br2_hedged_base_max_pair_cost);
+        apply!(
+            hedged_base_min_minority_leg_frac,
+            br2_hedged_base_min_minority_leg_frac
+        );
+        apply!(hedged_base_clip_usdc, br2_hedged_base_clip_usdc);
+        apply!(
+            hedged_base_max_notional_usdc,
+            br2_hedged_base_max_notional_usdc
+        );
+        apply!(
+            late_directional_overlay_frac,
+            br2_late_directional_overlay_frac
         );
         apply!(min_composite_direction, br2_min_composite_direction);
         apply!(late_clip_frac, br2_late_clip_frac);
@@ -374,6 +403,14 @@ impl BonereaperV2Profile {
             model_btc_reversal_pressure_risk_weight,
             model_btc_reversal_pressure_risk_weight
         );
+        apply!(reversal_score_enabled, br2_reversal_score_enabled);
+        apply!(reversal_score_cov_min, br2_reversal_score_cov_min);
+        apply!(reversal_score_cov_max, br2_reversal_score_cov_max);
+        apply!(reversal_score_size_floor, br2_reversal_score_size_floor);
+        apply!(reversal_score_size_ceiling, br2_reversal_score_size_ceiling);
+        if let Some(path) = &self.reversal_score_coeffs_path {
+            cfg.br2_reversal_score_coeffs_path = Some(path.clone());
+        }
     }
 }
 
@@ -483,6 +520,13 @@ pub struct WalkForwardConfig {
     pub br2_participation_repair_inventory_delta_shares: f64,
     pub br2_participation_refresh_secs: f32,
     pub br2_participation_stop_secs_before_close: f32,
+    pub br2_hedged_base_enabled: bool,
+    pub br2_hedged_base_max_secs_in: f32,
+    pub br2_hedged_base_max_pair_cost: f32,
+    pub br2_hedged_base_min_minority_leg_frac: f32,
+    pub br2_hedged_base_clip_usdc: f32,
+    pub br2_hedged_base_max_notional_usdc: f32,
+    pub br2_late_directional_overlay_frac: f32,
     pub br2_min_composite_direction: f32,
     pub br2_early_clip_frac: f32,
     pub br2_mid_clip_frac: f32,
@@ -563,6 +607,15 @@ pub struct WalkForwardConfig {
     pub br2_tail_regime_boost_min_reversal_pressure: f32,
     pub br2_tail_regime_boost_min_realized_vol_180s_bps: f32,
     pub br2_tail_regime_boost_max_path_efficiency: f32,
+    /// Phase-3 reversal-risk score modulators. OFF by default; inert defaults
+    /// keep orders byte-identical to baseline.
+    pub br2_reversal_score_enabled: bool,
+    /// Path to the Phase-2 logistic coefficients JSON. None => score path off.
+    pub br2_reversal_score_coeffs_path: Option<PathBuf>,
+    pub br2_reversal_score_cov_min: f32,
+    pub br2_reversal_score_cov_max: f32,
+    pub br2_reversal_score_size_floor: f32,
+    pub br2_reversal_score_size_ceiling: f32,
     pub enforce_model_gate: bool,
     pub model_gate_min_confidence: f32,
     pub model_gate_max_risk: f32,
@@ -664,6 +717,13 @@ impl Default for WalkForwardConfig {
             br2_participation_repair_inventory_delta_shares: 5.0,
             br2_participation_refresh_secs: 0.50,
             br2_participation_stop_secs_before_close: 20.0,
+            br2_hedged_base_enabled: false,
+            br2_hedged_base_max_secs_in: 240.0,
+            br2_hedged_base_max_pair_cost: 0.98,
+            br2_hedged_base_min_minority_leg_frac: 0.20,
+            br2_hedged_base_clip_usdc: 5.0,
+            br2_hedged_base_max_notional_usdc: 0.0,
+            br2_late_directional_overlay_frac: 1e9,
             br2_min_composite_direction: 0.10,
             br2_early_clip_frac: 0.00,
             br2_mid_clip_frac: 0.00,
@@ -744,6 +804,12 @@ impl Default for WalkForwardConfig {
             br2_tail_regime_boost_min_reversal_pressure: 1.0,
             br2_tail_regime_boost_min_realized_vol_180s_bps: 1.0e9,
             br2_tail_regime_boost_max_path_efficiency: -1.0,
+            br2_reversal_score_enabled: false,
+            br2_reversal_score_coeffs_path: None,
+            br2_reversal_score_cov_min: f32::NAN,
+            br2_reversal_score_cov_max: f32::NAN,
+            br2_reversal_score_size_floor: 1.0,
+            br2_reversal_score_size_ceiling: 1.0,
             enforce_model_gate: true,
             model_gate_min_confidence: 0.68,
             model_gate_max_risk: 0.72,
@@ -902,6 +968,13 @@ pub struct SummaryRunConfig {
     pub br2_participation_repair_inventory_delta_shares: f64,
     pub br2_participation_refresh_secs: f32,
     pub br2_participation_stop_secs_before_close: f32,
+    pub br2_hedged_base_enabled: bool,
+    pub br2_hedged_base_max_secs_in: f32,
+    pub br2_hedged_base_max_pair_cost: f32,
+    pub br2_hedged_base_min_minority_leg_frac: f32,
+    pub br2_hedged_base_clip_usdc: f32,
+    pub br2_hedged_base_max_notional_usdc: f32,
+    pub br2_late_directional_overlay_frac: f32,
     pub br2_min_composite_direction: f32,
     pub br2_early_clip_frac: f32,
     pub br2_mid_clip_frac: f32,
@@ -3414,6 +3487,22 @@ fn run_one_strategy(
             )
         }
         StratId::BonereaperV2 => {
+            let reversal_score_coeffs = match &cfg.br2_reversal_score_coeffs_path {
+                Some(path) => {
+                    let content = std::fs::read_to_string(path).with_context(|| {
+                        format!("failed to read reversal-score coeffs {}", path.display())
+                    })?;
+                    let coeffs: ReversalScoreCoeffs =
+                        serde_json::from_str(&content).with_context(|| {
+                            format!(
+                                "failed to parse reversal-score coeffs {} as JSON",
+                                path.display()
+                            )
+                        })?;
+                    Some(coeffs)
+                }
+                None => None,
+            };
             let mut s = BonereaperV2::new(BonereaperV2Config {
                 bankroll_usdc: bankroll,
                 max_clip_usdc: clip,
@@ -3427,6 +3516,13 @@ fn run_one_strategy(
                     .br2_participation_repair_inventory_delta_shares,
                 participation_refresh_secs: cfg.br2_participation_refresh_secs,
                 participation_stop_secs_before_close: cfg.br2_participation_stop_secs_before_close,
+                hedged_base_enabled: cfg.br2_hedged_base_enabled,
+                hedged_base_max_secs_in: cfg.br2_hedged_base_max_secs_in,
+                hedged_base_max_pair_cost: cfg.br2_hedged_base_max_pair_cost,
+                hedged_base_min_minority_leg_frac: cfg.br2_hedged_base_min_minority_leg_frac,
+                hedged_base_clip_usdc: cfg.br2_hedged_base_clip_usdc,
+                hedged_base_max_notional_usdc: cfg.br2_hedged_base_max_notional_usdc,
+                late_directional_overlay_frac: cfg.br2_late_directional_overlay_frac,
                 min_composite_direction: cfg.br2_min_composite_direction,
                 early_clip_frac: cfg.br2_early_clip_frac,
                 mid_clip_frac: cfg.br2_mid_clip_frac,
@@ -3524,6 +3620,12 @@ fn run_one_strategy(
                     .br2_tail_regime_boost_min_realized_vol_180s_bps,
                 tail_regime_boost_max_path_efficiency: cfg
                     .br2_tail_regime_boost_max_path_efficiency,
+                reversal_score_enabled: cfg.br2_reversal_score_enabled,
+                reversal_score_coeffs,
+                reversal_score_cov_min: cfg.br2_reversal_score_cov_min,
+                reversal_score_cov_max: cfg.br2_reversal_score_cov_max,
+                reversal_score_size_floor: cfg.br2_reversal_score_size_floor,
+                reversal_score_size_ceiling: cfg.br2_reversal_score_size_ceiling,
                 ..BonereaperV2Config::default()
             });
             let report = run_backtest(events, spot, trades, &mut s, runner_cfg)?;
@@ -4236,6 +4338,13 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
             .br2_participation_repair_inventory_delta_shares,
         br2_participation_refresh_secs: cfg.br2_participation_refresh_secs,
         br2_participation_stop_secs_before_close: cfg.br2_participation_stop_secs_before_close,
+        br2_hedged_base_enabled: cfg.br2_hedged_base_enabled,
+        br2_hedged_base_max_secs_in: cfg.br2_hedged_base_max_secs_in,
+        br2_hedged_base_max_pair_cost: cfg.br2_hedged_base_max_pair_cost,
+        br2_hedged_base_min_minority_leg_frac: cfg.br2_hedged_base_min_minority_leg_frac,
+        br2_hedged_base_clip_usdc: cfg.br2_hedged_base_clip_usdc,
+        br2_hedged_base_max_notional_usdc: cfg.br2_hedged_base_max_notional_usdc,
+        br2_late_directional_overlay_frac: cfg.br2_late_directional_overlay_frac,
         br2_min_composite_direction: cfg.br2_min_composite_direction,
         br2_early_clip_frac: cfg.br2_early_clip_frac,
         br2_mid_clip_frac: cfg.br2_mid_clip_frac,
@@ -4526,6 +4635,27 @@ model_btc_whipsaw_risk_weight = 0.31
     }
 
     #[test]
+    fn hedged_first_profile_enables_arb_base_and_overlay_cap() {
+        // The shipped profile must parse and turn the hedge-first lane on while
+        // capping the directional overlay. Resolve the path relative to the
+        // workspace root (CARGO_MANIFEST_DIR points at crates/pm-app).
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let path = manifest
+            .join("../../configs/bonereaper_v2_hedged_first.toml")
+            .canonicalize()
+            .expect("resolve hedged-first profile path");
+
+        let profile = BonereaperV2Profile::load(&path).expect("load hedged-first profile");
+        let mut cfg = WalkForwardConfig::default();
+        profile.apply_to_walkforward_config(&mut cfg);
+
+        assert!(cfg.br2_hedged_base_enabled);
+        assert!((cfg.br2_hedged_base_max_notional_usdc - 40.0).abs() < f32::EPSILON);
+        assert!((cfg.br2_hedged_base_max_pair_cost - 0.98).abs() < f32::EPSILON);
+        assert!((cfg.br2_late_directional_overlay_frac - 0.064).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn replay_event_cache_round_trips_jsonl() {
         let root = unique_tmp_dir("pm-replay-cache-test");
         let path = root.join("events.jsonl");
@@ -4789,6 +4919,19 @@ model_btc_whipsaw_risk_weight = 0.31
             regime_reversal_pressure: Some(0.20),
             regime_sign_flip_rate: Some(0.10),
             regime_realized_vol_180s_bps: Some(25.0),
+            binance_flow_imbal_5s: None,
+            binance_flow_imbal_15s: None,
+            binance_flow_imbal_30s: None,
+            binance_adverse_vol_5s: None,
+            binance_adverse_vol_15s: None,
+            binance_adverse_vol_30s: None,
+            binance_large_adverse_count_10s: None,
+            binance_trade_intensity_15s: None,
+            spot_ret_5s: None,
+            spot_ret_15s: None,
+            spot_ret_30s: None,
+            spot_accel_15s_vs_30s: None,
+            spot_accel_5s_vs_15s: None,
             post_fill_path: None,
         }
     }

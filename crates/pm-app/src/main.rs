@@ -384,6 +384,27 @@ enum Cmd {
         /// Bonereaper v2 seconds before close where participation maker quotes stop.
         #[arg(long, default_value = "20.0")]
         br2_participation_stop_secs_before_close: f32,
+        /// Bonereaper v2 hedge-first arb-anchored base lane toggle.
+        #[arg(long, default_value_t = false)]
+        br2_hedged_base_enabled: bool,
+        /// Bonereaper v2 hedge-first base only fires within this many seconds of window open.
+        #[arg(long, default_value = "240.0")]
+        br2_hedged_base_max_secs_in: f32,
+        /// Bonereaper v2 hedge-first base max combined taker pair cost to lock arb.
+        #[arg(long, default_value = "0.98")]
+        br2_hedged_base_max_pair_cost: f32,
+        /// Bonereaper v2 hedge-first base minimum minority-leg fraction of base book.
+        #[arg(long, default_value = "0.20")]
+        br2_hedged_base_min_minority_leg_frac: f32,
+        /// Bonereaper v2 hedge-first base per-add clip in USDC.
+        #[arg(long, default_value = "5.0")]
+        br2_hedged_base_clip_usdc: f32,
+        /// Bonereaper v2 hedge-first base total budget per market in USDC (0 disables).
+        #[arg(long, default_value = "0.0")]
+        br2_hedged_base_max_notional_usdc: f32,
+        /// Bonereaper v2 cap on directional notional as a fraction of hedged base notional.
+        #[arg(long, default_value = "1000000000.0")]
+        br2_late_directional_overlay_frac: f32,
         /// Bonereaper v2 minimum composite direction for early/mid/late lanes.
         #[arg(long, default_value = "0.10")]
         br2_min_composite_direction: f32,
@@ -624,6 +645,24 @@ enum Cmd {
         /// Bonereaper v2 maximum path efficiency for boosted tail coverage.
         #[arg(long, default_value = "-1.0")]
         br2_tail_regime_boost_max_path_efficiency: f32,
+        /// Enable the Phase-3 reversal-risk score modulators.
+        #[arg(long, default_value_t = false)]
+        br2_reversal_score_enabled: bool,
+        /// Path to the Phase-2 reversal-score logistic coefficients JSON.
+        #[arg(long)]
+        br2_reversal_score_coeffs: Option<PathBuf>,
+        /// Convex-tail coverage at reversal score 0 (NaN => use base coverage).
+        #[arg(long, default_value = "nan")]
+        br2_reversal_score_cov_min: f32,
+        /// Convex-tail coverage at reversal score 1 (NaN => use base coverage).
+        #[arg(long, default_value = "nan")]
+        br2_reversal_score_cov_max: f32,
+        /// Late-lane size multiplier at reversal score 1 (1.0 => no change).
+        #[arg(long, default_value = "1.0")]
+        br2_reversal_score_size_floor: f32,
+        /// Late-lane size multiplier at reversal score 0 (1.0 => no change).
+        #[arg(long, default_value = "1.0")]
+        br2_reversal_score_size_ceiling: f32,
         /// Enable the runner-level model gate after strategy emission.
         #[arg(long, default_value_t = true)]
         enforce_model_gate: bool,
@@ -1105,6 +1144,13 @@ async fn main() -> Result<()> {
             br2_participation_repair_inventory_delta_shares,
             br2_participation_refresh_secs,
             br2_participation_stop_secs_before_close,
+            br2_hedged_base_enabled,
+            br2_hedged_base_max_secs_in,
+            br2_hedged_base_max_pair_cost,
+            br2_hedged_base_min_minority_leg_frac,
+            br2_hedged_base_clip_usdc,
+            br2_hedged_base_max_notional_usdc,
+            br2_late_directional_overlay_frac,
             br2_min_composite_direction,
             br2_early_clip_frac,
             br2_mid_clip_frac,
@@ -1185,6 +1231,12 @@ async fn main() -> Result<()> {
             br2_tail_regime_boost_min_reversal_pressure,
             br2_tail_regime_boost_min_realized_vol_180s_bps,
             br2_tail_regime_boost_max_path_efficiency,
+            br2_reversal_score_enabled,
+            br2_reversal_score_coeffs,
+            br2_reversal_score_cov_min,
+            br2_reversal_score_cov_max,
+            br2_reversal_score_size_floor,
+            br2_reversal_score_size_ceiling,
             enforce_model_gate,
             disable_model_gate,
             model_gate_min_confidence,
@@ -1252,6 +1304,13 @@ async fn main() -> Result<()> {
                 br2_participation_repair_inventory_delta_shares,
                 br2_participation_refresh_secs,
                 br2_participation_stop_secs_before_close,
+                br2_hedged_base_enabled,
+                br2_hedged_base_max_secs_in,
+                br2_hedged_base_max_pair_cost,
+                br2_hedged_base_min_minority_leg_frac,
+                br2_hedged_base_clip_usdc,
+                br2_hedged_base_max_notional_usdc,
+                br2_late_directional_overlay_frac,
                 br2_min_composite_direction,
                 br2_early_clip_frac,
                 br2_mid_clip_frac,
@@ -1332,6 +1391,12 @@ async fn main() -> Result<()> {
                 br2_tail_regime_boost_min_reversal_pressure,
                 br2_tail_regime_boost_min_realized_vol_180s_bps,
                 br2_tail_regime_boost_max_path_efficiency,
+                br2_reversal_score_enabled,
+                br2_reversal_score_coeffs,
+                br2_reversal_score_cov_min,
+                br2_reversal_score_cov_max,
+                br2_reversal_score_size_floor,
+                br2_reversal_score_size_ceiling,
                 enforce_model_gate && !disable_model_gate,
                 model_gate_min_confidence,
                 model_gate_max_risk,
@@ -1941,6 +2006,13 @@ async fn walk_forward(
     br2_participation_repair_inventory_delta_shares: f64,
     br2_participation_refresh_secs: f32,
     br2_participation_stop_secs_before_close: f32,
+    br2_hedged_base_enabled: bool,
+    br2_hedged_base_max_secs_in: f32,
+    br2_hedged_base_max_pair_cost: f32,
+    br2_hedged_base_min_minority_leg_frac: f32,
+    br2_hedged_base_clip_usdc: f32,
+    br2_hedged_base_max_notional_usdc: f32,
+    br2_late_directional_overlay_frac: f32,
     br2_min_composite_direction: f32,
     br2_early_clip_frac: f32,
     br2_mid_clip_frac: f32,
@@ -2021,6 +2093,12 @@ async fn walk_forward(
     br2_tail_regime_boost_min_reversal_pressure: f32,
     br2_tail_regime_boost_min_realized_vol_180s_bps: f32,
     br2_tail_regime_boost_max_path_efficiency: f32,
+    br2_reversal_score_enabled: bool,
+    br2_reversal_score_coeffs: Option<PathBuf>,
+    br2_reversal_score_cov_min: f32,
+    br2_reversal_score_cov_max: f32,
+    br2_reversal_score_size_floor: f32,
+    br2_reversal_score_size_ceiling: f32,
     enforce_model_gate: bool,
     model_gate_min_confidence: f32,
     model_gate_max_risk: f32,
@@ -2157,6 +2235,13 @@ async fn walk_forward(
         br2_participation_repair_inventory_delta_shares,
         br2_participation_refresh_secs,
         br2_participation_stop_secs_before_close,
+        br2_hedged_base_enabled,
+        br2_hedged_base_max_secs_in,
+        br2_hedged_base_max_pair_cost,
+        br2_hedged_base_min_minority_leg_frac,
+        br2_hedged_base_clip_usdc,
+        br2_hedged_base_max_notional_usdc,
+        br2_late_directional_overlay_frac,
         br2_min_composite_direction,
         br2_early_clip_frac,
         br2_mid_clip_frac,
@@ -2237,6 +2322,12 @@ async fn walk_forward(
         br2_tail_regime_boost_min_reversal_pressure,
         br2_tail_regime_boost_min_realized_vol_180s_bps,
         br2_tail_regime_boost_max_path_efficiency,
+        br2_reversal_score_enabled,
+        br2_reversal_score_coeffs_path: br2_reversal_score_coeffs,
+        br2_reversal_score_cov_min,
+        br2_reversal_score_cov_max,
+        br2_reversal_score_size_floor,
+        br2_reversal_score_size_ceiling,
         enforce_model_gate,
         model_gate_min_confidence,
         model_gate_max_risk,
@@ -2295,6 +2386,13 @@ async fn walk_forward(
         "br2_participation_repair_inventory_delta_shares": wf_cfg.br2_participation_repair_inventory_delta_shares,
         "br2_participation_refresh_secs": wf_cfg.br2_participation_refresh_secs,
         "br2_participation_stop_secs_before_close": wf_cfg.br2_participation_stop_secs_before_close,
+        "br2_hedged_base_enabled": wf_cfg.br2_hedged_base_enabled,
+        "br2_hedged_base_max_secs_in": wf_cfg.br2_hedged_base_max_secs_in,
+        "br2_hedged_base_max_pair_cost": wf_cfg.br2_hedged_base_max_pair_cost,
+        "br2_hedged_base_min_minority_leg_frac": wf_cfg.br2_hedged_base_min_minority_leg_frac,
+        "br2_hedged_base_clip_usdc": wf_cfg.br2_hedged_base_clip_usdc,
+        "br2_hedged_base_max_notional_usdc": wf_cfg.br2_hedged_base_max_notional_usdc,
+        "br2_late_directional_overlay_frac": wf_cfg.br2_late_directional_overlay_frac,
         "br2_late_confirm_min_model_edge": wf_cfg.br2_late_confirm_min_model_edge,
         "br2_late_confirm_min_model_confidence": wf_cfg.br2_late_confirm_min_model_confidence,
         "br2_late_confirm_max_model_risk": wf_cfg.br2_late_confirm_max_model_risk,
