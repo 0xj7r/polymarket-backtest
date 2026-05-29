@@ -38,6 +38,26 @@ This checkpoint is not yet the final late-regime window. Do not promote a
 post-fill reversal gate until the full-history artifact reaches the final 30d
 slice and the OOS diagnostics are rerun there.
 
+When the active artifact reaches the final 30d slice or completes, regenerate
+the diagnostic pack with:
+
+```bash
+AWS_PROFILE=visumlabs python3 scripts/run_postfill_diagnostics.py \
+  s3://pm-research-backtest-prod/results/20260529T062901Z-portfolio-grid-5265/clip_0p015_gross_250_expfrac_0p12_lat500ms_cap1k_btc_5m_tail08_lc_range50_exact_profile_postpath_mem128_cf8/markets.jsonl \
+  --aws-profile visumlabs \
+  --recent-days 30 \
+  --last-markets 8633 \
+  --test-days 30 \
+  --out-prefix docs/btc5m_postfill_full
+```
+
+This emits:
+
+- `docs/btc5m_postfill_full_regime_evolution.md`
+- `docs/btc5m_postfill_full_reversal_tail.md`
+- `docs/btc5m_postfill_full_toxic_reversal_path_model.md`
+- `docs/btc5m_postfill_full_crossed_mid_after_fill_model.md`
+
 ## Final Selection
 
 Selected 1K BTC 5m path:
