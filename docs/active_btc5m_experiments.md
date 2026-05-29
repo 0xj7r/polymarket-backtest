@@ -1,6 +1,6 @@
 # Active BTC 5m Experiments
 
-Last updated: 2026-05-29 06:55 UTC.
+Last updated: 2026-05-29 07:20 UTC.
 
 Scope for this lane is BTC 5m only. Multi-market BTC/ETH and 15m/1h expansion is
 paused until the BTC 5m engine has a clean full-history profile.
@@ -20,23 +20,33 @@ Current active rerun for path diagnostics:
 
 Latest checkpoint readout:
 
-- S3 checkpoint analyzed: `2,000 / 23,705` markets.
-- Checkpoint calendar: `2026-02-27T15:40:00Z` to `2026-03-06T14:15:00Z`.
-- Checkpoint PnL: `+$1,147.81`, max drawdown `18.23%`, `957` fills.
-- Path labels are present on all analyzed fills.
-- `crossed_mid_after_fill` is the directly confirmed loss shape:
-  `br2_late_favourite_load` crossed-mid fills lost `-$1,216.94`, while
-  held-side favourite fills made `+$1,194.07`.
-- The 2-day OOS toxic-reversal smoke model is promising but not yet decisive:
-  test AUC `0.6191`; the highest-risk bucket had `68.97%` cross-mid rate and
-  `-$238.27` PnL.
-- A stricter 3,250-market walk-forward gate simulation has two OOS folds. It
-  suggests the first actionable shape is lane-specific, not a global throttle:
-  `br2_late_confirm:q0.95` removed `-$114.68` across `10` high-risk fills,
-  while broad late-favourite throttles removed positive PnL.
-- See `docs/btc5m_postfill_checkpoint_readout.md` for the checkpoint details.
-- See `docs/btc5m_postfill_checkpoint_2000_regime_evolution.md` for the
-  current post-fill evolution report.
+- S3 checkpoint analyzed: `4,250 / 23,705` markets.
+- Checkpoint calendar: `2026-02-27T15:40:00Z` to `2026-03-14T09:45:00Z`.
+- Checkpoint PnL: `+$2,589.16`; active markets `836 / 4,250` (`19.67%`).
+- Path labels are present on all analyzed tracked lane fills.
+- The failure mode is now clearly path-dependent, not just a final-range label:
+  `crossed_mid_after_fill` is toxic, while held-side and moderate adverse paths
+  are strongly profitable.
+- `br2_late_favourite_load`: crossed-mid fills lost `-$2,739.40`; held-side
+  fills made `+$2,858.32`; moderate-adverse fills made `+$1,139.26`.
+- `br2_late_confirm`: crossed-mid fills lost `-$2,543.20`; held-side fills made
+  `+$3,303.96`; moderate-adverse fills made `+$320.94`.
+- `br2_high_skew_load`: crossed-mid fills lost `-$637.31`; held-side fills made
+  `+$630.84`; moderate-adverse fills made `+$247.96`.
+- Final-range `0.78..0.93` remains a useful post-hoc diagnostic bucket:
+  late-favourite fills in that bucket lost `-$2,153.53`, while final range
+  `<0.78` made `+$3,811.93`.
+- Replay-safe logistic toxic-reversal model on a short final-5-day split is
+  weak: test AUC `0.5972`, log loss `0.6736`. It ranks risk directionally, but
+  top-risk test buckets still made money, so it is not yet an actionable gate.
+- The 4,250-market walk-forward gate simulation has only one OOS fold. The best
+  candidate was small (`br2_late_confirm:q0.95`, `+$35.29` full-removal
+  improvement); broad/global throttles removed profitable fills. Treat this as
+  a diagnostic signal only.
+- See `docs/btc5m_postfill_checkpoint_4250_regime_evolution.md`,
+  `docs/btc5m_postfill_checkpoint_4250_reversal_tail.md`,
+  `docs/btc5m_postfill_checkpoint_4250_toxic_reversal_path_model.md`, and
+  `docs/btc5m_postfill_checkpoint_4250_gate_sim.md` for the current reports.
 
 This checkpoint is not yet the final late-regime window. Do not promote a
 post-fill reversal gate until the full-history artifact reaches the final 30d

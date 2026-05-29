@@ -16,6 +16,18 @@ def run(cmd: list[str], env: dict[str, str] | None = None) -> None:
     subprocess.run(cmd, check=True, env=env)
 
 
+def run_optional(cmd: list[str], env: dict[str, str] | None = None) -> bool:
+    print("+ " + " ".join(cmd), flush=True)
+    completed = subprocess.run(cmd, check=False, env=env)
+    if completed.returncode != 0:
+        print(
+            f"warning: optional diagnostic skipped after exit {completed.returncode}: {' '.join(cmd)}",
+            flush=True,
+        )
+        return False
+    return True
+
+
 def maybe_download(source: str, local_path: Path, aws_profile: str | None) -> Path:
     if not source.startswith("s3://"):
         return Path(source)
@@ -111,7 +123,7 @@ def main() -> int:
         ]
     )
     for target in ("toxic_reversal_path", "crossed_mid_after_fill"):
-        run(
+        run_optional(
             [
                 sys.executable,
                 "scripts/postfill_reversal_model.py",
@@ -130,7 +142,7 @@ def main() -> int:
                 str(out_prefix.with_name(out_prefix.name + f"_{target}_model.md")),
             ]
         )
-    run(
+    run_optional(
         [
             sys.executable,
             "scripts/postfill_gate_sim.py",
