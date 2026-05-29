@@ -462,6 +462,15 @@ enum Cmd {
         /// Bonereaper v2 high-skew clip multiplier.
         #[arg(long, default_value = "0.60")]
         br2_high_skew_clip_frac: f32,
+        /// Bonereaper v2 per-lane directional size multiplier (late favourite). 1.0 = no change.
+        #[arg(long, default_value = "1.0")]
+        br2_lane_size_late_favourite: f32,
+        /// Bonereaper v2 per-lane directional size multiplier (late confirm). 1.0 = no change.
+        #[arg(long, default_value = "1.0")]
+        br2_lane_size_late_confirm: f32,
+        /// Bonereaper v2 per-lane directional size multiplier (high skew). 1.0 = no change.
+        #[arg(long, default_value = "1.0")]
+        br2_lane_size_high_skew: f32,
         /// Bonereaper v2 maximum high-skew load clips.
         #[arg(long, default_value = "5")]
         br2_high_skew_max_clips: usize,
@@ -1170,6 +1179,9 @@ async fn main() -> Result<()> {
             br2_recent_regime_gate_high_skew,
             br2_recent_regime_gate_late_favourite,
             br2_high_skew_clip_frac,
+            br2_lane_size_late_favourite,
+            br2_lane_size_late_confirm,
+            br2_lane_size_high_skew,
             br2_high_skew_max_clips,
             br2_high_skew_max_whipsaw_score,
             br2_high_skew_min_realized_vol_180s_bps,
@@ -1330,6 +1342,9 @@ async fn main() -> Result<()> {
                 br2_recent_regime_gate_high_skew,
                 br2_recent_regime_gate_late_favourite,
                 br2_high_skew_clip_frac,
+                br2_lane_size_late_favourite,
+                br2_lane_size_late_confirm,
+                br2_lane_size_high_skew,
                 br2_high_skew_max_clips,
                 br2_high_skew_max_whipsaw_score,
                 br2_high_skew_min_realized_vol_180s_bps,
@@ -2032,6 +2047,9 @@ async fn walk_forward(
     br2_recent_regime_gate_high_skew: bool,
     br2_recent_regime_gate_late_favourite: bool,
     br2_high_skew_clip_frac: f32,
+    br2_lane_size_late_favourite: f32,
+    br2_lane_size_late_confirm: f32,
+    br2_lane_size_high_skew: f32,
     br2_high_skew_max_clips: usize,
     br2_high_skew_max_whipsaw_score: f32,
     br2_high_skew_min_realized_vol_180s_bps: f32,
@@ -2261,6 +2279,9 @@ async fn walk_forward(
         br2_recent_regime_gate_high_skew,
         br2_recent_regime_gate_late_favourite,
         br2_high_skew_clip_frac,
+        br2_lane_size_late_favourite,
+        br2_lane_size_late_confirm,
+        br2_lane_size_high_skew,
         br2_high_skew_max_clips,
         br2_high_skew_max_whipsaw_score,
         br2_high_skew_min_realized_vol_180s_bps,

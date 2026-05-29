@@ -380,6 +380,13 @@ pub struct BonereaperV2Config {
     /// Late-lane size multiplier at score=0 (stable). 1.0 => no change.
     pub reversal_score_size_ceiling: f32,
 
+    /// Per-lane directional size multipliers (1.0 => no change, multiplied
+    /// into each lane's clip). Used for lane-targeted amputation in whippy
+    /// regimes without disturbing the shared late_clip_frac path.
+    pub lane_size_late_favourite: f32,
+    pub lane_size_late_confirm: f32,
+    pub lane_size_high_skew: f32,
+
     // High-skew load lane with whipsaw guards
     pub high_skew_threshold: f32,
     pub high_skew_max_ask: f32,
@@ -554,6 +561,9 @@ impl Default for BonereaperV2Config {
             reversal_score_cov_max: f32::NAN,
             reversal_score_size_floor: 1.0,
             reversal_score_size_ceiling: 1.0,
+            lane_size_late_favourite: 1.0,
+            lane_size_late_confirm: 1.0,
+            lane_size_high_skew: 1.0,
             // Favourite-loading lane. Keep this stricter than the old probe
             // defaults: the looser settings overtraded early skew and paid
             // taker spread before the market had a durable favourite.
@@ -1745,7 +1755,9 @@ impl Strategy for BonereaperV2 {
                 {
                     self.gate_stats.late_confirm_recent_regime_fail += 1;
                 } else {
-                    let clip = self.cfg.max_clip_usdc * self.cfg.late_clip_frac as f64;
+                    let clip = self.cfg.max_clip_usdc
+                        * self.cfg.late_clip_frac as f64
+                        * self.cfg.lane_size_late_confirm as f64;
                     let reversal_size_mult =
                         self.reversal_size_mult(ctx, spot, event.ts_ns, target, px as f32);
                     let shares = shares_capped(clip * reversal_size_mult, px);
@@ -1891,7 +1903,9 @@ impl Strategy for BonereaperV2 {
                         {
                             self.gate_stats.high_skew_recent_regime_fail += 1;
                         } else {
-                            let clip = self.cfg.max_clip_usdc * self.cfg.high_skew_clip_frac as f64;
+                            let clip = self.cfg.max_clip_usdc
+                                * self.cfg.high_skew_clip_frac as f64
+                                * self.cfg.lane_size_high_skew as f64;
                             // Dynamic risk sizing (same as late favourite lane)
                             let risk_size_mult = ctx
                                 .model_output
@@ -2141,7 +2155,9 @@ impl Strategy for BonereaperV2 {
                             if fragile_taper < 1.0 {
                                 levels = levels.min(1);
                             }
-                            let clip = self.cfg.max_clip_usdc * clip_frac as f64;
+                            let clip = self.cfg.max_clip_usdc
+                                * clip_frac as f64
+                                * self.cfg.lane_size_late_favourite as f64;
                             let range_size_taper = (1.0 - range_throttle as f64).clamp(0.0, 1.0);
                             let desired_notional = clip
                                 * levels as f64
@@ -2657,6 +2673,45 @@ mod tests {
         assert_eq!(late_favourite_high_cert_max_levels(0.95, 5), 3);
         assert_eq!(late_favourite_high_cert_max_levels(0.97, 5), 2);
         assert_eq!(late_favourite_high_cert_max_levels(0.99, 5), 1);
+    }
+
+    #[test]
+    fn lane_size_multiplier_scales_late_favourite_clip() {
+        let close_ns = 300_000_000_000;
+        let fire = |mult: f32| {
+            let mut strat = BonereaperV2::new(BonereaperV2Config {
+                max_clip_usdc: 20.0,
+                late_max_fires: 0,
+                high_skew_max_clips: 0,
+                late_favourite_start_secs: 180.0,
+                late_favourite_max_clips: 12,
+                late_favourite_min_ask: 0.70,
+                late_favourite_max_ask: 0.97,
+                late_favourite_min_model_edge: 0.0,
+                late_favourite_high_cert_min_model_edge: 0.0,
+                lane_size_late_favourite: mult,
+                ..BonereaperV2Config::default()
+            });
+            let out = strat.on_event(
+                &test_event(240_000_000_000, 0.92, 0.91, 0.93),
+                &test_ctx(close_ns, 0.9, 0.94),
+                &test_spot_uptrend(250_000_000_000),
+                &TradeHistory::default(),
+            );
+            out.orders
+                .iter()
+                .filter(|o| o.tag == "br2_late_favourite_load")
+                .map(|o| o.shares)
+                .sum::<f64>()
+        };
+        let full = fire(1.0);
+        let cut = fire(0.2);
+        assert!(full > 0.0, "baseline lane should fire");
+        assert!(cut > 0.0, "cut lane should still fire (size, not gate)");
+        assert!(
+            (cut - full * 0.2).abs() < full * 0.05,
+            "0.2x multiplier should cut shares to ~20%: full={full} cut={cut}"
+        );
     }
 
     #[test]
