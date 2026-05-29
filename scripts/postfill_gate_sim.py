@@ -56,6 +56,111 @@ def add_candidate(
     row["removed_cost"] += sum(float(fill["notional"]) for fill in removed)
 
 
+def add_hard_candidate(
+    row: dict[str, float],
+    test: list[dict[str, Any]],
+    predicate: Any,
+) -> None:
+    removed = [fill for fill in test if predicate(fill)]
+    kept = [fill for fill in test if not predicate(fill)]
+    removed_pnl = sum(float(fill["pnl"]) for fill in removed)
+    kept_pnl = sum(float(fill["pnl"]) for fill in kept)
+    base_pnl = removed_pnl + kept_pnl
+    row["folds"] += 1
+    row["base_pnl"] += base_pnl
+    row["removed_pnl"] += removed_pnl
+    row["kept_pnl"] += kept_pnl
+    row["removed_fills"] += len(removed)
+    row["tested_fills"] += len(test)
+    row["removed_target"] += sum(1 for fill in removed if fill["target"])
+    row["removed_crossed_mid"] += sum(1 for fill in removed if fill["post_crossed_mid"])
+    row["removed_cost"] += sum(float(fill["notional"]) for fill in removed)
+
+
+def f(fill: dict[str, Any], key: str) -> float:
+    return float(fill.get(key) or 0.0)
+
+
+def is_late_load(fill: dict[str, Any]) -> bool:
+    return str(fill.get("tag")) in {"br2_late_confirm", "br2_late_favourite_load"}
+
+
+def is_loading_lane(fill: dict[str, Any]) -> bool:
+    return str(fill.get("tag")) in {
+        "br2_high_skew_load",
+        "br2_late_confirm",
+        "br2_late_favourite_load",
+    }
+
+
+def expanded_not_decisive(fill: dict[str, Any]) -> bool:
+    observed_range = f(fill, "market_yes_range_so_far")
+    sign_flip = f(fill, "regime_sign_flip_rate")
+    path_eff = f(fill, "regime_path_efficiency")
+    return 0.40 <= observed_range < 0.65 and (sign_flip >= 0.40 or path_eff <= 0.15)
+
+
+def hard_gate_specs() -> list[tuple[str, Any]]:
+    return [
+        (
+            "hard:late_loads:expanded_not_decisive",
+            lambda fill: is_late_load(fill) and expanded_not_decisive(fill),
+        ),
+        (
+            "hard:late_confirm:expanded_not_decisive",
+            lambda fill: fill.get("tag") == "br2_late_confirm" and expanded_not_decisive(fill),
+        ),
+        (
+            "hard:late_fav:expanded_not_decisive",
+            lambda fill: fill.get("tag") == "br2_late_favourite_load" and expanded_not_decisive(fill),
+        ),
+        (
+            "hard:late_loads:signflip40_eff20",
+            lambda fill: is_late_load(fill)
+            and f(fill, "regime_sign_flip_rate") >= 0.40
+            and f(fill, "regime_path_efficiency") <= 0.20,
+        ),
+        (
+            "hard:late_loads:obs40_65_reversal34",
+            lambda fill: is_late_load(fill)
+            and 0.40 <= f(fill, "market_yes_range_so_far") < 0.65
+            and f(fill, "regime_reversal_pressure") >= 0.34,
+        ),
+        (
+            "hard:late_loads:obs50_65_low_eff",
+            lambda fill: is_late_load(fill)
+            and 0.50 <= f(fill, "market_yes_range_so_far") < 0.65
+            and f(fill, "regime_path_efficiency") <= 0.20,
+        ),
+        (
+            "hard:loading_lanes:obs_ge50_signflip35",
+            lambda fill: is_loading_lane(fill)
+            and f(fill, "market_yes_range_so_far") >= 0.50
+            and f(fill, "regime_sign_flip_rate") >= 0.35,
+        ),
+        (
+            "hard:late_fav:price75_90_obs40_65_signflip35",
+            lambda fill: fill.get("tag") == "br2_late_favourite_load"
+            and 0.75 <= f(fill, "price") <= 0.90
+            and 0.40 <= f(fill, "market_yes_range_so_far") < 0.65
+            and f(fill, "regime_sign_flip_rate") >= 0.35,
+        ),
+        (
+            "hard:late_confirm:edge_le08_reversal",
+            lambda fill: fill.get("tag") == "br2_late_confirm"
+            and f(fill, "side_edge_vs_fill") <= 0.08
+            and f(fill, "regime_reversal_pressure") >= 0.30,
+        ),
+        (
+            "hard:late_fav:price_ge78_edge_le10_choppy",
+            lambda fill: fill.get("tag") == "br2_late_favourite_load"
+            and f(fill, "price") >= 0.78
+            and f(fill, "side_edge_vs_fill") <= 0.10
+            and (f(fill, "regime_sign_flip_rate") >= 0.35 or f(fill, "regime_path_efficiency") <= 0.20),
+        ),
+    ]
+
+
 def train_predict(
     train: list[dict[str, Any]],
     test: list[dict[str, Any]],
@@ -125,6 +230,8 @@ def main() -> int:
         )
 
     candidates: dict[str, dict[str, float]] = defaultdict(acc)
+    hard_candidates: dict[str, dict[str, float]] = defaultdict(acc)
+    hard_specs = hard_gate_specs()
     quality = acc()
     quantiles = [0.70, 0.80, 0.90, 0.95]
     fold_count = 0
@@ -180,6 +287,8 @@ def main() -> int:
                     continue
                 threshold = float(np.quantile(train_lane_probs, quantile))
                 add_candidate(candidates[f"{lane}:q{quantile:.2f}:lane_threshold"], test_pairs, threshold)
+        for name, predicate in hard_specs:
+            add_hard_candidate(hard_candidates[name], test, predicate)
         start += args.step_fills
 
     lines = [
@@ -216,6 +325,32 @@ def main() -> int:
         key=lambda item: -(-item[1]["removed_pnl"]),
     )
     for name, row in ranked:
+        removed_fills = int(row["removed_fills"])
+        if removed_fills == 0:
+            continue
+        full_improvement = -row["removed_pnl"]
+        half_improvement = -row["removed_pnl"] * 0.5
+        lines.append(
+            f"| {name} | {int(row['folds'])} | {int(row['tested_fills'])} | {removed_fills} | "
+            f"{money(row['removed_cost'])} | {money(row['removed_pnl'])} | {money(row['kept_pnl'])} | "
+            f"{money(full_improvement)} | {money(half_improvement)} | "
+            f"{pct(row['removed_target'] / removed_fills)} | "
+            f"{pct(row['removed_crossed_mid'] / removed_fills)} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Replay-Safe Hard-Regime Gate Diagnostics",
+            "",
+            "These rules use only fill-time features. They are not automatically fitted per fold, so treat them as diagnostics for candidate regime throttles rather than validated live gates.",
+            "",
+            "| Candidate | Folds | Tested Fills | Removed Fills | Removed Cost | Removed PnL | Kept PnL | Full-Removal Improvement | Half-Throttle Improvement | Removed Target Rate | Removed Cross-Mid Rate |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    hard_ranked = sorted(hard_candidates.items(), key=lambda item: item[1]["removed_pnl"])
+    for name, row in hard_ranked:
         removed_fills = int(row["removed_fills"])
         if removed_fills == 0:
             continue

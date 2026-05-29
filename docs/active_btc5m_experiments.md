@@ -50,6 +50,12 @@ Latest checkpoint readout:
   candidate was small (`br2_late_confirm:q0.95`, `+$35.29` full-removal
   improvement); broad/global throttles removed profitable fills. Treat this as
   a diagnostic signal only.
+- Replay-safe hard-regime throttles were also tested in the same OOS fold
+  (`expanded_not_decisive`, sign-flip/path-efficiency, observed-range/reversal,
+  high-price choppy favourite variants). They all removed positive PnL in this
+  checkpoint. That means the broad regime label is not enough; we need a sharper
+  classifier for "late break that fails back through mid" rather than a blanket
+  choppy/mid-wide throttle.
 - See `docs/btc5m_postfill_checkpoint_4500_regime_evolution.md`,
   `docs/btc5m_postfill_checkpoint_4500_reversal_tail.md`,
   `docs/btc5m_postfill_checkpoint_4500_toxic_reversal_path_model.md`, and

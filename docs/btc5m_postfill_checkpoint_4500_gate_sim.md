@@ -1,6 +1,6 @@
 # BTC5m Post-Fill Gate Simulation
 
-Source: `s3://pm-research-backtest-prod/results/20260529T062901Z-portfolio-grid-5265/clip_0p015_gross_250_expfrac_0p12_lat500ms_cap1k_btc_5m_tail08_lc_range50_exact_profile_postpath_mem128_cf8/markets.jsonl`
+Source: `/tmp/btc5m_postfill_diagnostics_markets.jsonl`
 Target: `toxic_reversal_path`
 Fills: `1640`
 Min train fills: `1000`
@@ -37,6 +37,23 @@ Improvement assumes full removal of high-risk fills. `Half-Throttle Improvement`
 | br2_late_confirm:q0.70:lane_threshold | 1 | 176 | 57 | $2,772.76 | $339.32 | $168.63 | $-339.32 | $-169.66 | 29.82% | 56.14% |
 | all_lanes:q0.80:global_threshold | 1 | 500 | 100 | $4,106.92 | $485.83 | $1,168.86 | $-485.83 | $-242.91 | 24.00% | 44.00% |
 | all_lanes:q0.70:global_threshold | 1 | 500 | 141 | $5,505.97 | $526.65 | $1,128.04 | $-526.65 | $-263.32 | 24.82% | 50.35% |
+
+## Replay-Safe Hard-Regime Gate Diagnostics
+
+These rules use only fill-time features. They are not automatically fitted per fold, so treat them as diagnostics for candidate regime throttles rather than validated live gates.
+
+| Candidate | Folds | Tested Fills | Removed Fills | Removed Cost | Removed PnL | Kept PnL | Full-Removal Improvement | Half-Throttle Improvement | Removed Target Rate | Removed Cross-Mid Rate |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| hard:late_fav:price_ge78_edge_le10_choppy | 1 | 500 | 31 | $1,781.89 | $91.11 | $1,563.58 | $-91.11 | $-45.56 | 9.68% | 25.81% |
+| hard:late_confirm:edge_le08_reversal | 1 | 500 | 73 | $3,354.13 | $170.33 | $1,484.36 | $-170.33 | $-85.16 | 19.18% | 35.62% |
+| hard:loading_lanes:obs_ge50_signflip35 | 1 | 500 | 100 | $2,962.73 | $284.88 | $1,369.81 | $-284.88 | $-142.44 | 17.00% | 40.00% |
+| hard:late_fav:price75_90_obs40_65_signflip35 | 1 | 500 | 78 | $4,263.39 | $288.74 | $1,365.95 | $-288.74 | $-144.37 | 16.67% | 33.33% |
+| hard:late_loads:obs50_65_low_eff | 1 | 500 | 48 | $1,972.91 | $340.94 | $1,313.75 | $-340.94 | $-170.47 | 12.50% | 27.08% |
+| hard:late_fav:expanded_not_decisive | 1 | 500 | 125 | $5,480.90 | $377.97 | $1,276.72 | $-377.97 | $-188.98 | 17.60% | 38.40% |
+| hard:late_confirm:expanded_not_decisive | 1 | 500 | 108 | $5,122.66 | $467.38 | $1,187.31 | $-467.38 | $-233.69 | 19.44% | 42.59% |
+| hard:late_loads:obs40_65_reversal34 | 1 | 500 | 91 | $4,406.64 | $630.90 | $1,023.79 | $-630.90 | $-315.45 | 15.38% | 27.47% |
+| hard:late_loads:signflip40_eff20 | 1 | 500 | 189 | $8,389.45 | $729.57 | $925.12 | $-729.57 | $-364.79 | 18.52% | 39.15% |
+| hard:late_loads:expanded_not_decisive | 1 | 500 | 233 | $10,603.56 | $845.35 | $809.34 | $-845.35 | $-422.68 | 18.45% | 40.34% |
 
 ## Folds
 
