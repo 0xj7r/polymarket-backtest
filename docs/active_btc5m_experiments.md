@@ -30,6 +30,10 @@ Latest checkpoint readout:
 - The 2-day OOS toxic-reversal smoke model is promising but not yet decisive:
   test AUC `0.6191`; the highest-risk bucket had `68.97%` cross-mid rate and
   `-$238.27` PnL.
+- A stricter 3,250-market walk-forward gate simulation has two OOS folds. It
+  suggests the first actionable shape is lane-specific, not a global throttle:
+  `br2_late_confirm:q0.95` removed `-$114.68` across `10` high-risk fills,
+  while broad late-favourite throttles removed positive PnL.
 - See `docs/btc5m_postfill_checkpoint_readout.md` for the checkpoint details.
 - See `docs/btc5m_postfill_checkpoint_2000_regime_evolution.md` for the
   current post-fill evolution report.
@@ -57,6 +61,7 @@ This emits:
 - `docs/btc5m_postfill_full_reversal_tail.md`
 - `docs/btc5m_postfill_full_toxic_reversal_path_model.md`
 - `docs/btc5m_postfill_full_crossed_mid_after_fill_model.md`
+- `docs/btc5m_postfill_full_gate_sim.md`
 
 ## Final Selection
 

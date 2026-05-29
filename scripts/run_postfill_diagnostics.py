@@ -65,6 +65,10 @@ def main() -> int:
     parser.add_argument("--recent-days", type=int, default=30)
     parser.add_argument("--last-markets", type=int, default=8633)
     parser.add_argument("--test-days", type=int, default=30)
+    parser.add_argument("--gate-min-train-fills", type=int, default=1000)
+    parser.add_argument("--gate-test-fills", type=int, default=500)
+    parser.add_argument("--gate-step-fills", type=int, default=500)
+    parser.add_argument("--gate-epochs", type=int, default=1200)
     parser.add_argument("--out-prefix", default="docs/btc5m_postfill_full")
     parser.add_argument("--local-cache", default="/tmp/btc5m_postfill_diagnostics_markets.jsonl")
     parser.add_argument("--min-fills", type=int, default=500)
@@ -126,6 +130,29 @@ def main() -> int:
                 str(out_prefix.with_name(out_prefix.name + f"_{target}_model.md")),
             ]
         )
+    run(
+        [
+            sys.executable,
+            "scripts/postfill_gate_sim.py",
+            str(local_markets),
+            "--strategy",
+            args.strategy,
+            "--target",
+            "toxic_reversal_path",
+            "--min-train-fills",
+            str(args.gate_min_train_fills),
+            "--test-fills",
+            str(args.gate_test_fills),
+            "--step-fills",
+            str(args.gate_step_fills),
+            "--epochs",
+            str(args.gate_epochs),
+            "--source-label",
+            source_label,
+            "--out-md",
+            str(out_prefix.with_name(out_prefix.name + "_gate_sim.md")),
+        ]
+    )
     return 0
 
 
