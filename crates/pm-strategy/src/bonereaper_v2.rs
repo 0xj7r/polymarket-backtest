@@ -387,6 +387,35 @@ pub struct BonereaperV2Config {
     pub lane_size_late_confirm: f32,
     pub lane_size_high_skew: f32,
 
+    /// Regime-conditional lane gate. EX-ANTE and INERT by default. When enabled,
+    /// a trailing whippy-regime estimate (mean YES-mid range over the last N
+    /// completed BTC 5m markets via `ctx.prior_market_range_{1,3,7}d`, optionally
+    /// blended with the live ex-ante whipsaw score) scales the directional lanes
+    /// (late_favourite + late_confirm) toward `regime_gate_lane_floor` once the
+    /// regime score exceeds `regime_gate_threshold`. `high_skew` is left at 1.0.
+    /// Below the threshold all lanes run at full size (full br2). All inputs are
+    /// available at the load decision instant: no post-fill / full-market lookahead.
+    pub regime_gate_enabled: bool,
+    /// Which trailing window drives the regime score: 1 => prior_market_range_1d,
+    /// 3 => 3d, 7 => 7d. Any other value falls back to 3d.
+    pub regime_gate_window: u8,
+    /// Trailing-range threshold. When the (optionally whipsaw-blended) trailing
+    /// range estimate exceeds this, the directional lanes are amputated.
+    pub regime_gate_threshold: f32,
+    /// Soft ramp width below the threshold. The lane multiplier interpolates
+    /// linearly from 1.0 at `threshold - soft_band` down to the floor at
+    /// `threshold`. 0.0 => hard step at the threshold.
+    pub regime_gate_soft_band: f32,
+    /// Lane multiplier applied to the directional lanes when fully whippy.
+    /// 0.0 => full amputation (config H0).
+    pub regime_gate_lane_floor: f32,
+    /// Optional blend weight in [0,1] for the live ex-ante whipsaw score. The
+    /// regime score becomes
+    /// `(1-w) * trailing_range + w * whipsaw_score_as_range`, where the whipsaw
+    /// score (0..1) is rescaled onto the trailing-range axis by `regime_gate_threshold`.
+    /// 0.0 => trailing-range only (default).
+    pub regime_gate_whipsaw_weight: f32,
+
     // High-skew load lane with whipsaw guards
     pub high_skew_threshold: f32,
     pub high_skew_max_ask: f32,
@@ -564,6 +593,13 @@ impl Default for BonereaperV2Config {
             lane_size_late_favourite: 1.0,
             lane_size_late_confirm: 1.0,
             lane_size_high_skew: 1.0,
+            // Regime-conditional gate: inert by default (disabled => baseline).
+            regime_gate_enabled: false,
+            regime_gate_window: 3,
+            regime_gate_threshold: 0.50,
+            regime_gate_soft_band: 0.0,
+            regime_gate_lane_floor: 0.0,
+            regime_gate_whipsaw_weight: 0.0,
             // Favourite-loading lane. Keep this stricter than the old probe
             // defaults: the looser settings overtraded early skew and paid
             // taker spread before the market had a durable favourite.
@@ -855,6 +891,44 @@ impl BonereaperV2 {
             ) as f64,
             None => 1.0,
         }
+    }
+
+    /// Regime-conditional directional-lane multiplier. Returns 1.0 when the gate
+    /// is disabled (byte-identical to baseline) or when the ex-ante regime
+    /// estimate is below threshold. In a whippy regime it ramps down toward
+    /// `regime_gate_lane_floor`. All inputs are ex-ante: the trailing
+    /// `prior_market_range_*` aggregates only already-closed markets, and
+    /// `whipsaw_score` is computed from the price path up to the decision instant.
+    fn regime_gate_lane_mult(&self, ctx: &Ctx, whipsaw_score: f32) -> f64 {
+        if !self.cfg.regime_gate_enabled {
+            return 1.0;
+        }
+        let trailing = match self.cfg.regime_gate_window {
+            1 => ctx.prior_market_range_1d,
+            7 => ctx.prior_market_range_7d,
+            _ => ctx.prior_market_range_3d,
+        };
+        // Warmup: no prior-market history yet => stay at full size.
+        if !(trailing > 0.0) {
+            return 1.0;
+        }
+        let threshold = self.cfg.regime_gate_threshold.max(1e-6);
+        let w = self.cfg.regime_gate_whipsaw_weight.clamp(0.0, 1.0);
+        // Rescale the live whipsaw score (0..1) onto the trailing-range axis so
+        // the two ex-ante signals are comparable, then blend.
+        let whipsaw_as_range = whipsaw_score.clamp(0.0, 1.0) * threshold;
+        let score = (1.0 - w) * trailing + w * whipsaw_as_range;
+        let floor = self.cfg.regime_gate_lane_floor.clamp(0.0, 1.0);
+        let band = self.cfg.regime_gate_soft_band.max(0.0);
+        if score >= threshold {
+            return floor as f64;
+        }
+        if band <= 0.0 || score <= threshold - band {
+            return 1.0;
+        }
+        // Linear ramp from 1.0 at (threshold - band) down to floor at threshold.
+        let frac = (score - (threshold - band)) / band;
+        (1.0 - frac as f64 * (1.0 - floor as f64)).clamp(floor as f64, 1.0)
     }
 
     /// True when the late directional lanes are allowed to add more exposure.
@@ -1757,7 +1831,8 @@ impl Strategy for BonereaperV2 {
                 } else {
                     let clip = self.cfg.max_clip_usdc
                         * self.cfg.late_clip_frac as f64
-                        * self.cfg.lane_size_late_confirm as f64;
+                        * self.cfg.lane_size_late_confirm as f64
+                        * self.regime_gate_lane_mult(ctx, whipsaw.score);
                     let reversal_size_mult =
                         self.reversal_size_mult(ctx, spot, event.ts_ns, target, px as f32);
                     let shares = shares_capped(clip * reversal_size_mult, px);
@@ -2157,7 +2232,8 @@ impl Strategy for BonereaperV2 {
                             }
                             let clip = self.cfg.max_clip_usdc
                                 * clip_frac as f64
-                                * self.cfg.lane_size_late_favourite as f64;
+                                * self.cfg.lane_size_late_favourite as f64
+                                * self.regime_gate_lane_mult(ctx, whipsaw.score);
                             let range_size_taper = (1.0 - range_throttle as f64).clamp(0.0, 1.0);
                             let desired_notional = clip
                                 * levels as f64
@@ -3300,6 +3376,94 @@ mod tests {
                 .iter()
                 .all(|o| o.tag != "br2_participation_hedged_base")
         );
+    }
+
+    #[test]
+    fn regime_gate_disabled_is_byte_identical_to_baseline() {
+        let close_ns = 300_000_000_000;
+        // Drive across the late window with a strong favourite so the
+        // directional lanes can fire; replay several events.
+        let ctx = Ctx {
+            prior_market_range_1d: 0.90,
+            prior_market_range_3d: 0.90,
+            prior_market_range_7d: 0.90,
+            ..test_ctx(close_ns, 0.40, 0.85)
+        };
+        let events: Vec<_> = (0..40)
+            .map(|i| test_event(i * 5_000_000_000, 0.85, 0.84, 0.86))
+            .collect();
+        let spot = test_spot_uptrend(close_ns);
+
+        let mut baseline = BonereaperV2::new(BonereaperV2Config::default());
+        // Regime-gate knobs set aggressively EXCEPT the enable flag: must be inert.
+        let mut disabled = BonereaperV2::new(BonereaperV2Config {
+            regime_gate_enabled: false,
+            regime_gate_window: 3,
+            regime_gate_threshold: 0.10,
+            regime_gate_lane_floor: 0.0,
+            regime_gate_whipsaw_weight: 1.0,
+            ..BonereaperV2Config::default()
+        });
+
+        for e in &events {
+            let b = baseline.on_event(e, &ctx, &spot, &TradeHistory::default());
+            let d = disabled.on_event(e, &ctx, &spot, &TradeHistory::default());
+            assert_eq!(b.orders.len(), d.orders.len());
+            for (a, c) in b.orders.iter().zip(d.orders.iter()) {
+                assert_eq!(a.side, c.side);
+                assert_eq!(a.shares, c.shares);
+                assert_eq!(a.max_depth, c.max_depth);
+                assert_eq!(a.limit_price, c.limit_price);
+                assert_eq!(a.tag, c.tag);
+            }
+        }
+    }
+
+    #[test]
+    fn regime_gate_lane_mult_amputates_only_when_whippy() {
+        let close_ns = 300_000_000_000;
+        let whippy = BonereaperV2::new(BonereaperV2Config {
+            regime_gate_enabled: true,
+            regime_gate_window: 3,
+            regime_gate_threshold: 0.50,
+            regime_gate_lane_floor: 0.0,
+            regime_gate_soft_band: 0.0,
+            regime_gate_whipsaw_weight: 0.0,
+            ..BonereaperV2Config::default()
+        });
+        // Trending regime: trailing range below threshold => full size.
+        let calm = Ctx {
+            prior_market_range_3d: 0.20,
+            ..test_ctx(close_ns, 0.0, 0.50)
+        };
+        assert_eq!(whippy.regime_gate_lane_mult(&calm, 0.0), 1.0);
+        // Whippy regime: trailing range above threshold => amputated to floor.
+        let choppy = Ctx {
+            prior_market_range_3d: 0.80,
+            ..test_ctx(close_ns, 0.0, 0.50)
+        };
+        assert_eq!(whippy.regime_gate_lane_mult(&choppy, 0.0), 0.0);
+        // Warmup (no prior history) => full size regardless.
+        let warmup = Ctx {
+            prior_market_range_3d: 0.0,
+            ..test_ctx(close_ns, 0.0, 0.50)
+        };
+        assert_eq!(whippy.regime_gate_lane_mult(&warmup, 0.0), 1.0);
+
+        // Soft band ramps linearly.
+        let soft = BonereaperV2::new(BonereaperV2Config {
+            regime_gate_enabled: true,
+            regime_gate_threshold: 0.50,
+            regime_gate_soft_band: 0.20,
+            regime_gate_lane_floor: 0.0,
+            ..BonereaperV2Config::default()
+        });
+        let mid = Ctx {
+            prior_market_range_3d: 0.40, // halfway through the [0.30, 0.50] band
+            ..test_ctx(close_ns, 0.0, 0.50)
+        };
+        let m = soft.regime_gate_lane_mult(&mid, 0.0);
+        assert!((m - 0.5).abs() < 1e-6, "expected ~0.5 got {m}");
     }
 
     #[test]

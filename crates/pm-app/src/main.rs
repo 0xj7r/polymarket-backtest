@@ -471,6 +471,26 @@ enum Cmd {
         /// Bonereaper v2 per-lane directional size multiplier (high skew). 1.0 = no change.
         #[arg(long, default_value = "1.0")]
         br2_lane_size_high_skew: f32,
+        /// Bonereaper v2 regime-conditional lane gate. Ex-ante and inert by
+        /// default. When set, amputates the directional lanes (late favourite +
+        /// late confirm) toward the floor in whippy regimes; high skew untouched.
+        #[arg(long, default_value = "false")]
+        br2_regime_gate_enabled: bool,
+        /// Trailing window for the regime score: 1, 3 or 7 (days of prior markets).
+        #[arg(long, default_value = "3")]
+        br2_regime_gate_window: u8,
+        /// Trailing-range threshold above which the directional lanes are amputated.
+        #[arg(long, default_value = "0.50")]
+        br2_regime_gate_threshold: f32,
+        /// Soft ramp width below the threshold. 0 = hard step.
+        #[arg(long, default_value = "0.0")]
+        br2_regime_gate_soft_band: f32,
+        /// Directional lane multiplier when fully whippy. 0 = full amputation.
+        #[arg(long, default_value = "0.0")]
+        br2_regime_gate_lane_floor: f32,
+        /// Blend weight in [0,1] for the live ex-ante whipsaw score. 0 = trailing-range only.
+        #[arg(long, default_value = "0.0")]
+        br2_regime_gate_whipsaw_weight: f32,
         /// Bonereaper v2 maximum high-skew load clips.
         #[arg(long, default_value = "5")]
         br2_high_skew_max_clips: usize,
@@ -1182,6 +1202,12 @@ async fn main() -> Result<()> {
             br2_lane_size_late_favourite,
             br2_lane_size_late_confirm,
             br2_lane_size_high_skew,
+            br2_regime_gate_enabled,
+            br2_regime_gate_window,
+            br2_regime_gate_threshold,
+            br2_regime_gate_soft_band,
+            br2_regime_gate_lane_floor,
+            br2_regime_gate_whipsaw_weight,
             br2_high_skew_max_clips,
             br2_high_skew_max_whipsaw_score,
             br2_high_skew_min_realized_vol_180s_bps,
@@ -1345,6 +1371,12 @@ async fn main() -> Result<()> {
                 br2_lane_size_late_favourite,
                 br2_lane_size_late_confirm,
                 br2_lane_size_high_skew,
+                br2_regime_gate_enabled,
+                br2_regime_gate_window,
+                br2_regime_gate_threshold,
+                br2_regime_gate_soft_band,
+                br2_regime_gate_lane_floor,
+                br2_regime_gate_whipsaw_weight,
                 br2_high_skew_max_clips,
                 br2_high_skew_max_whipsaw_score,
                 br2_high_skew_min_realized_vol_180s_bps,
@@ -2050,6 +2082,12 @@ async fn walk_forward(
     br2_lane_size_late_favourite: f32,
     br2_lane_size_late_confirm: f32,
     br2_lane_size_high_skew: f32,
+    br2_regime_gate_enabled: bool,
+    br2_regime_gate_window: u8,
+    br2_regime_gate_threshold: f32,
+    br2_regime_gate_soft_band: f32,
+    br2_regime_gate_lane_floor: f32,
+    br2_regime_gate_whipsaw_weight: f32,
     br2_high_skew_max_clips: usize,
     br2_high_skew_max_whipsaw_score: f32,
     br2_high_skew_min_realized_vol_180s_bps: f32,
@@ -2282,6 +2320,12 @@ async fn walk_forward(
         br2_lane_size_late_favourite,
         br2_lane_size_late_confirm,
         br2_lane_size_high_skew,
+        br2_regime_gate_enabled,
+        br2_regime_gate_window,
+        br2_regime_gate_threshold,
+        br2_regime_gate_soft_band,
+        br2_regime_gate_lane_floor,
+        br2_regime_gate_whipsaw_weight,
         br2_high_skew_max_clips,
         br2_high_skew_max_whipsaw_score,
         br2_high_skew_min_realized_vol_180s_bps,

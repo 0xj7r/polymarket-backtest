@@ -90,6 +90,12 @@ pub struct BonereaperV2Profile {
     pub lane_size_late_favourite: Option<f32>,
     pub lane_size_late_confirm: Option<f32>,
     pub lane_size_high_skew: Option<f32>,
+    pub regime_gate_enabled: Option<bool>,
+    pub regime_gate_window: Option<u8>,
+    pub regime_gate_threshold: Option<f32>,
+    pub regime_gate_soft_band: Option<f32>,
+    pub regime_gate_lane_floor: Option<f32>,
+    pub regime_gate_whipsaw_weight: Option<f32>,
     pub high_skew_max_clips: Option<usize>,
     pub high_skew_max_whipsaw_score: Option<f32>,
     pub high_skew_min_realized_vol_180s_bps: Option<f32>,
@@ -246,6 +252,12 @@ impl BonereaperV2Profile {
         apply!(lane_size_late_favourite, br2_lane_size_late_favourite);
         apply!(lane_size_late_confirm, br2_lane_size_late_confirm);
         apply!(lane_size_high_skew, br2_lane_size_high_skew);
+        apply!(regime_gate_enabled, br2_regime_gate_enabled);
+        apply!(regime_gate_window, br2_regime_gate_window);
+        apply!(regime_gate_threshold, br2_regime_gate_threshold);
+        apply!(regime_gate_soft_band, br2_regime_gate_soft_band);
+        apply!(regime_gate_lane_floor, br2_regime_gate_lane_floor);
+        apply!(regime_gate_whipsaw_weight, br2_regime_gate_whipsaw_weight);
         apply!(high_skew_max_clips, br2_high_skew_max_clips);
         apply!(high_skew_max_whipsaw_score, br2_high_skew_max_whipsaw_score);
         apply!(
@@ -555,6 +567,12 @@ pub struct WalkForwardConfig {
     pub br2_lane_size_late_favourite: f32,
     pub br2_lane_size_late_confirm: f32,
     pub br2_lane_size_high_skew: f32,
+    pub br2_regime_gate_enabled: bool,
+    pub br2_regime_gate_window: u8,
+    pub br2_regime_gate_threshold: f32,
+    pub br2_regime_gate_soft_band: f32,
+    pub br2_regime_gate_lane_floor: f32,
+    pub br2_regime_gate_whipsaw_weight: f32,
     pub br2_high_skew_max_clips: usize,
     pub br2_high_skew_max_whipsaw_score: f32,
     pub br2_high_skew_min_realized_vol_180s_bps: f32,
@@ -755,6 +773,12 @@ impl Default for WalkForwardConfig {
             br2_lane_size_late_favourite: 1.0,
             br2_lane_size_late_confirm: 1.0,
             br2_lane_size_high_skew: 1.0,
+            br2_regime_gate_enabled: false,
+            br2_regime_gate_window: 3,
+            br2_regime_gate_threshold: 0.50,
+            br2_regime_gate_soft_band: 0.0,
+            br2_regime_gate_lane_floor: 0.0,
+            br2_regime_gate_whipsaw_weight: 0.0,
             br2_high_skew_max_clips: 5,
             br2_high_skew_max_whipsaw_score: 0.75,
             br2_high_skew_min_realized_vol_180s_bps: 0.0,
@@ -1009,6 +1033,12 @@ pub struct SummaryRunConfig {
     pub br2_lane_size_late_favourite: f32,
     pub br2_lane_size_late_confirm: f32,
     pub br2_lane_size_high_skew: f32,
+    pub br2_regime_gate_enabled: bool,
+    pub br2_regime_gate_window: u8,
+    pub br2_regime_gate_threshold: f32,
+    pub br2_regime_gate_soft_band: f32,
+    pub br2_regime_gate_lane_floor: f32,
+    pub br2_regime_gate_whipsaw_weight: f32,
     pub br2_high_skew_max_clips: usize,
     pub br2_high_skew_max_whipsaw_score: f32,
     pub br2_high_skew_min_realized_vol_180s_bps: f32,
@@ -3561,6 +3591,12 @@ fn run_one_strategy(
                 lane_size_late_favourite: cfg.br2_lane_size_late_favourite,
                 lane_size_late_confirm: cfg.br2_lane_size_late_confirm,
                 lane_size_high_skew: cfg.br2_lane_size_high_skew,
+                regime_gate_enabled: cfg.br2_regime_gate_enabled,
+                regime_gate_window: cfg.br2_regime_gate_window,
+                regime_gate_threshold: cfg.br2_regime_gate_threshold,
+                regime_gate_soft_band: cfg.br2_regime_gate_soft_band,
+                regime_gate_lane_floor: cfg.br2_regime_gate_lane_floor,
+                regime_gate_whipsaw_weight: cfg.br2_regime_gate_whipsaw_weight,
                 high_skew_max_clips: cfg.br2_high_skew_max_clips,
                 high_skew_max_whipsaw_score: cfg.br2_high_skew_max_whipsaw_score,
                 high_skew_min_realized_vol_180s_bps: cfg.br2_high_skew_min_realized_vol_180s_bps,
@@ -4385,6 +4421,12 @@ fn summary_run_config(cfg: &WalkForwardConfig) -> SummaryRunConfig {
         br2_lane_size_late_favourite: cfg.br2_lane_size_late_favourite,
         br2_lane_size_late_confirm: cfg.br2_lane_size_late_confirm,
         br2_lane_size_high_skew: cfg.br2_lane_size_high_skew,
+        br2_regime_gate_enabled: cfg.br2_regime_gate_enabled,
+        br2_regime_gate_window: cfg.br2_regime_gate_window,
+        br2_regime_gate_threshold: cfg.br2_regime_gate_threshold,
+        br2_regime_gate_soft_band: cfg.br2_regime_gate_soft_band,
+        br2_regime_gate_lane_floor: cfg.br2_regime_gate_lane_floor,
+        br2_regime_gate_whipsaw_weight: cfg.br2_regime_gate_whipsaw_weight,
         br2_high_skew_max_clips: cfg.br2_high_skew_max_clips,
         br2_high_skew_max_whipsaw_score: cfg.br2_high_skew_max_whipsaw_score,
         br2_high_skew_min_realized_vol_180s_bps: cfg.br2_high_skew_min_realized_vol_180s_bps,
